@@ -68,10 +68,11 @@
 // 08-05-2017, ES: Handling of preferences.
 // 20-05-2017, ES: Handling input buttons and MQTT.
 // 22-05-2017, ES: Save preset, volume and tone settings.
+// 23-05-2017, ES: No more calls of non-iram functions
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 23 May 2017 08:35:00 GMT"
+#define VERSION "Tue, 23 May 2017 20:15:00 GMT"
 // TFT.  Define USETFT if required.
 #define USETFT
 #include <WiFi.h>
@@ -215,7 +216,6 @@ uint16_t         rbwindex = 0 ;                            // Fill pointer in ri
 uint16_t         rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
 uint16_t         rcount = 0 ;                              // Number of bytes in ringbuffer
 bool             resetreq = false ;                        // Request to reset the ESP32
-bool             savereq = false ;                         // Request to save volume/preset/tone
 bool             NetworkFound = false ;                    // True if WiFi network connected
 bool             mqtt_on = false ;                         // MQTT in use
 String           networks ;                                // Found networks
@@ -1067,7 +1067,6 @@ void IRAM_ATTR timer10sec()
 {
   static uint32_t oldtotalcount = 7321 ;          // Needed foor change detection
   static uint8_t  morethanonce = 0 ;              // Counter for succesive fails
-  static uint8_t  t600 = 0 ;                      // Counter for 10 minutes
 
   if ( datamode & ( INIT | HEADER | DATA |        // Test op playing
                     METADATA | PLAYLISTINIT |
@@ -1102,15 +1101,6 @@ void IRAM_ATTR timer10sec()
       }
       oldtotalcount = totalcount ;                // Save for comparison in next cycle
     }
-  }
-  if ( t600++ == 60 )                             // 10 minutes over?
-  {
-    t600 = 0 ;                                    // Yes, reset counter
-    mqttpub.trigger ( MQTT_IP ) ;                 // Request re-publish IP
-  }
-  if ( t600 == 30 )                               // After 5, 15, 25, 35, 45, ... minutes
-  {
-    savereq = true ;                              // Request to save volume/preset/tone
   }
 }
 
@@ -2291,6 +2281,49 @@ String xmlparse ( String mount )
 
 
 //******************************************************************************************
+//                              H A N D L E S A V E R E Q                                  *
+//******************************************************************************************
+// Handle save volume/preset/tone.  This will save current settings every 10 minutes to    *
+// the preferences.  On the next restart these values will be loaded.                      *
+// Note that saving prefences will only take place if contents has changed.                *
+//******************************************************************************************
+void handleSaveReq()
+{
+  static uint32_t savetime = 0 ;                          // Limit save to once per 10 minutes
+  
+  if ( ( millis() - savetime ) < 600000 )                 // 600 sec is 10 minutes
+  {
+    return ;
+  }
+  savetime = millis() ;                                   // Set time of last save
+  nvssetstr ( "preset", String ( currentpreset )  ) ;     // Save current preset
+  nvssetstr ( "volume", String ( ini_block.reqvol ) );    // Save current volue
+  nvssetstr ( "toneha", String ( ini_block.rtone[0] ) ) ; // Save current toneha
+  nvssetstr ( "tonehf", String ( ini_block.rtone[1] ) ) ; // Save current tonehf
+  nvssetstr ( "tonela", String ( ini_block.rtone[2] ) ) ; // Save current tonela
+  nvssetstr ( "tonelf", String ( ini_block.rtone[3] ) ) ; // Save current tonelf
+}
+
+
+//******************************************************************************************
+//                              H A N D L E I P P U B                                      *
+//******************************************************************************************
+// Handle publish op IP to MQTT.  This will happen every 10 minutes.                       *
+//******************************************************************************************
+void handleIpPub()
+{
+  static uint32_t pubtime = 300000 ;                       // Limit save to once per 10 minutes
+  
+  if ( ( millis() - pubtime ) < 600000 )                   // 600 sec is 10 minutes
+  {
+    return ;
+  }
+  pubtime = millis() ;                                     // Set time of last publish
+  mqttpub.trigger ( MQTT_IP ) ;                            // Request re-publish IP
+}
+
+
+//******************************************************************************************
 //                                   M P 3 L O O P                                         *
 //******************************************************************************************
 // Called from the mail loop() for the mp3 functions.                                      *
@@ -2507,19 +2540,8 @@ void loop()
     }
     mqttclient.loop() ;                                     // Handling of MQTT connection
   }
-  // Handle save volume/preset/tone.  This will save current settings every 10 minutes to the preferences.
-  // On the next restart these values will be loaded.
-  // Note that saving prefences will only take place if contents has changed.
-  if ( savereq )                                            // Request to save volume/preset/tone?
-  {
-    savereq = false ;                                       // Clear request
-    nvssetstr ( "preset", String ( currentpreset )  ) ;     // Save current preset
-    nvssetstr ( "volume", String ( ini_block.reqvol ) );    // Save current volue
-    nvssetstr ( "toneha", String ( ini_block.rtone[0] ) ) ; // Save current toneha
-    nvssetstr ( "tonehf", String ( ini_block.rtone[1] ) ) ; // Save current tonehf
-    nvssetstr ( "tonela", String ( ini_block.rtone[2] ) ) ; // Save current tonela
-    nvssetstr ( "tonelf", String ( ini_block.rtone[3] ) ) ; // Save current tonelf
-  }
+  handleSaveReq() ;                                         // See if time to save settings
+  handleIpPub() ;                                           // See if time to publish IP
 }
 
 
