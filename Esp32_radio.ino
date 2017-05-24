@@ -69,10 +69,11 @@
 // 20-05-2017, ES: Handling input buttons and MQTT.
 // 22-05-2017, ES: Save preset, volume and tone settings.
 // 23-05-2017, ES: No more calls of non-iram functions
+// 24-05-2017, ES: Support for featherboard
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 23 May 2017 20:15:00 GMT"
+#define VERSION "Wed, 24 May 2017 08:15:00 GMT"
 // TFT.  Define USETFT if required.
 #define USETFT
 #include <WiFi.h>
@@ -106,9 +107,16 @@
 #define WHITE   BLUE | RED | GREEN
 // Digital I/O used
 // Pins for VS1053 module
-#define VS1053_CS     5
-#define VS1053_DCS    16
-#define VS1053_DREQ   4
+#if defined ( ARDUINO_FEATHER_ESP32 )
+  #define VS1053_CS     32
+  #define VS1053_DCS    33
+  #define VS1053_DREQ   15
+  #define SDCARDCS      14
+#else
+  #define VS1053_CS     5
+  #define VS1053_DCS    16
+  #define VS1053_DREQ   4
+#endif
 // Pins CS and DC for TFT module (if used, see definition of "USETFT")
 #define TFT_CS 15
 #define TFT_DC 2
@@ -1786,6 +1794,10 @@ void setup()
     
   Serial.begin ( 115200 ) ;                              // For debug
   Serial.println() ;
+#if defined ( SDCARDCS ) && ( SDCARDCS >= 0 )
+  pinMode ( SDCARDCS, OUTPUT ) ;                         // Deselect SDCARD
+  digitalWrite ( SDCARDCS, HIGH ) ;
+#endif
   // Print some memory and sketch info
   dbgprint ( "Starting ESP32-radio Version %s...  Free memory %d",
              VERSION,
