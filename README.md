@@ -26,6 +26,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 26-may-2017: Allow connection from single hidden AP.
 - 23-may-2017: First release, derived from ESP8266 version.
 
 
