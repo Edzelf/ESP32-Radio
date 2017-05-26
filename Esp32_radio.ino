@@ -77,7 +77,7 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Fri, 26 May 2017 10:15:00 GMT"
+#define VERSION "Fri, 26 May 2017 15:00:00 GMT"
 // TFT.  Define USETFT if required.
 #define USETFT
 #include <WiFi.h>
