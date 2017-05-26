@@ -122,7 +122,7 @@
 #define TFT_CS 15
 #define TFT_DC 2
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-#define RINGBFSIZ 20000
+#define RINGBFSIZ 20480
 // Debug buffer size
 #define DEBUG_BUFFER_SIZE 130
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
@@ -766,15 +766,49 @@ inline uint16_t ringavail()
 //******************************************************************************************
 //                                P U T R I N G                                            *
 //******************************************************************************************
-void putring ( uint8_t b )            // Put one byte in the ringbuffer
+// Put one byte in the ringbuffer.                                                         *
+// No check on available space.  See ringspace().                                          *
+//******************************************************************************************
+void putring ( uint8_t b )
 {
-  // No check on available space.  See ringspace()
   *(ringbuf + rbwindex) = b ;         // Put byte in ringbuffer
   if ( ++rbwindex == RINGBFSIZ )      // Increment pointer and
   {
     rbwindex = 0 ;                    // wrap at end
   }
   rcount++ ;                          // Count number of bytes in the
+}
+
+
+//******************************************************************************************
+//                                P U T R I N G                                            *
+//******************************************************************************************
+// Version of putring to write a buffer to the ringbuffer.                                 *
+// No check on available space.  See ringspace().                                          *
+//******************************************************************************************
+void putring ( uint8_t* buf, uint16_t len )
+{
+  uint16_t partl ;                                                // Partial length to xfer  
+
+  if ( len )                                                      // anything to do?
+  {
+    // First see if we must split the transfer.  We cannot write past the ringbuffer end.
+    if ( ( rbwindex + len ) >= RINGBFSIZ  )
+    {
+      partl = RINGBFSIZ - rbwindex ;                              // Part of length to xfer
+      memcpy ( ringbuf + rbwindex, buf, partl ) ;                 // Copy next part
+      rbwindex = 0 ;
+      rcount += partl ;                                           // Adjust number of bytes
+      buf += partl ;                                              // Point to next free byte
+      len -= partl ;                                              // Adjust rest length
+    }
+    if ( len )                                                    // Rest to do?
+    {
+      memcpy ( ringbuf + rbwindex, buf, len ) ;                   // Copy full or last part
+      rbwindex += len ;                                           // Point to next free byte
+      rcount += len ;                                             // Adjust number of bytes
+    }
+  }
 }
 
 
@@ -1257,7 +1291,7 @@ bool connecttohost()
     }
     dbgprint ( "Playlist request, entry %d", playlist_num ) ;
   }
-  // In the URL there may be an extension
+  // In the URL there may be an extension, like noisefm.ru:8000/play.m3u&t=.m3u
   inx = host.indexOf ( "/" ) ;                      // Search for begin of extension
   if ( inx > 0 )                                    // Is there an extension?
   {
@@ -2395,13 +2429,9 @@ void mp3loop()
                     PLAYLISTDATA ) )
   {
     rs = ringspace() ;                                   // Get free ringbuffer space
-    maxchunk = rs ;
-    if ( rs > ( RINGBFSIZ / 4 ) )                        // Need to fill the ringbuffer?
+    if ( rs >= sizeof(tmpbuff) )                         // Need to fill the ringbuffer?
     {
-      if ( maxchunk > sizeof(tmpbuff) )                  // Reduce byte count for this mp3loop()
-      {
-        maxchunk = sizeof(tmpbuff) ;
-      }
+      maxchunk = sizeof(tmpbuff) ;                       // Reduce byte count for this mp3loop()
       if ( localfile )                                   // Playing file from SD card?
       {
         av = mp3file.available() ;                       // Bytes left in file
@@ -2409,11 +2439,7 @@ void mp3loop()
         {
           maxchunk = av ;
         }
-        if ( rs < maxchunk )                             // Limit size
-        {
-          maxchunk = rs ;
-        }
-        if ( maxchunk )
+        if ( maxchunk )                                  // Anything to read?
         {
           res = mp3file.read ( tmpbuff, maxchunk ) ;     // Read a block of data
         }
@@ -2425,15 +2451,12 @@ void mp3loop()
         {
           maxchunk = av ;
         }
-        if ( maxchunk )
+        if ( maxchunk )                                  // Anything to read?
         {
           res = mp3client.read ( tmpbuff, maxchunk ) ;   // Read a number of bytes from the stream
         }
       }
-      for ( i = 0 ; i < res ; i++ )                      // Transfer to ringbuffer
-      {
-        putring ( tmpbuff[i] ) ;                         // Store one byte in ringbuffer
-      }
+      putring ( tmpbuff, res ) ;                         // Transfer to ringbuffer
     }
   }
   while ( vs1053player.data_request() && ringavail() )   // Try to keep VS1053 filled
@@ -2690,6 +2713,7 @@ void handlebyte ( uint8_t b, bool force )
   static __attribute__((aligned(4))) uint8_t buf[32] ; // Buffer for chunk
   static int       bufcnt = 0 ;                        // Data in chunk
   static bool      firstchunk = true ;                 // First chunk as input
+  String           lcml ;                              // Lower case metaline
   String           ct ;                                // Contents type
   static bool      ctseen = false ;                    // First line of header seen or not
   int              inx ;                               // Pointer in metaline
@@ -2755,14 +2779,16 @@ void handlebyte ( uint8_t b, bool force )
       LFcount++ ;                                      // Count linefeeds
       if ( chkhdrline ( metaline.c_str() ) )           // Reasonable input?
       {
+        lcml = metaline ;                              // Use lower case for compare
+        lcml.toLowerCase() ;
         dbgprint ( metaline.c_str() ) ;                // Yes, Show it
-        if (metaline.indexOf ( "Content-Type" ) >= 0)  // Line with "Content-Type: xxxx/yyy"
+        if ( lcml.indexOf ( "content-type" ) >= 0)     // Line with "Content-Type: xxxx/yyy"
         {
           ctseen = true ;                              // Yes, remember seeing this
           ct = metaline.substring ( 14 ) ;             // Set contentstype. Not used yet
           dbgprint ( "%s seen.", ct.c_str() ) ;
         }
-        if ( metaline.startsWith ( "icy-br:" ) )
+        if ( lcml.startsWith ( "icy-br:" ) )
         {
           bitrate = metaline.substring(7).toInt() ;    // Found bitrate tag, read the bitrate
           if ( bitrate == 0 )                          // For Ogg br is like "Quality 2"
@@ -2774,7 +2800,7 @@ void handlebyte ( uint8_t b, bool force )
         {
           metaint = metaline.substring(12).toInt() ;   // Found metaint tag, read the value
         }
-        else if ( metaline.startsWith ( "icy-name:" ) )
+        else if ( lcml.startsWith ( "icy-name:" ) )
         {
           icyname = metaline.substring(9) ;            // Get station name
           icyname.trim() ;                             // Remove leading and trailing spaces
@@ -2782,7 +2808,7 @@ void handlebyte ( uint8_t b, bool force )
                         YELLOW ) ;                     // Show station name at position 60
           mqttpub.trigger ( MQTT_ICYNAME ) ;           // Request publishing to MQTT
         }
-        else if ( metaline.startsWith ( "Transfer-Encoding:" ) )
+        else if ( lcml.startsWith ( "transfer-encoding:" ) )
         {
           // Station provides chunked transfer
           if ( metaline.endsWith ( "chunked" ) )
@@ -2854,6 +2880,7 @@ void handlebyte ( uint8_t b, bool force )
   if ( datamode == PLAYLISTINIT )                      // Initialize for receive .m3u file
   {
     // We are going to use metadata to read the lines from the .m3u file
+    // Sometimes this will only contain a single line
     metaline = "" ;                                    // Prepare for new line
     LFcount = 0 ;                                      // For detection end of header
     datamode = PLAYLISTHEADER ;                        // Handle playlist data
@@ -2902,6 +2929,7 @@ void handlebyte ( uint8_t b, bool force )
                  metaline.c_str() ) ;
       if ( metaline.length() < 5 )                     // Skip short lines
       {
+        metaline = "" ;                                // Flush line
         return ;
       }
       if ( metaline.indexOf ( "#EXTINF:" ) >= 0 )      // Info?
