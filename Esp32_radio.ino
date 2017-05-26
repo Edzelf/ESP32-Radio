@@ -11,6 +11,8 @@
 //  - ArduinoOTA
 //  - PubSubClient
 //  - TinyXML
+//  - SD
+//  - FS
 // A library for the VS1053 (for ESP32) is not available (or not easy to find).  Therefore
 // a class for this module is derived from the maniacbug library and integrated in this sketch.
 //
@@ -43,37 +45,39 @@
 //
 // The VSPI interface is used for VS1053 and TFT.
 //
-// Wiring:
-// ESP32dev Signal  Wired to LCD        Wired to VS1053      Wired to the rest
-// -------- ------  --------------      -------------------  ---------------------
-// GPIO16           -                   pin 1 XDCS           -
-// GPIO5            -                   pin 2 XCS            -
-// GPIO4            -                   pin 4 DREQ           -
-// GPIO2            pin 3 D/C           -                    -
-// GPIO18   SCLK    pin 5 CLK           pin 5 SCK            -
-// GPIO19   MISO    -                   pin 7 MISO           -
-// GPIO23   MOSI    pin 4 DIN           pin 6 MOSI           -
-// GPIO15           pin 2 CS            -                    -
-// GPI03    RXD0    -                   -                    Reserved serial input
-// GPIO1    TXD0    -                   -                    Reserved serial output
-// GPIO34   -       -                   -                    Optional pull-up resistor
-// GPIO35   -       -                   -                    Optional pull-up resistor
-// -------  ------  ---------------     -------------------  ----------------------
-// GND      -       pin 8 GND           pin 8 GND            Power supply GND
-// VCC 5 V  -       pin 7 BL            -                    Power supply
-// VCC 5 V  -       pin 6 VCC           pin 9 5V             Power supply
-// EN       -       pin 1 RST           pin 3 XRST           -
+// Wiring, note that Featherbord has other connections:
+// ESP32dev Signal  Wired to LCD        Wired to VS1053      SDCARD   Wired to the rest
+// -------- ------  --------------      -------------------  ------   ---------------
+// GPIO16           -                   pin 1 XDCS                    -
+// GPIO5            -                   pin 2 XCS                     -
+// GPIO4            -                   pin 4 DREQ                    -
+// GPIO2            pin 3 D/C           -                             -
+// GPIO18   SCLK    pin 5 CLK           pin 5 SCK             CLK     -
+// GPIO19   MISO    -                   pin 7 MISO            MISO    -
+// GPIO23   MOSI    pin 4 DIN           pin 6 MOSI            MOSI    -
+// GPIO21           -                   -                     CS      -
+// GPIO15           pin 2 CS            -                             -
+// GPI03    RXD0    -                   -                             Reserved serial input
+// GPIO1    TXD0    -                   -                             Reserved serial output
+// GPIO34   -       -                   -                             Optional pull-up resistor
+// GPIO35   -       -                   -                             Optional pull-up resistor
+// -------  ------  ---------------     -------------------  ------   ----------------
+// GND      -       pin 8 GND           pin 8 GND                     Power supply GND
+// VCC 5 V  -       pin 7 BL            -                             Power supply
+// VCC 5 V  -       pin 6 VCC           pin 9 5V                      Power supply
+// EN       -       pin 1 RST           pin 3 XRST                    -
 //
 // 26-04-2017, ES: First set-up, derived from ESP8266 version.
 // 08-05-2017, ES: Handling of preferences.
 // 20-05-2017, ES: Handling input buttons and MQTT.
 // 22-05-2017, ES: Save preset, volume and tone settings.
-// 23-05-2017, ES: No more calls of non-iram functions
+// 23-05-2017, ES: No more calls of non-iram functions on interrupts.
 // 24-05-2017, ES: Support for featherboard
+// 26-05-2017, ES: Correction playing from .m3u playlist. Allow single hidden SSID.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 24 May 2017 08:15:00 GMT"
+#define VERSION "Fri, 26 May 2017 10:15:00 GMT"
 // TFT.  Define USETFT if required.
 #define USETFT
 #include <WiFi.h>
@@ -88,13 +92,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <FS.h>
+#include "SD.h"
 #include <ArduinoOTA.h>
 #include <TinyXML.h>
-#include <esp_log.h>
-//extern "C"
-//{
-//#include "user_interface.h"
-//}
 
 // Color definitions for the TFT screen (if used)
 #define	BLACK   0x0000
@@ -116,6 +116,7 @@
   #define VS1053_CS     5
   #define VS1053_DCS    16
   #define VS1053_DREQ   4
+  #define SDCARDCS      21
 #endif
 // Pins CS and DC for TFT module (if used, see definition of "USETFT")
 #define TFT_CS 15
@@ -145,7 +146,7 @@ void        displayinfo ( const char* str, uint16_t pos, uint16_t height, uint16
 void        showstreamtitle ( const char* ml, bool full = false ) ;
 void        handlebyte ( uint8_t b, bool force = false ) ;
 void        handlebyte_ch ( uint8_t b, bool force = false ) ;
-void        handleFSf ( const String& filename ) ;
+void        handleFSf ( const String& pagename ) ;
 void        handleCmd()  ;
 char*       dbgprint( const char* format, ... ) ;
 const char* analyzeCmd ( const char* str ) ;
@@ -239,6 +240,8 @@ int              chunkcount = 0 ;                          // Counter for chunke
 String           http_getcmd = "" ;                        // Contents of last GET command
 String           http_rqfile = "" ;                        // Requested file
 bool             http_reponse_flag = false ;               // Response required
+String           lssid, lpw ;                              // Last read SSID and password from wifi_xx
+
 // XML parse globals.
 TinyXML     xml ;                                          // For XML parser
 const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
@@ -262,12 +265,11 @@ uint32_t    nvshandle = 0 ;                                // Handle for nvs acc
 //
 progpin_struct   progpin[] =                               // Input pins with programmed function
      {
-         {  0, true,  "uppreset=1", false, false },        // Example.  Can be reprogrammed.
+         {  0, true,  "uppreset=1", false, false },        // Example.  Can be re-programmed.
          { 12, false,  "",          false, false },
          { 13, false,  "",          false, false },
          { 14, false,  "",          false, false },
          { 17, false,  "",          false, false },
-         { 21, false,  "",          false, false },
          { 22, false,  "",          false, false },
          { 25, false,  "",          false, false },
          { 26, false,  "",          false, false },
@@ -764,7 +766,7 @@ inline uint16_t ringavail()
 //******************************************************************************************
 //                                P U T R I N G                                            *
 //******************************************************************************************
-void putring ( uint8_t b )                 // Put one byte in the ringbuffer
+void putring ( uint8_t b )            // Put one byte in the ringbuffer
 {
   // No check on available space.  See ringspace()
   *(ringbuf + rbwindex) = b ;         // Put byte in ringbuffer
@@ -1052,7 +1054,7 @@ void listNetworks()
       acceptable = "Acceptable" ;
     }
     encryption = WiFi.encryptionType ( i ) ;
-    dbgprint ( "%2d - %-25s Signal: %3d dBm, Encryption %4s,  %s",
+    dbgprint ( "%2d - %-25s Signal: %3d dBm, Encryption %4s, %s",
                i + 1, WiFi.SSID ( i ).c_str(), WiFi.RSSI ( i ),
                getEncryptionType ( encryption ),
                acceptable ) ;
@@ -1304,7 +1306,7 @@ bool connecttofile()
 
   displayinfo ( "   **** MP3 Player ****", 0, 20, WHITE ) ;
   path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
-  //mp3file = SPIFFS.open ( path, "r" ) ;                   // Open the file
+  mp3file = SD.open ( path ) ;                            // Open the file
   if ( !mp3file )
   {
     dbgprint ( "Error opening file %s", path.c_str() ) ;  // No luck
@@ -1313,7 +1315,6 @@ bool connecttofile()
   p = (char*)path.c_str() + 1 ;                           // Point to filename
   showstreamtitle ( p, true ) ;                           // Show the filename as title
   mqttpub.trigger ( MQTT_STREAMTITLE ) ;                  // Request publishing to MQTT
-
   displayinfo ( "Playing from local file",
                 60, 68, YELLOW ) ;                        // Show Source at position 60
   icyname = "" ;                                          // No icy name yet
@@ -1326,30 +1327,52 @@ bool connecttofile()
 //                               C O N N E C T W I F I                                     *
 //******************************************************************************************
 // Connect to WiFi using the SSID's available in wifiMulti.                                *
+// If only one AP if found in preferences (i.e. wifi_00) the connection is made without    *
+// using wifiMulti.                                                                        *
 // If connection fails, an AP is created and the function returns false.                   *
 //******************************************************************************************
 bool connectwifi()
 {
   char*  pfs ;                                          // Pointer to formatted string
+  bool   localAP = false ;                              // True if only local AP is left
 
   WiFi.disconnect() ;                                   // After restart the router could
   WiFi.softAPdisconnect(true) ;                         // still keep the old connection
-  wifiMulti.run() ;                                     // Connect to best network
-  if (  WiFi.waitForConnectResult() != WL_CONNECTED )   // Try to connect
+  pfs = "IP = 192.168.4.1" ;                            // Default IP address (no AP found)
+  if ( num_an )                                         // Any AP defined?
+  {
+    if ( num_an == 1 )                                  // Just one AP defined in preferences?
+    {
+      WiFi.begin ( lssid.c_str(),
+                   lpw.c_str() ) ;                      // Connect to single SSID found in wifi_xx
+      dbgprint ( "Try WiFi %s", lssid.c_str() ) ;       // Message to show during WiFi connect
+    }
+    else                                                // More AP to try
+    {
+      wifiMulti.run() ;                                 // Connect to best network
+    }
+    if (  WiFi.waitForConnectResult() != WL_CONNECTED ) // Try to connect
+    {
+      localAP = true ;                                  // Error, setup own AP
+    }
+  }
+  if ( localAP )                                        // Must setup local AP?
   {
     dbgprint ( "WiFi Failed!  Trying to setup AP with name %s and password %s.", NAME, NAME ) ;
     WiFi.softAP ( NAME, NAME ) ;                        // This ESP will be an AP
     delay ( 5000 ) ;
-    pfs = dbgprint ( "IP = 192.168.4.1" ) ;             // Address if AP
-    return false ;
+    pfs = dbgprint ( "IP = 192.168.4.1" ) ;             // Address for AP
   }
-  ipaddress = WiFi.localIP().toString() ;               // Form IP address
-  dbgprint ( "Connected to %s", WiFi.SSID().c_str() ) ;
-  pfs = dbgprint ( "IP = %s", ipaddress.c_str() ) ;     // String to dispay on TFT
+  else
+  {    
+    ipaddress = WiFi.localIP().toString() ;             // Form IP address
+    dbgprint ( "Connected to %s", WiFi.SSID().c_str() ) ;
+    pfs = dbgprint ( "IP = %s", ipaddress.c_str() ) ;   // String to dispay on TFT
+  }
 #if defined ( USETFT )
   displayinfo ( pfs, 60, 68, YELLOW ) ;                 // Show info at position 60
 #endif
-  return true ;
+  return ( localAP == false ) ;                         // Return result of connection
 }
 
 
@@ -1709,35 +1732,37 @@ void  scandigital()
 // Make al list of acceptable networks in preferences.                                     *
 // The result will be stored in anetworks like "|SSID1|SSID2|......|SSIDn|".               *
 // The number of acceptable networks will be stored in num_an.                             *
+// Not that the last pound SSID and password are kept in common data.  If only one SSID is *
+// defined, the connect is made without using wifiMulti.  In this case a connection will   *
+// be made even if de SSID is hidden.                                                      *
 //******************************************************************************************
 void  mk_lsan()
 {
-  int         i ;                                      // Loop control
-  char        key[10] ;                                // For example: "wifi_03"
-  String      buf ;                                    // "SSID/password"
-  String      ssid, pw ;                               // SSID and password in value
-  int         inx ;                                    // Place of "/"
+  int         i ;                                        // Loop control
+  char        key[10] ;                                  // For example: "wifi_03"
+  String      buf ;                                      // "SSID/password"
+  int         inx ;                                      // Place of "/"
   
-  num_an = 0 ;                                         // Count acceptable networks
-  anetworks = "|" ;                                    // Initial value
+  num_an = 0 ;                                           // Count acceptable networks
+  anetworks = "|" ;                                      // Initial value
 
-  for ( i = 0 ; i < 100 ; i++ )                        // Examine wifi_00 .. wifi_99
+  for ( i = 0 ; i < 100 ; i++ )                          // Examine wifi_00 .. wifi_99
   {
-    sprintf ( key, "wifi_%02d", i ) ;                  // Form key in preferences
-    if ( nvssearch ( key  ) )                          // Does it exists?
+    sprintf ( key, "wifi_%02d", i ) ;                    // Form key in preferences
+    if ( nvssearch ( key  ) )                            // Does it exists?
     {
-      buf = nvsgetstr ( key ) ;                        // Get the contents
-      inx = buf.indexOf ( "/" ) ;                      // Find separator between ssid and password
-      if ( inx > 0 )                                   // Separator found?
+      buf = nvsgetstr ( key ) ;                          // Get the contents
+      inx = buf.indexOf ( "/" ) ;                        // Find separator between ssid and password
+      if ( inx > 0 )                                     // Separator found?
       {
-        pw = buf.substring ( inx+1 ) ;                 // Isolate password
-        ssid = buf.substring ( 0, inx ) ;              // Holds SSID now
+        lpw = buf.substring ( inx+1 ) ;                  // Isolate password
+        lssid = buf.substring ( 0, inx ) ;               // Holds SSID now
         dbgprint ( "Added SSID %s to list of networks",
-                   ssid.c_str() ) ;
-        anetworks += ssid ;                            // Add to list
-        anetworks += "|" ;                             // Separator
-        num_an++ ;                                     // Count number of acceptable networks
-        wifiMulti.addAP ( ssid.c_str(), pw.c_str() ) ; // Add to wifi acceptable network list
+                   lssid.c_str() ) ;
+        anetworks += lssid ;                             // Add to list
+        anetworks += "|" ;                               // Separator
+        num_an++ ;                                       // Count number of acceptable networks
+        wifiMulti.addAP ( lssid.c_str(), lpw.c_str() ) ; // Add to wifi acceptable network list
       }
     }
   }
@@ -1794,15 +1819,26 @@ void setup()
     
   Serial.begin ( 115200 ) ;                              // For debug
   Serial.println() ;
-#if defined ( SDCARDCS ) && ( SDCARDCS >= 0 )
-  pinMode ( SDCARDCS, OUTPUT ) ;                         // Deselect SDCARD
-  digitalWrite ( SDCARDCS, HIGH ) ;
-#endif
   // Print some memory and sketch info
   dbgprint ( "Starting ESP32-radio Version %s...  Free memory %d",
              VERSION,
              ESP.getFreeHeap() ) ;
-# if defined ( USETFT )
+#if defined ( SDCARDCS )
+  pinMode ( SDCARDCS, OUTPUT ) ;                         // Deselect SDCARD
+  digitalWrite ( SDCARDCS, HIGH ) ;
+  if ( !SD.begin ( SDCARDCS ) )                          // Try to init SD card driver
+  {
+    dbgprint ( "SD Card Mount Failed!" ) ;               // No success
+  }
+  else
+  {
+    if ( SD.cardType() == CARD_NONE )                    // See if known card
+    {
+      dbgprint ( "No SD card attached" ) ;
+    }
+  }
+#endif
+#if defined ( USETFT )
   tft.begin() ;                                          // Init TFT interface
   tft.fillRect ( 0, 0, 160, 128, BLACK ) ;               // Clear screen does not work when rotated
   tft.setRotation ( 3 ) ;                                // Use landscape format
@@ -2345,66 +2381,66 @@ void handleIpPub()
 //******************************************************************************************
 void mp3loop()
 {
-  static uint8_t  tcpbuff[1024] ;                       // Input buffer from mp3client stream
-  uint32_t        maxfilechunk ;                        // Max number of bytes to read from file
-  uint32_t        maxtcpchunk ;                         // Max number to read from mp3 stream
-  int             res ;                                 // Result reading from mp3 stream
-  int             i ;                                   // Index in tcpbuff
-  uint32_t        rs ;                                  // Free space in ringbuffer
-  uint32_t        av ;                                  // Available in stream
-
+  static uint8_t  tmpbuff[1024] ;                        // Input buffer for mp3 stream
+  uint32_t        maxchunk ;                             // Max number of bytes to read
+  int             res = 0 ;                              // Result reading from mp3 stream
+  int             i ;                                    // Index in tmpbuff
+  uint32_t        rs ;                                   // Free space in ringbuffer
+  uint32_t        av ;                                   // Available in stream
+  
   // Try to keep the ringbuffer filled up by adding as much bytes as possible
-  if ( datamode & ( INIT | HEADER | DATA |              // Test op playing
+  if ( datamode & ( INIT | HEADER | DATA |               // Test op playing
                     METADATA | PLAYLISTINIT |
                     PLAYLISTHEADER |
                     PLAYLISTDATA ) )
   {
-    if ( localfile )                                    // Not active yet!!!
+    rs = ringspace() ;                                   // Get free ringbuffer space
+    maxchunk = rs ;
+    if ( rs > ( RINGBFSIZ / 4 ) )                        // Need to fill the ringbuffer?
     {
-      maxfilechunk = mp3file.available() ;              // Bytes left in file
-      if ( maxfilechunk > 1024 )                        // Reduce byte count for this mp3loop()
+      if ( maxchunk > sizeof(tmpbuff) )                  // Reduce byte count for this mp3loop()
       {
-        maxfilechunk = 1024 ;
+        maxchunk = sizeof(tmpbuff) ;
       }
-      while ( ringspace() && maxfilechunk-- )
+      if ( localfile )                                   // Playing file from SD card?
       {
-        putring ( mp3file.read() ) ;                    // Yes, store one byte in ringbuffer
-        //yield() ;
-      }
-    }
-    else
-    {
-      rs = ringspace() ;                                 // Get free ringbuffer space
-      if ( rs > ( RINGBFSIZ / 4 ) )                      // Need to fill the ringbuffer?
-      {
-        maxtcpchunk = rs ;
-        if ( maxtcpchunk > sizeof(tcpbuff) )             // Reduce byte count for this mp3loop()
+        av = mp3file.available() ;                       // Bytes left in file
+        if ( av < maxchunk )                             // Reduce byte count for this mp3loop()
         {
-          maxtcpchunk = sizeof(tcpbuff) ;
+          maxchunk = av ;
         }
+        if ( rs < maxchunk )                             // Limit size
+        {
+          maxchunk = rs ;
+        }
+        if ( maxchunk )
+        {
+          res = mp3file.read ( tmpbuff, maxchunk ) ;     // Read a block of data
+        }
+      }
+      else
+      {
         av = mp3client.available() ;                     // Available from stream
-        if ( maxtcpchunk > av )                          // Limit read size
+        if ( av < maxchunk )                             // Limit read size
         {
-          maxtcpchunk = av ;
+          maxchunk = av ;
         }
-        if ( maxtcpchunk )
+        if ( maxchunk )
         {
-          res = mp3client.read ( tcpbuff, maxtcpchunk ) ;  // Read a number of bytes from the stream
-          //dbgprint ( "Req %d, Res = %d", maxtcpchunk, res ) ;
-          for ( i = 0 ; i < res ; i++ )                    // Transfer to ringbuffer
-          {
-            putring ( tcpbuff[i] ) ;                       // Store one byte in ringbuffer
-            //yield() ;
-          }
+          res = mp3client.read ( tmpbuff, maxchunk ) ;   // Read a number of bytes from the stream
         }
+      }
+      for ( i = 0 ; i < res ; i++ )                      // Transfer to ringbuffer
+      {
+        putring ( tmpbuff[i] ) ;                         // Store one byte in ringbuffer
       }
     }
   }
-  while ( vs1053player.data_request() && ringavail() ) // Try to keep VS1053 filled
+  while ( vs1053player.data_request() && ringavail() )   // Try to keep VS1053 filled
   {
-    handlebyte_ch ( getring() ) ;                      // Yes, handle it
+    handlebyte_ch ( getring() ) ;                        // Yes, handle it
   }
-  if ( datamode == STOPREQD )                          // STOP requested?
+  if ( datamode == STOPREQD )                            // STOP requested?
   {
     dbgprint ( "STOP requested" ) ;
     if ( localfile )
@@ -2413,92 +2449,92 @@ void mp3loop()
     }
     else
     {
-      stop_mp3client() ;                               // Disconnect if still connected
+      stop_mp3client() ;                                 // Disconnect if still connected
     }
-    handlebyte_ch ( 0, true ) ;                        // Force flush of buffer
-    vs1053player.setVolume ( 0 ) ;                     // Mute
-    vs1053player.stopSong() ;                          // Stop playing
-    emptyring() ;                                      // Empty the ringbuffer
-    datamode = STOPPED ;                               // Yes, state becomes STOPPED
+    handlebyte_ch ( 0, true ) ;                          // Force flush of buffer
+    vs1053player.setVolume ( 0 ) ;                       // Mute
+    vs1053player.stopSong() ;                            // Stop playing
+    emptyring() ;                                        // Empty the ringbuffer
+    datamode = STOPPED ;                                 // Yes, state becomes STOPPED
 #if defined ( USETFT )
-    tft.fillRect ( 0, 0, 160, 128, BLACK ) ;           // Clear screen does not work when rotated
+    tft.fillRect ( 0, 0, 160, 128, BLACK ) ;             // Clear screen does not work when rotated
 #endif
     delay ( 500 ) ;
   }
-  if ( localfile )                                     // Not active yet!!
+  if ( localfile )                                       // Playin from SD?
   {
-    if ( datamode & ( INIT | HEADER | DATA |           // Test op playing
+    if ( datamode & ( INIT | HEADER | DATA |             // Test op playing
                       METADATA | PLAYLISTINIT |
                       PLAYLISTHEADER |
                       PLAYLISTDATA ) )
     {
       if ( ( mp3file.available() == 0 ) && ( ringavail() == 0 ) )
       {
-        datamode = STOPREQD ;                          // End of local mp3-file detected
+        datamode = STOPREQD ;                            // End of local mp3-file detected
       }
     }
   }
-  if ( ini_block.newpreset != currentpreset )          // New station or next from playlist requested?
+  if ( ini_block.newpreset != currentpreset )            // New station or next from playlist requested?
   {
-    if ( datamode != STOPPED )                         // Yes, still busy?
+    if ( datamode != STOPPED )                           // Yes, still busy?
     {
-      datamode = STOPREQD ;                            // Yes, request STOP
+      datamode = STOPREQD ;                              // Yes, request STOP
     }
     else
     {
-      if ( playlist_num )                               // Playing from playlist?
+      if ( playlist_num )                                 // Playing from playlist?
       { // Yes, retrieve URL of playlist
         playlist_num += ini_block.newpreset -
-                        currentpreset ;                 // Next entry in playlist
-        ini_block.newpreset = currentpreset ;           // Stay at current preset
+                        currentpreset ;                   // Next entry in playlist
+        ini_block.newpreset = currentpreset ;             // Stay at current preset
       }
       else
       {
-        host = readhostfrompref() ;                     // Lookup preset in preferences
-        chomp ( host ) ;                                // Get rid of part after "#"
+        host = readhostfrompref() ;                       // Lookup preset in preferences
+        chomp ( host ) ;                                  // Get rid of part after "#"
       }
       dbgprint ( "New preset/file requested (%d/%d) from %s",
                  ini_block.newpreset, playlist_num, host.c_str() ) ;
-      if ( host != ""  )                                // Preset in ini-file?
+      if ( host != ""  )                                  // Preset in ini-file?
       {
-        hostreq = true ;                                // Force this station as new preset
+        hostreq = true ;                                  // Force this station as new preset
       }
       else
       {
         // This preset is not available, return to preset 0, will be handled in next mp3loop()
         dbgprint ( "No host for this preset" ) ;
-        ini_block.newpreset = 0 ;                       // Wrap to first station
+        ini_block.newpreset = 0 ;                         // Wrap to first station
       }
     }
   }
-  if ( hostreq )                                        // New preset or station?
+  if ( hostreq )                                          // New preset or station?
   {
     hostreq = false ;
-    currentpreset = ini_block.newpreset ;               // Remember current preset
+    currentpreset = ini_block.newpreset ;                 // Remember current preset
     // Find out if this URL is on localhost.  Not yet implemented.
     localfile = ( host.indexOf ( "localhost/" ) >= 0 ) ;
-    if ( localfile )                                    // Play file from localhost?
+    if ( localfile )                                      // Play file from localhost?
     {
-      if ( connecttofile() )                            // Yes, open mp3-file
+      if ( connecttofile() )                              // Yes, open mp3-file
       {
-        datamode = INIT ;                               // Start in INIT mode
+        datamode = DATA ;                                 // Start in DATA mode
       }
     }
     else
     {
-      if ( host.startsWith ( "ihr/" ) )                 // iHeartRadio station requested?
+      if ( host.startsWith ( "ihr/" ) )                   // iHeartRadio station requested?
       {
-        host = host.substring ( 4 ) ;                   // Yes, remove "ihr/"
-        host = xmlparse ( host ) ;                      // Parse the xml to get the host
+        host = host.substring ( 4 ) ;                     // Yes, remove "ihr/"
+        host = xmlparse ( host ) ;                        // Parse the xml to get the host
       }
-      connecttohost() ;                                 // Switch to new host
+      connecttohost() ;                                   // Switch to new host
     }
   }
-  if ( xmlreq )                                         // Directly xml requested?
+  if ( xmlreq )                                           // Directly xml requested?
   {
-    xmlreq = false ;                                    // Yes, clear request flag
-    host = xmlparse ( host ) ;                          // Parse the xml to get the host
-    connecttohost() ;                                   // and connect to this host
+    xmlreq = false ;                                      // Yes, clear request flag
+    host = xmlparse ( host ) ;                            // Parse the xml to get the host
+    connecttohost() ;                                     // and connect to this host
   }
 }
 
@@ -2654,14 +2690,18 @@ void handlebyte ( uint8_t b, bool force )
   static __attribute__((aligned(4))) uint8_t buf[32] ; // Buffer for chunk
   static int       bufcnt = 0 ;                        // Data in chunk
   static bool      firstchunk = true ;                 // First chunk as input
+  String           ct ;                                // Contents type
+  static bool      ctseen = false ;                    // First line of header seen or not
   int              inx ;                               // Pointer in metaline
   int              i ;                                 // Loop control
-
+  
   if ( datamode == INIT )                              // Initialize for header receive
   {
+    ctseen = false ;                                   // Contents type not seen yet
     metaint = 0 ;                                      // No metaint found
     LFcount = 0 ;                                      // For detection end of header
     bitrate = 0 ;                                      // Bitrate still unknown
+    dbgprint ( "Switch to HEADER" ) ;
     datamode = HEADER ;                                // Handle header
     totalcount = 0 ;                                   // Reset totalcount
     metaline = "" ;                                    // No metadata yet
@@ -2716,6 +2756,12 @@ void handlebyte ( uint8_t b, bool force )
       if ( chkhdrline ( metaline.c_str() ) )           // Reasonable input?
       {
         dbgprint ( metaline.c_str() ) ;                // Yes, Show it
+        if (metaline.indexOf ( "Content-Type" ) >= 0)  // Line with "Content-Type: xxxx/yyy"
+        {
+          ctseen = true ;                              // Yes, remember seeing this
+          ct = metaline.substring ( 14 ) ;             // Set contentstype. Not used yet
+          dbgprint ( "%s seen.", ct.c_str() ) ;
+        }
         if ( metaline.startsWith ( "icy-br:" ) )
         {
           bitrate = metaline.substring(7).toInt() ;    // Found bitrate tag, read the bitrate
@@ -2747,10 +2793,11 @@ void handlebyte ( uint8_t b, bool force )
         }
       }
       metaline = "" ;                                  // Reset this line
-      if ( LFcount == 2 )
+      if ( ( LFcount == 2 ) && ctseen )                // Some data seen and a double LF?
       {
-        dbgprint ( "Switch to DATA, bitrate is %d",    // Show bitrate
-                   bitrate ) ;
+        dbgprint ( "Switch to DATA, bitrate is %d"     // Show bitrate
+                   ", metaint is %d",                  // and metaint
+                   bitrate, metaint ) ;
         datamode = DATA ;                              // Expecting data now
         datacount = metaint ;                          // Number of bytes before first metadata
         bufcnt = 0 ;                                   // Reset buffer count
@@ -2929,16 +2976,16 @@ String getContentType ( String filename )
 //******************************************************************************************
 // Handling of requesting pages from the PROGMEM. Example: favicon.ico                     *
 //******************************************************************************************
-void handleFSf ( const String& filename )
+void handleFSf ( const String& pagename )
 {
   String                 ct ;                           // Content type
   const char*            p ;
   int                    l ;                            // Size of requested page
   int                    TCPCHUNKSIZE = 1024 ;          // Max number of bytes per write
 
-  dbgprint ( "FileRequest received %s", filename.c_str() ) ;
-  ct = getContentType ( filename ) ;                    // Get content type
-  if ( ( ct == "" ) || ( filename == "" ) )             // Empty is illegal
+  dbgprint ( "FileRequest received %s", pagename.c_str() ) ;
+  ct = getContentType ( pagename ) ;                    // Get content type
+  if ( ( ct == "" ) || ( pagename == "" ) )             // Empty is illegal
   {
     cmdclient.println ( "HTTP/1.1 404 Not Found" ) ;
     cmdclient.println ( "" ) ;
@@ -2946,27 +2993,27 @@ void handleFSf ( const String& filename )
   }
   else
   {
-    if ( filename.indexOf ( "index.html" ) >= 0 )       // Index page is in PROGMEM
+    if ( pagename.indexOf ( "index.html" ) >= 0 )       // Index page is in PROGMEM
     {
       p = index_html ;
       l = sizeof ( index_html ) ;
     }
-    else if ( filename.indexOf ( "radio.css" ) >= 0 )   // CSS file is in PROGMEM
+    else if ( pagename.indexOf ( "radio.css" ) >= 0 )   // CSS file is in PROGMEM
     {
       p = radio_css + 1 ;
       l = sizeof ( radio_css ) ;
     }
-    else if ( filename.indexOf ( "config.html" ) >= 0 ) // Config page is in PROGMEM
+    else if ( pagename.indexOf ( "config.html" ) >= 0 ) // Config page is in PROGMEM
     {
       p = config_html ;
       l = sizeof ( config_html ) ;
     }
-    else if ( filename.indexOf ( "about.html" ) >= 0 )  // About page is in PROGMEM
+    else if ( pagename.indexOf ( "about.html" ) >= 0 )  // About page is in PROGMEM
     {
       p = about_html ;
       l = sizeof ( about_html ) ;
     }
-    else if ( filename.indexOf ( "favicon.ico" ) >= 0 ) // Favicon icon is in PROGMEM
+    else if ( pagename.indexOf ( "favicon.ico" ) >= 0 ) // Favicon icon is in PROGMEM
     {
       p = (char*)favicon_ico ;
       l = sizeof ( favicon_ico ) ;
