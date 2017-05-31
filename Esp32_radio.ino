@@ -72,12 +72,13 @@
 // 20-05-2017, ES: Handling input buttons and MQTT.
 // 22-05-2017, ES: Save preset, volume and tone settings.
 // 23-05-2017, ES: No more calls of non-iram functions on interrupts.
-// 24-05-2017, ES: Support for featherboard
+// 24-05-2017, ES: Support for featherboard.
 // 26-05-2017, ES: Correction playing from .m3u playlist. Allow single hidden SSID.
+// 30-05-2017, ES: Add SD card support, volume indicator.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Fri, 26 May 2017 15:00:00 GMT"
+#define VERSION "Wed, 31 May 2017 12:05:00 GMT"
 // TFT.  Define USETFT if required.
 #define USETFT
 #include <WiFi.h>
@@ -192,7 +193,7 @@ enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,          // State for datastre
 
 // Global variables
 int              DEBUG = 1 ;                               // Debug on/off
-WiFiMulti        wifiMulti ;                               // Possible WiFinetworks
+WiFiMulti        wifiMulti ;                               // Possible WiFi networks
 ini_struct       ini_block ;                               // Holds configurable data
 WiFiServer       cmdserver ( 80 ) ;                        // Instance of embedded webserver on port 80
 WiFiClient       mp3client ;                               // An instance of the mp3 client
@@ -241,6 +242,7 @@ String           http_getcmd = "" ;                        // Contents of last G
 String           http_rqfile = "" ;                        // Requested file
 bool             http_reponse_flag = false ;               // Response required
 String           lssid, lpw ;                              // Last read SSID and password from wifi_xx
+bool             SDokay = false ;                          // True if SD card in place and readable
 
 // XML parse globals.
 TinyXML     xml ;                                          // For XML parser
@@ -341,17 +343,17 @@ void mqttpubc::publishtopic()
   {
     if ( amqttpub[i].topictrigger )                           // Topic ready to send?
     {
+      amqttpub[i].topictrigger = false ;                      // Success or not: clear trigger
       sprintf ( topic, "%s/%s", ini_block.mqttprefix.c_str(),
                         amqttpub[i].topic ) ;                 // Add prefix to topic
       payload = (*amqttpub[i].payload).c_str() ;              // Get payload
       dbgprint ( "Publish to topic %s : %s",                  // Show for debug
                  topic, payload ) ;
-      if ( mqttclient.publish ( topic, payload ) )            // Publish!
+      if ( !mqttclient.publish ( topic, payload ) )           // Publish!
       {
-        amqttpub[i].topictrigger = false ;                    // Success, clear trigger
-        return ;                                              // Do the rest later
+        dbgprint ( "MQTT publish failed!" ) ;                 // Failed
       }
-      dbgprint ( "MQTT publish failed!" ) ;                   // Failed
+      return ;                                                // Do the rest later
     }
     i++ ;                                                     // Next entry
   }
@@ -369,6 +371,7 @@ mqttpubc mqttpub ;                                            // Instance for mq
 #include "about_html.h"
 #include "config_html.h"
 #include "index_html.h"
+#include "mp3play_html.h"
 #include "radio_css.h"
 #include "favicon_ico.h"
 #include "defaultprefs.h"
@@ -766,23 +769,6 @@ inline uint16_t ringavail()
 //******************************************************************************************
 //                                P U T R I N G                                            *
 //******************************************************************************************
-// Put one byte in the ringbuffer.                                                         *
-// No check on available space.  See ringspace().                                          *
-//******************************************************************************************
-void putring ( uint8_t b )
-{
-  *(ringbuf + rbwindex) = b ;         // Put byte in ringbuffer
-  if ( ++rbwindex == RINGBFSIZ )      // Increment pointer and
-  {
-    rbwindex = 0 ;                    // wrap at end
-  }
-  rcount++ ;                          // Count number of bytes in the
-}
-
-
-//******************************************************************************************
-//                                P U T R I N G                                            *
-//******************************************************************************************
 // Version of putring to write a buffer to the ringbuffer.                                 *
 // No check on available space.  See ringspace().                                          *
 //******************************************************************************************
@@ -1005,6 +991,29 @@ void utf8ascii ( char* s )
 
 
 //******************************************************************************************
+//                              U T F 8 A S C I I                                          *
+//******************************************************************************************
+// Conversion UTF8-String to Extended ASCII String.                                        *
+//******************************************************************************************
+String utf8ascii ( const char* s )
+{
+  int  i ;                            // Index for input string
+  char c ;
+  String res = "" ;                   // Result string
+
+  for ( i = 0 ; s[i] ; i++ )          // For every input character
+  {
+    c = utf8ascii ( s[i] ) ;          // Translate if necessary
+    if ( c )                          // Good translation?
+    {
+      res += String ( c ) ;           // Yes, put in output string
+    }
+  }
+  return res ;
+}
+
+
+//******************************************************************************************
 //                                  D B G P R I N T                                        *
 //******************************************************************************************
 // Send a line of info to serial output.  Works like vsprintf(), but checks the DEBUG flag.*
@@ -1024,6 +1033,135 @@ char* dbgprint ( const char* format, ... )
     Serial.println ( sbuf ) ;                          // and the info
   }
   return sbuf ;                                        // Return stored string
+}
+
+
+//******************************************************************************************
+//                              G E T S D F I L E N A M E                                  *
+//******************************************************************************************
+// Translate the NnodeID of a track to the full filename that can be used as a station.    *
+//******************************************************************************************
+String getSDfilename ( String nodeID )
+{
+  String          res ;                                 // Function result
+  File            root, file ;                          // Handle to root and directory entry
+  uint16_t        n, i ;                                // Current sequence number and counter in directory
+  uint16_t        inx ;                                 // Position of comma in nodeID
+  const char*     p = "/" ;                             // Points to directory/file
+
+  dbgprint ( "getSDfilename started" ) ;
+  while ( ( n = nodeID.toInt() ) )                      // Next sequence in current level
+  {
+    inx = nodeID.indexOf ( "," ) ;                      // Find position of comma
+    if ( inx >= 0 )
+    {
+      nodeID= nodeID.substring ( inx+1 ) ;              // Remove sequence in this level from nodeID
+    }
+    root = SD.open ( p ) ;                              // Open the directory (this level)
+    for ( i = 1 ; i <=  n ; i++ )
+    {
+      file = root.openNextFile() ;                      // Get next directory entry
+      //dbgprint ( "file nr %d/%d is %s", i, n, file.name() ) ;
+    }
+    p = file.name() ;                                   // Points to directory- or file name
+  }
+  res = String ( "localhost" ) + String ( p ) ;         // Format result
+  return res ;                                          // Return full station spec
+}
+
+
+//******************************************************************************************
+//                              L I S T S D T R A C K S                                    *
+//******************************************************************************************
+// Search all MP3 files on directory of SD card.  Return the number of files found.        *
+// A "node" of max. 4 levels ( the subdirectory level) will be generated for every file.   *
+// The numbers within the node-array is the sequence number of the file/directory in that  *
+// subdirectory.                                                                           *
+//******************************************************************************************
+int listsdtracks ( const char * dirname, int level = 0 )
+{
+  const  uint16_t MAXDEPTH = 4 ;                        // Maximum depts.  Note: see mp3play_html.
+  static uint16_t fcount, oldfcount ;                   // Total number of files
+  static uint16_t node[MAXDEPTH] ;                      // Max 5 levels deep
+  static String   outbuf ;                              // Output buffer for cmdclient
+  uint16_t        ldirname ;                            // Length of dirname to remove from filename
+  File            root, file ;                          // Handle to root and directory entry
+  String          filename ;                            // Copy of filename for lowercase test
+  uint16_t        i ;                                   // Loop control to compute single node id
+  
+  if ( strcmp ( dirname, "/" ) == 0 )                   // Are we at the root directory?
+  {
+    fcount = 0 ;                                        // Yes, reset count
+    memset ( node, 0, sizeof(node) ) ;                  // And sequence counters
+    outbuf = String() ;                                 // And output buffer
+    if ( !SDokay )                                      // See if known card
+    {
+      cmdclient.println ( "0/No tracks found" ) ;       // No SD card, emppty list
+      return 0 ;
+    }
+  }
+  oldfcount = fcount ;                                  // To see if files found in this directory
+  //dbgprint ( "SD directory is %s", dirname ) ;        // Show current directory
+  ldirname = strlen ( dirname ) ;                       // Length of dirname to remove from filename
+  root = SD.open ( dirname ) ;                          // Open the current directory level
+  if ( !root || !root.isDirectory() )                   // Success?
+  {
+    dbgprint ( "%s is not a directory or not root",     // No, print debug message
+               dirname ) ;
+    return fcount ;                                     // and return
+  }
+  while ( ( file = root.openNextFile() ) )
+  {
+    node[level]++ ;                                     // Set entry sequence of current level
+    if ( file.name()[0] == '.' )                        // Skip hidden directories
+    {
+      continue ;
+    }
+    if ( file.isDirectory() )                           // Is it a directory?
+    {
+      if ( level < MAXDEPTH )                           // Yes, dig deeper
+      {
+        listsdtracks ( file.name(), level + 1 ) ;       // Note: called recursively
+        node[level+1] = 0 ;                             // Forget counter for one level up
+      }
+    }
+    else
+    {
+      filename = String ( file.name() ) ;               // Copy filename
+      filename.toLowerCase() ;                          // Force lowercase
+      if ( filename.endsWith ( ".mp3" ) )               // It is a file, but is it an MP3?
+      {
+        fcount++ ;                                      // Yes, count total number of MP3 files
+        for ( i = 0 ; i < MAXDEPTH ; i++ )
+        {
+          if ( i )
+          {
+            outbuf += String ( "," ) ;
+          }
+          outbuf += String ( node[i] ) ;
+        }
+        outbuf += utf8ascii (file.name() + ldirname) +  // Form line for mp3play_html page
+                  String ( "\n" ) ;     
+        //dbgprint ( "Track: %s",                       // Show debug info
+        //           file.name() + ldirname ) ;
+        if ( outbuf.length() > 1000 )                   // Buffer full?
+        {
+          cmdclient.print ( outbuf ) ;                  // Yes, send it
+          outbuf = String() ;                           // Clear buffer
+        }
+      }
+    }
+  }
+  if ( fcount != oldfcount )                            // Files in this directory?
+  {
+    outbuf += String ( "-1/ \n" ) ;                     // Spacing in list
+  }
+  if ( outbuf.length() )                                // Flush buffer if not empty
+  {
+    cmdclient.print ( outbuf ) ;                        // Yes, send it
+    outbuf = String() ;                                 // Continue with empty buffer
+  }
+  return fcount ;                                       // Return number of MP3s (sofar)
 }
 
 
@@ -1168,6 +1306,27 @@ void IRAM_ATTR timer100()
 
 
 //******************************************************************************************
+//                              D I S P L A Y V O L U M E                                  *
+//******************************************************************************************
+// Show the current volume as an indicator on the screen.                                  *
+//******************************************************************************************
+void displayvolume()
+{
+#if defined ( USETFT )
+  static uint8_t oldvol = 0 ;                        // Previous volume
+  uint8_t        pos ;                               // Positon of volume indicator
+
+  if ( vs1053player.getVolume() != oldvol )
+  {
+    pos = map ( vs1053player.getVolume(), 0, 100, 0, 160 ) ;
+  }
+  tft.fillRect ( 0, 126, pos, 2, RED ) ;             // Paint red part
+  tft.fillRect ( pos, 126, 160 - pos, 2, GREEN ) ;   // Paint green part
+#endif
+}
+
+
+//******************************************************************************************
 //                              D I S P L A Y I N F O                                      *
 //******************************************************************************************
 // Show a string on the LCD at a specified y-position in a specified color                 *
@@ -1307,7 +1466,7 @@ bool connecttohost()
   }
   pfs = dbgprint ( "Connect to %s on port %d, extension %s",
                    hostwoext.c_str(), port, extension.c_str() ) ;
-  displayinfo ( pfs, 60, 68, YELLOW ) ;             // Show info at position 60
+  displayinfo ( pfs, 60, 66, YELLOW ) ;             // Show info at position 60..125
   if ( mp3client.connect ( hostwoext.c_str(), port ) )
   {
     dbgprint ( "Connected to server" ) ;
@@ -1844,12 +2003,12 @@ void getpresets()
 //******************************************************************************************
 void setup()
 {
-  int   itrpt ;                                          // Interrupt number for DREQ
-  int   i ;                                              // Loop control
-  int   pinnr ;                                          // Input pinnumber
-  char* p ;
-  byte  mac[6] ;                                         // WiFi mac address
-  char  tmpstr[20] ;                                     // For version and Mac address
+  int      itrpt ;                                       // Interrupt number for DREQ
+  int      i ;                                           // Loop control
+  int      pinnr ;                                       // Input pinnumber
+  char*    p ;
+  byte     mac[6] ;                                      // WiFi mac address
+  char     tmpstr[20] ;                                  // For version and Mac address
     
   Serial.begin ( 115200 ) ;                              // For debug
   Serial.println() ;
@@ -1860,17 +2019,6 @@ void setup()
 #if defined ( SDCARDCS )
   pinMode ( SDCARDCS, OUTPUT ) ;                         // Deselect SDCARD
   digitalWrite ( SDCARDCS, HIGH ) ;
-  if ( !SD.begin ( SDCARDCS ) )                          // Try to init SD card driver
-  {
-    dbgprint ( "SD Card Mount Failed!" ) ;               // No success
-  }
-  else
-  {
-    if ( SD.cardType() == CARD_NONE )                    // See if known card
-    {
-      dbgprint ( "No SD card attached" ) ;
-    }
-  }
 #endif
 #if defined ( USETFT )
   tft.begin() ;                                          // Init TFT interface
@@ -1957,6 +2105,20 @@ void setup()
   timerAlarmWrite ( timer, 100000, true ) ;              // Alarm every 100 msec
   timerAlarmEnable ( timer ) ;                           // Enable the timer
   delay ( 1000 ) ;                                       // Show IP for a while
+#if defined ( SDCARDCS )
+  if ( !SD.begin ( SDCARDCS ) )                          // Try to init SD card driver
+  {
+    dbgprint ( "SD Card Mount Failed!" ) ;               // No success
+  }
+  else
+  {
+    SDokay = ( SD.cardType() != CARD_NONE ) ;           // See if known card
+    if ( !SDokay )
+    {
+      dbgprint ( "No SD card attached" ) ;              // Card not readable
+    }
+  }
+#endif
 }
 
 
@@ -2066,7 +2228,8 @@ void writeprefs()
 void handlehttpreply()
 {
   const char*   p ;                                         // Pointer to reply if command
-  String        sndstr ;                                    // String to send
+  String        sndstr = "" ;                               // String to send
+  int           n ;                                         // Number of files on SD card
 
   if ( http_reponse_flag )
   {
@@ -2090,7 +2253,7 @@ void handlehttpreply()
         if ( http_getcmd.length() )                         // Command to analyze?
         {
           dbgprint ( "Start reply for %s", http_getcmd.c_str() ) ;
-          sndstr = httpheader ( String ( "text/html") ) ;   // Set header
+          sndstr = httpheader ( String ( "text/html" ) ) ;  // Set header
           if ( http_getcmd.startsWith ( "getprefs" ) )      // Is it a "Get preferences"?
           {
             sndstr += readprefs ( true ) ;                  // Read and send
@@ -2103,11 +2266,17 @@ void handlehttpreply()
           {
             writeprefs() ;                                  // Yes, handle it
           }
+          else if ( http_getcmd.startsWith ("mp3list") )    // Is is a "Get SD MP3 tracklist"
+          {
+            cmdclient.print ( sndstr ) ;                    // Send header
+            n = listsdtracks ( "/" ) ;                      // Yes, handle it
+            dbgprint ( "%d tracks found on SD card", n ) ;
+            return ;                                        // Do not send empty line
+          }
           else
           {
             p = analyzeCmd ( http_getcmd.c_str() ) ;        // Yes, do so
-            // the content of the HTTP response follows the header:
-            sndstr += String ( p ) ;
+            sndstr += String ( p ) ;                        // Content of HTTP response follows the header
           }
           sndstr += String ( "\n" ) ;                       // The HTTP response ends with a blank line
           cmdclient.print ( sndstr ) ;
@@ -2120,13 +2289,9 @@ void handlehttpreply()
         }
         else
         {
-          cmdclient.println ( "HTTP/1.1 200 OK" ) ;
-          cmdclient.println ( "Content-type:text/html" ) ;
-          cmdclient.println();
+          httpheader ( String ( "text/html" ) ) ;           // Send header
           // the content of the HTTP response follows the header:
-          cmdclient.println ( "Dummy response" ) ;
-          // The HTTP response ends with another blank line:
-          cmdclient.println() ;
+          cmdclient.println ( "Dummy response\n" ) ;        // Text ending with double newline
           dbgprint ( "Dummy response sent" ) ;
         }
       }
@@ -2478,6 +2643,7 @@ void mp3loop()
     vs1053player.setVolume ( 0 ) ;                       // Mute
     vs1053player.stopSong() ;                            // Stop playing
     emptyring() ;                                        // Empty the ringbuffer
+    metaint = 0 ;                                        // No metaint known now
     datamode = STOPPED ;                                 // Yes, state becomes STOPPED
 #if defined ( USETFT )
     tft.fillRect ( 0, 0, 160, 128, BLACK ) ;             // Clear screen does not work when rotated
@@ -2588,6 +2754,7 @@ void loop()
   {
     vs1053player.setVolume ( ini_block.reqvol ) ;           // Unmute
   }
+  displayvolume() ;                                         // Show volume on display
   scanserial() ;                                            // Handle serial input
   scandigital() ;                                           // Scan digital inputs
   ArduinoOTA.handle() ;                                     // Check for OTA
@@ -3036,6 +3203,11 @@ void handleFSf ( const String& pagename )
       p = config_html ;
       l = sizeof ( config_html ) ;
     }
+    else if ( pagename.indexOf ( "mp3play.html" ) >= 0 ) // Mp3player page is in PROGMEM
+    {
+      p = mp3play_html ;
+      l = sizeof ( mp3play_html ) ;
+    }
     else if ( pagename.indexOf ( "about.html" ) >= 0 )  // About page is in PROGMEM
     {
       p = about_html ;
@@ -3163,6 +3335,7 @@ void chomp ( String &str )
 //   mqttport   = 1883                      // Set MQTT port to use, default 1883 *)       *
 //   mqttuser   = myuser                    // Set MQTT user for authentication *)         *
 //   mqttpasswd = mypassword                // Set MQTT password for authentication *)     *
+//   mp3track   = <nodeID>                  // Play track from SD card                     *
 //   status                                 // Show current URL to play                    *
 //   test                                   // For test purposes                           *
 //   debug      = 0 or 1                    // Switch debugging on or off                  *
@@ -3174,7 +3347,7 @@ const char* analyzeCmd ( const char* par, const char* val )
   String             argument ;                       // Argument as string
   String             value ;                          // Value of an argument as a string
   int                ivalue ;                         // Value of argument as an integer
-  static char        reply[150] ;                     // Reply to client, will be returned
+  static char        reply[180] ;                     // Reply to client, will be returned
   uint8_t            oldvol ;                         // Current volume
   bool               relative ;                       // Relative argument (+ or -)
   int                inx ;                            // Index in string
@@ -3244,22 +3417,19 @@ const char* analyzeCmd ( const char* par, const char* val )
   {
     muteflag = false ;                                // Request normal volume
   }
-  else if ( argument.indexOf ( "preset" ) >= 0 )      // Preset station?
+  else if ( argument.indexOf ( "preset" ) >= 0 )      // (UP/DOWN)Preset station?
   {
-    if ( !argument.startsWith ( "preset_" ) )         // But not a station URL
+    if ( relative )                                   // Relative argument?
     {
-      if ( relative )                                 // Relative argument?
-      {
-        ini_block.newpreset += ivalue ;               // Yes, adjust currentpreset
-      }
-      else
-      {
-        ini_block.newpreset = ivalue ;                // Otherwise set station
-      }
-      sprintf ( reply, "Preset is now %d",            // Reply new preset
-                ini_block.newpreset ) ;
-      playlist_num = 0 ;
+      ini_block.newpreset += ivalue ;                 // Yes, adjust currentpreset
     }
+    else
+    {
+      ini_block.newpreset = ivalue ;                  // Otherwise set station
+    }
+    sprintf ( reply, "Preset is now %d",              // Reply new preset
+              ini_block.newpreset ) ;
+    playlist_num = 0 ;
   }
   else if ( argument == "stop" )                      // Stop requested?
   {
@@ -3281,8 +3451,13 @@ const char* analyzeCmd ( const char* par, const char* val )
       hostreq = true ;                                // Yes, request restart
     }
   }
-  else if ( argument == "station" )                   // Station in the form address:port
+  else if ( ( argument == "mp3track" ) ||             // Select a track from SD card?
+            ( argument == "station" ) )               // Station in the form address:port
   {
+    if ( argument.startsWith ( "mp3" ) )              // MP3 track to search for
+    {
+      value = getSDfilename ( value ) ;               // like "localhost/........"
+    }
     if ( datamode & ( HEADER | DATA | METADATA | PLAYLISTINIT |
                       PLAYLISTHEADER | PLAYLISTDATA ) )
 
@@ -3292,8 +3467,9 @@ const char* analyzeCmd ( const char* par, const char* val )
     host = value ;                                    // Save it for storage and selection later
     hostreq = true ;                                  // Force this station as new preset
     sprintf ( reply,
-              "New preset station %s accepted",       // Format reply
-              host.c_str() ) ;
+              "New %s %s accepted",                   // Format reply
+              argument.c_str(), host.c_str() ) ;
+    utf8ascii ( reply ) ;                             // Remove possible strange characters
   }
   else if ( argument == "status" )                    // Status request
   {
