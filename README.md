@@ -5,6 +5,7 @@ Features:
 -	Can connect to thousands of Internet radio stations that broadcast MP3 or Ogg audio streams.
 - Can connect to a standalone mp3 file on a server.
 - Support for .m3u playlists.
+- Can play mp3 tracks from SD card.
 -	Uses a minimal number of components; no Arduino required.
 -	Handles bitrates up to 320 kbps.
 -	Has a preset list of maximal 100 favorite radio stations in configuration file.
@@ -26,7 +27,8 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
-- 26-may-2017: Correctio Upper/Lower Case compare.
+- 31-may-2017: Experimental: play MP3 tracks from SD card.
+- 26-may-2017: Correction Upper/Lower Case compare.
 - 26-may-2017: Allow connection from single hidden AP.
 - 23-may-2017: First release, derived from ESP8266 version.
 
