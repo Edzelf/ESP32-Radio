@@ -8,7 +8,7 @@ const char index_html[] PROGMEM = R"=====(
   <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
   <link rel="Shortcut Icon" type="image/ico" href="favicon.ico">
  </head>
- <body>
+ <body onload="initvalues()">
   <ul>
    <li><a class="pull-left" href="#">ESP32 Radio</a></li>
    <li><a class="pull-left active" href="/index.html">Control</a></li>
@@ -25,7 +25,7 @@ const char index_html[] PROGMEM = R"=====(
    <button class="button" onclick="httpGet('stop')">STOP</button>
    <button class="button" onclick="httpGet('resume')">RESUME</button>
    <button class="button" onclick="httpGet('status')">STATUS</button>
-   <button class="button" onclick="httpGet('test')">TEST</button>
+   <button class="button" onclick="httpGet('test')">MEMORY</button>
    <table style="width:500px">
     <tr>
      <td colspan="2"><center>
@@ -50,7 +50,7 @@ const char index_html[] PROGMEM = R"=====(
        <option value="13">-4.5 dB</option>
        <option value="14">-3 dB</option>
        <option value="15">-1.5 dB</option>
-       <option value="0" selected>Off</option>
+       <option value="0">Off</option>
        <option value="1">+1.5 dB</option>
        <option value="2">+3 dB</option>
        <option value="3">+4.5 dB</option>
@@ -90,7 +90,7 @@ const char index_html[] PROGMEM = R"=====(
       <label for="LA"><big>Bass Gain:</big></label>
       <br>
       <select class="select" onChange="handletone(this)" id="LA">
-       <option value="0" selected>Off</option>
+       <option value="0">Off</option>
        <option value="1">+1 dB</option>
        <option value="2">+2 dB</option>
        <option value="3">+3 dB</option>
@@ -214,6 +214,27 @@ const char index_html[] PROGMEM = R"=====(
    }
    xhr.open ( "GET", theUrl, false ) ;
    xhr.send() ;
+   // Fill eq values initially
+   //
+   function initvalues ()
+   {
+     var i, selection, opt, cursettings ;
+     var theUrl = "/?eq" + "&version=" + Math.random() ;
+     var xhr = new XMLHttpRequest() ;
+     xhr.onreadystatechange = function() {
+     if ( xhr.readyState == XMLHttpRequest.DONE )
+     {
+       cursettings = xhr.responseText.split ( "|" ) ;
+       for ( i = 0 ; i < 4 ; i++ )
+       {
+         document.getElementById(cursettings[i].substring(0,2)).value = cursettings[i].substring(2) ;
+       }
+         
+     }
+   }
+   xhr.open ( "GET", theUrl, false ) ;
+   xhr.send() ;
+  }
   </script>
   <script type="text/javascript">
     var stylesheet = document.createElement('link') ;
