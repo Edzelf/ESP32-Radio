@@ -3551,6 +3551,15 @@ const char* analyzeCmd ( const char* par, const char* val )
   {
     return presetlist.c_str() ;                       // Send preset list as reply
   }
+  else if ( argument == "eq" )
+  {
+    String toneCodes[] = { "HA", "HF", "LA", "LF" };
+    String eq = "" ;
+    for (uint8_t i = 0; i < 4; i++) {
+      eq += toneCodes[i] + String( ini_block.rtone[i] ) + String( '|' ) ;
+    }  
+    return eq.c_str() ;
+  }
   else
   {
     sprintf ( reply, "%s called with illegal parameter: %s",
