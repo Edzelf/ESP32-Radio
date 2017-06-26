@@ -74,11 +74,12 @@
 // 23-05-2017, ES: No more calls of non-iram functions on interrupts.
 // 24-05-2017, ES: Support for featherboard.
 // 26-05-2017, ES: Correction playing from .m3u playlist. Allow single hidden SSID.
-// 30-05-2017, ES: Add SD card support, volume indicator.
+// 30-05-2017, ES: Add SD card support (FAT format), volume indicator.
+// 26-06-2017, ES: Correction: start in AP-mode if no WiFi networks configured.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 31 May 2017 12:05:00 GMT"
+#define VERSION "Wed, 26 Jun 2017 08:50:00 GMT"
 // TFT.  Define USETFT if required.
 #define USETFT
 #include <WiFi.h>
@@ -123,6 +124,7 @@
 #define TFT_CS 15
 #define TFT_DC 2
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
+// Use a multiple of 1024 for optimal handling of bufferspace.  See definition of tmpbuff.
 #define RINGBFSIZ 20480
 // Debug buffer size
 #define DEBUG_BUFFER_SIZE 130
@@ -414,7 +416,7 @@ class VS1053
     {
       while ( !digitalRead ( dreq_pin ) )
       {
-        yield() ;                                 // Very short delay
+        NOP() ;                                   // Very short delay
       }
     }
 
@@ -602,7 +604,6 @@ bool VS1053::testComm ( const char *header )
       cnt++ ;
       delay ( 10 ) ;
     }
-    yield() ;                                           // Allow ESP firmware to do some bookkeeping
   }
   return ( cnt == 0 ) ;                                 // Return the result
 }
@@ -1549,12 +1550,16 @@ bool connectwifi()
       localAP = true ;                                  // Error, setup own AP
     }
   }
+  else
+  {
+    localAP = true ;                                    // Not even a single AP defined
+  }
   if ( localAP )                                        // Must setup local AP?
   {
     dbgprint ( "WiFi Failed!  Trying to setup AP with name %s and password %s.", NAME, NAME ) ;
     WiFi.softAP ( NAME, NAME ) ;                        // This ESP will be an AP
-    delay ( 5000 ) ;
     pfs = dbgprint ( "IP = 192.168.4.1" ) ;             // Address for AP
+    delay ( 5000 ) ;
   }
   else
   {    
@@ -2108,14 +2113,14 @@ void setup()
 #if defined ( SDCARDCS )
   if ( !SD.begin ( SDCARDCS ) )                          // Try to init SD card driver
   {
-    dbgprint ( "SD Card Mount Failed!" ) ;               // No success
+    dbgprint ( "SD Card Mount Failed!" ) ;               // No success, check formatting (FAT)
   }
   else
   {
-    SDokay = ( SD.cardType() != CARD_NONE ) ;           // See if known card
+    SDokay = ( SD.cardType() != CARD_NONE ) ;            // See if known card
     if ( !SDokay )
     {
-      dbgprint ( "No SD card attached" ) ;              // Card not readable
+      dbgprint ( "No SD card attached" ) ;               // Card not readable
     }
   }
 #endif
