@@ -40,4 +40,8 @@ preset_08 = skonto.ls.lv:8002/mp3                    #  8 - Skonto 128k
 preset_09 = 94.23.66.155:8106                        #  9 - *ILR CHILL and GROOVE
 preset_10 = ihr/IHR_IEDM                             # 10 - iHeartRadio IHR_IEDM
 preset_11 = ihr/IHR_TRAN                             # 11 - iHeartRadio IHR_TRAN
+#
+# Some IR codes
+ir_40BF = upvolume = 2
+ir_C03F = downvolume = 2
 )=====" ;

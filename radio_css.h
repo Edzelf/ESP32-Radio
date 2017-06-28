@@ -46,7 +46,7 @@ li a:hover, a.active {
 
 .button {
    width: 80px;
-   height: 40px;
+   height: 30px;
    background-color: #128F76;
    border: none;
    color: white;
@@ -60,10 +60,6 @@ li a:hover, a.active {
 }
 
 .buttonr {background-color: #D62C1A;}
-
-.button-play {
-   height: 30px;
-}
 
 .select {
    width: 160px;

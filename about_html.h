@@ -1,5 +1,6 @@
 // about.html file in raw data format for PROGMEM
 //
+#define about_html_version 170626
 const char about_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
@@ -21,7 +22,7 @@ const char about_html[] PROGMEM = R"=====(
   <center>
    <h1>** ESP32 Radio **</h1>
   </center>
-	<p>Esp Radio -- Webradio receiver for ESP32, 1.8" color display and VS1053 MP3 module.<br>
+	<p>ESP32 Radio -- Webradio receiver for ESP32, 1.8" color display and VS1053 MP3 module.<br>
 	This project is documented at <a target="blank" href="https://github.com/Edzelf/ESP32-radio">Github</a>.</p>
 	<p>Author: Ed Smallenburg<br>
 	Webinterface design: <a target="blank" href="http://www.sanderjochems.nl/">Sander Jochems</a><br>

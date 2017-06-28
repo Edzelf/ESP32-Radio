@@ -1,11 +1,13 @@
 // index.html file in raw data format for PROGMEM
 //
+#define index_html_version 170626
 const char index_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
  <head>
   <title>ESP32-radio</title>
   <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+  <link rel="stylesheet" type="text/css" href="radio.css">
   <link rel="Shortcut Icon" type="image/ico" href="favicon.ico">
  </head>
  <body>
@@ -13,6 +15,7 @@ const char index_html[] PROGMEM = R"=====(
    <li><a class="pull-left" href="#">ESP32 Radio</a></li>
    <li><a class="pull-left active" href="/index.html">Control</a></li>
    <li><a class="pull-left" href="/config.html">Config</a></li>
+   <li><a class="pull-left" href="/mp3play.html">MP3 player</a></li>
    <li><a class="pull-left" href="/about.html">About</a></li>
   </ul>
   <br><br><br>
@@ -22,6 +25,7 @@ const char index_html[] PROGMEM = R"=====(
    <button class="button" onclick="httpGet('uppreset=1')">NEXT</button>
    <button class="button" onclick="httpGet('downvolume=2')">VOL-</button>
    <button class="button" onclick="httpGet('upvolume=2')">VOL+</button>
+   <button class="button" onclick="httpGet('mute')">MUTE</button>
    <button class="button" onclick="httpGet('stop')">STOP</button>
    <button class="button" onclick="httpGet('resume')">RESUME</button>
    <button class="button" onclick="httpGet('status')">STATUS</button>
@@ -134,7 +138,7 @@ const char index_html[] PROGMEM = R"=====(
    </table>
    <br>
    <input type="text" size="60" id="station" placeholder="Enter a station/file here....">
-   <button class="button button-play" onclick="setstat()">PLAY</button>
+   <button class="button" onclick="setstat()">PLAY</button>
    <br>
    <br>
    <input type="text" width="600px" size="72" id="resultstr" placeholder="Waiting for a command...."><br>
@@ -214,13 +218,6 @@ const char index_html[] PROGMEM = R"=====(
    }
    xhr.open ( "GET", theUrl, false ) ;
    xhr.send() ;
-  </script>
-  <script type="text/javascript">
-    var stylesheet = document.createElement('link') ;
-    stylesheet.href = 'radio.css' ;
-    stylesheet.rel = 'stylesheet' ;
-    stylesheet.type = 'text/css' ;
-    document.getElementsByTagName('head')[0].appendChild(stylesheet) ;
   </script>
  </body>
 </html>

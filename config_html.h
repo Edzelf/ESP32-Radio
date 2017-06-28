@@ -1,18 +1,21 @@
 // config.html file in raw data format for PROGMEM
 //
+#define config_html_version 170626
 const char config_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
  <head>
   <title>Configuration ESP32-radio</title>
   <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+  <link rel="stylesheet" type="text/css" href="radio.css">
   <link rel="Shortcut Icon" type="image/ico" href="favicon.ico">
  </head>
  <body>
   <ul>
-   <li><a class="pull-left" href="#">ESP Radio</a></li>
+   <li><a class="pull-left" href="#">ESP32 Radio</a></li>
    <li><a class="pull-left" href="/index.html">Control</a></li>
    <li><a class="pull-left active" href="/config.html">Config</a></li>
+   <li><a class="pull-left" href="/mp3play.html">MP3 player</a></li>
    <li><a class="pull-left" href="/about.html">About</a></li>
   </ul>
   <br><br><br>
@@ -114,13 +117,6 @@ const char config_html[] PROGMEM = R"=====(
       xhr.send() ;
       // Now get the configuration parameters from preferences
       ldef ( "getprefs" ) ;
-    </script>
-    <script type="text/javascript">
-      var stylesheet = document.createElement('link') ;
-      stylesheet.href = 'radio.css' ;
-      stylesheet.rel = 'stylesheet' ;
-      stylesheet.type = 'text/css' ;
-      document.getElementsByTagName('head')[0].appendChild(stylesheet) ;
     </script>
   </body>
 </html>
