@@ -28,6 +28,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 30-jun-2017: Improved MP3 player.
 - 28-jun-2017: Added IR interface.
 - 31-may-2017: Experimental: play MP3 tracks from SD card.
 - 26-may-2017: Correction Upper/Lower Case compare.
