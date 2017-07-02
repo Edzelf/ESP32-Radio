@@ -21,11 +21,13 @@ const char mp3play_html[] PROGMEM = R"=====(
   <br><br><br>
   <center>
    <h1>** ESP32 Radio **</h1>
-   <label for="seltrack"><big>Testing -- MP3 files on SD card:</big></label>
+   <label for="seltrack"><big>MP3 files on SD card:</big></label>
    <br>
    <select class="select selectw" onChange="trackreq(this)" id="seltrack">
     <option value="-1">Select a track here</option>
    </select>
+   <br><br>
+   <button class="button" onclick="httpGet('mp3track=0')">RANDOM</button>
    <br><br>
    <br>
    <input type="text" width="600px" size="120" id="resultstr" placeholder="Waiting for a command...."><br>

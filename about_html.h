@@ -27,7 +27,7 @@ const char about_html[] PROGMEM = R"=====(
 	<p>Author: Ed Smallenburg<br>
 	Webinterface design: <a target="blank" href="http://www.sanderjochems.nl/">Sander Jochems</a><br>
 	App (Android): <a target="blank" href="https://play.google.com/store/apps/details?id=com.thunkable.android.sander542jochems.ESP_Radio">Sander Jochems</a><br>
-	Date: May 2017</p>
+	Date: June 2017</p>
  </body>
 </html>
 )=====" ;
