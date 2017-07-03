@@ -1,6 +1,6 @@
 // index.html file in raw data format for PROGMEM
 //
-#define mp3play_html_version 170626
+#define mp3play_html_version 170703
 const char mp3play_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
