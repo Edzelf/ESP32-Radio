@@ -1,6 +1,6 @@
 // config.html file in raw data format for PROGMEM
 //
-#define config_html_version 1707203
+#define config_html_version 170703
 const char config_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
