@@ -1,12 +1,12 @@
 // index.html file in raw data format for PROGMEM
 //
-#define mp3play_html_version 170626
+#define mp3play_html_version 170703
 const char mp3play_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
  <head>
   <title>ESP32-radio</title>
-  <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
   <link rel="stylesheet" type="text/css" href="radio.css">
   <link rel="Shortcut Icon" type="image/ico" href="favicon.ico">
  </head>

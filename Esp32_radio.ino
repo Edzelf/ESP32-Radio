@@ -111,7 +111,13 @@
 #define WHITE   BLUE | RED | GREEN
 // Digital I/O used
 // Pins for VS1053 module
-#if defined ( ARDUINO_FEATHER_ESP32 )
+#define Qantum_MP3_shield 1
+#if defined( Qantum_MP3_shield )
+#define VS1053_CS     26
+#define VS1053_DCS    27
+#define VS1053_DREQ   2
+#define SDCARDCS      21
+#elif defined ( ARDUINO_FEATHER_ESP32 )
 #define VS1053_CS     32
 #define VS1053_DCS    33
 #define VS1053_DREQ   15
@@ -3123,7 +3129,7 @@ void handlebyte ( uint8_t b, bool force )
   }
   if ( datamode == HEADER )                            // Handle next byte of MP3 header
   {
-    if ( ( b > 0x7F ) ||                               // Ignore unprintable characters
+    if ( //( b > 0x7F ) ||                               // Ignore unprintable characters
          ( b == '\r' ) ||                              // Ignore CR
          ( b == '\0' ) )                               // Ignore NULL
     {
@@ -3245,7 +3251,7 @@ void handlebyte ( uint8_t b, bool force )
   }
   if ( datamode == PLAYLISTHEADER )                    // Read header
   {
-    if ( ( b > 0x7F ) ||                               // Ignore unprintable characters
+    if (// ( b > 0x7F ) ||                               // Ignore unprintable characters
          ( b == '\r' ) ||                              // Ignore CR
          ( b == '\0' ) )                               // Ignore NULL
     {
@@ -3272,7 +3278,7 @@ void handlebyte ( uint8_t b, bool force )
   }
   if ( datamode == PLAYLISTDATA )                      // Read next byte of .m3u file data
   {
-    if ( ( b > 0x7F ) ||                               // Ignore unprintable characters
+    if (// ( b > 0x7F ) ||                               // Ignore unprintable characters
          ( b == '\r' ) ||                              // Ignore CR
          ( b == '\0' ) )                               // Ignore NULL
     {
