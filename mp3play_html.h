@@ -6,7 +6,7 @@ const char mp3play_html[] PROGMEM = R"=====(
 <html>
  <head>
   <title>ESP32-radio</title>
-  <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
   <link rel="stylesheet" type="text/css" href="radio.css">
   <link rel="Shortcut Icon" type="image/ico" href="favicon.ico">
  </head>
