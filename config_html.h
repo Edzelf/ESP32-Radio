@@ -1,12 +1,12 @@
 // config.html file in raw data format for PROGMEM
 //
-#define config_html_version 170626
+#define config_html_version 1707203
 const char config_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
  <head>
   <title>Configuration ESP32-radio</title>
-  <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
   <link rel="stylesheet" type="text/css" href="radio.css">
   <link rel="Shortcut Icon" type="image/ico" href="favicon.ico">
  </head>
