@@ -1,5 +1,7 @@
-//*  Esp32_radio -- Webradio receiver for ESP32, 1.8 color display and VS1053 MP3 module.   *
-//*******************************************************************************************
+//***************************************************************************************************
+//*  Esp32_radio -- Webradio receiver for ESP32, 1.8 color display and VS1053 MP3 module.           *
+//*                 By Ed Smallenburg.                                                              *
+//***************************************************************************************************
 // ESP32 libraries used:
 //  - WiFi
 //  - WiFiMulti
@@ -77,10 +79,12 @@
 // 26-06-2017, ES: Correction: start in AP-mode if no WiFi networks configured.
 // 28-06-2017, ES: Added IR interface.
 // 30-06-2017, ES: Improved functions for SD card play.
+// 03-07-2017, ES: Webinterface control page shows current settings.
+// 04-07-2017, ES: Correction MQTT subscription. Keep playing during long oprerations.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Fri, 30 Jun 2017 10:50:00 GMT"
+#define VERSION "Tue, 4 Jul 2017 08:50:00 GMT"
 
 // TFT.  Define USETFT if required.
 #define USETFT
@@ -146,9 +150,9 @@
 // if mqttprefix is "ESP32Radio".
 #define MQTT_SUBTOPIC     "command"           // Command to receive from MQTT
 //
-//******************************************************************************************
-// Forward declaration of various functions                                                *
-//******************************************************************************************
+//**************************************************************************************************
+// Forward declaration of various functions                                                        *
+//**************************************************************************************************
 void        displayinfo ( const char* str, uint16_t pos, uint16_t height, uint16_t color ) ;
 void        showstreamtitle ( const char* ml, bool full = false ) ;
 void        handlebyte ( uint8_t b, bool force = false ) ;
@@ -162,14 +166,14 @@ void        chomp ( String &str ) ;
 String      httpheader ( String contentstype ) ;
 
 //
-//******************************************************************************************
-// Global data section.                                                                    *
-//******************************************************************************************
-// There is a block ini-data that contains some configuration.  Configuration data is      *
-// saved in the preferences by the webinterface.  On restart the new data will             *
-// de read from these preferences.                                                         *
-// Items in ini_block can be changed by commands from webserver/MQTT/Serial.               *
-//******************************************************************************************
+//**************************************************************************************************
+// Global data section.                                                                            *
+//**************************************************************************************************
+// There is a block ini-data that contains some configuration.  Configuration data is              *
+// saved in the preferences by the webinterface.  On restart the new data will                     *
+// de read from these preferences.                                                                 *
+// Items in ini_block can be changed by commands from webserver/MQTT/Serial.                       *
+//**************************************************************************************************
 struct ini_struct
 {
   String         mqttbroker ;                              // The name of the MQTT broker server
@@ -236,7 +240,6 @@ bool             NetworkFound = false ;                    // True if WiFi netwo
 bool             mqtt_on = false ;                         // MQTT in use
 String           networks ;                                // Found networks
 String           anetworks ;                               // Aceptable networks (present in preferences)
-String           presetlist ;                              // List for webserver
 uint8_t          num_an ;                                  // Number of acceptable networks in preferences
 uint16_t         mqttcount = 0 ;                           // Counter MAXMQTTCONNECTS
 int8_t           playlist_num = 0 ;                        // Nonzero for selection from playlist
@@ -292,9 +295,9 @@ progpin_struct   progpin[] =                               // Input pins with pr
 } ;
 
 
-//******************************************************************************************
-//                             M Q T T P U B _ C L A S S                                   *
-//******************************************************************************************
+//**************************************************************************************************
+//                                     M Q T T P U B _ C L A S S                                   *
+//**************************************************************************************************
 // ID's for the items to publish to MQTT.  Is index in amqttpub[]
 enum { MQTT_IP, MQTT_ICYNAME, MQTT_STREAMTITLE, MQTT_NOWPLAYING } ;
 
@@ -322,25 +325,25 @@ class mqttpubc                                             // For MQTT publishin
     void          publishtopic() ;                          // Publish triggerer items
 } ;
 
-//******************************************************************************************
-// MQTTPUB  class implementation.                                                          *
-//******************************************************************************************
+//**************************************************************************************************
+// MQTTPUB  class implementation.                                                                  *
+//**************************************************************************************************
 
-//******************************************************************************************
-//                            T R I G G E R                                                *
-//******************************************************************************************
-// Set request for an item to publish to MQTT.                                             *
-//******************************************************************************************
+//**************************************************************************************************
+//                                            T R I G G E R                                        *
+//**************************************************************************************************
+// Set request for an item to publish to MQTT.                                                     *
+//**************************************************************************************************
 void mqttpubc::trigger ( uint8_t item )                // Trigger publishig for one item
 {
   amqttpub[item].topictrigger = true ;                 // Request re-publish for an item
 }
 
-//******************************************************************************************
-//                            P U B L I S H T O P I C                                      *
-//******************************************************************************************
-// Publish a topic to MQTT broker.                                                         *
-//******************************************************************************************
+//**************************************************************************************************
+//                                     P U B L I S H T O P I C                                     *
+//**************************************************************************************************
+// Publish a topic to MQTT broker.                                                                 *
+//**************************************************************************************************
 void mqttpubc::publishtopic()
 {
   int         i = 0 ;                                         // Loop control
@@ -369,13 +372,13 @@ void mqttpubc::publishtopic()
 
 mqttpubc mqttpub ;                                            // Instance for mqttpubc
 
-//******************************************************************************************
-// End of global data section.                                                             *
-//******************************************************************************************
+//**************************************************************************************************
+// End of global data section.                                                                     *
+//**************************************************************************************************
 
-//******************************************************************************************
-// Pages, CSS and data for the webinterface.                                               *
-//******************************************************************************************
+//**************************************************************************************************
+// Pages, CSS and data for the webinterface.                                                       *
+//**************************************************************************************************
 #include "about_html.h"
 #include "config_html.h"
 #include "index_html.h"
@@ -384,11 +387,11 @@ mqttpubc mqttpub ;                                            // Instance for mq
 #include "favicon_ico.h"
 #include "defaultprefs.h"
 //
-//******************************************************************************************
-// VS1053 stuff.  Based on maniacbug library.                                              *
-//******************************************************************************************
-// VS1053 class definition.                                                                *
-//******************************************************************************************
+//**************************************************************************************************
+// VS1053 stuff.  Based on maniacbug library.                                                      *
+//**************************************************************************************************
+// VS1053 class definition.                                                                        *
+//**************************************************************************************************
 class VS1053
 {
   private:
@@ -485,9 +488,9 @@ class VS1053
     }
 } ;
 
-//******************************************************************************************
-// VS1053 class implementation.                                                            *
-//******************************************************************************************
+//**************************************************************************************************
+// VS1053 class implementation.                                                                    *
+//**************************************************************************************************
 
 VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) :
   cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin)
@@ -747,38 +750,38 @@ void VS1053::printDetails ( const char *header )
 // The object for the MP3 player
 VS1053 vs1053player (  VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 
-//******************************************************************************************
-// End VS1053 stuff.                                                                       *
-//******************************************************************************************
+//**************************************************************************************************
+// End VS1053 stuff.                                                                               *
+//**************************************************************************************************
 
 
-//******************************************************************************************
-// Ringbuffer (fifo) routines.                                                             *
-//******************************************************************************************
-//******************************************************************************************
-//                              R I N G S P A C E                                          *
-//******************************************************************************************
+//**************************************************************************************************
+// Ringbuffer (fifo) routines.                                                                     *
+//**************************************************************************************************
+//**************************************************************************************************
+//                                          R I N G S P A C E                                      *
+//**************************************************************************************************
 uint16_t ringspace()
 {
   return ( RINGBFSIZ - rcount ) ;     // Free space available
 }
 
 
-//******************************************************************************************
-//                              R I N G A V A I L                                          *
-//******************************************************************************************
+//**************************************************************************************************
+//                                         R I N G A V A I L                                       *
+//**************************************************************************************************
 inline uint16_t ringavail()
 {
   return rcount ;                     // Return number of bytes available for getring()
 }
 
 
-//******************************************************************************************
-//                                P U T R I N G                                            *
-//******************************************************************************************
-// Version of putring to write a buffer to the ringbuffer.                                 *
-// No check on available space.  See ringspace().                                          *
-//******************************************************************************************
+//**************************************************************************************************
+//                                        P U T R I N G                                            *
+//**************************************************************************************************
+// Version of putring to write a buffer to the ringbuffer.                                         *
+// No check on available space.  See ringspace().                                                  *
+//**************************************************************************************************
 void putring ( uint8_t* buf, uint16_t len )
 {
   uint16_t partl ;                                                // Partial length to xfer
@@ -805,9 +808,9 @@ void putring ( uint8_t* buf, uint16_t len )
 }
 
 
-//******************************************************************************************
-//                                G E T R I N G                                            *
-//******************************************************************************************
+//**************************************************************************************************
+//                                        G E T R I N G                                            *
+//**************************************************************************************************
 uint8_t getring()
 {
   // Assume there is always something in the bufferpace.  See ringavail()
@@ -819,9 +822,9 @@ uint8_t getring()
   return *(ringbuf + rbrindex) ;      // return the oldest byte
 }
 
-//******************************************************************************************
-//                               E M P T Y R I N G                                         *
-//******************************************************************************************
+//**************************************************************************************************
+//                                       E M P T Y R I N G                                         *
+//**************************************************************************************************
 void emptyring()
 {
   rbwindex = 0 ;                      // Reset ringbuffer administration
@@ -830,13 +833,13 @@ void emptyring()
 }
 
 
-//******************************************************************************************
-//                              N V S O P E N                                              *
-//******************************************************************************************
-// Open Preferences with my-app namespace. Each application module, library, etc.          *
-// has to use namespace name to prevent key name collisions. We will open storage in       *
-// RW-mode (second parameter has to be false).                                             *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      N V S O P E N                                              *
+//**************************************************************************************************
+// Open Preferences with my-app namespace. Each application module, library, etc.                  *
+// has to use namespace name to prevent key name collisions. We will open storage in               *
+// RW-mode (second parameter has to be false).                                                     *
+//**************************************************************************************************
 void nvsopen()
 {
   if ( ! nvshandle )                                         // Opened already?
@@ -850,11 +853,11 @@ void nvsopen()
 }
 
 
-//******************************************************************************************
-//                              N V S C L E A R                                            *
-//******************************************************************************************
-// Clear all preferences.                                                                  *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      N V S C L E A R                                            *
+//**************************************************************************************************
+// Clear all preferences.                                                                          *
+//**************************************************************************************************
 esp_err_t nvsclear()
 {
   nvsopen() ;                                         // Be sure to open nvs
@@ -862,12 +865,12 @@ esp_err_t nvsclear()
 }
 
 
-//******************************************************************************************
-//                              N V S G E T S T R                                          *
-//******************************************************************************************
-// Read a string from nvs.                                                                 *
-// A copy of the key is used because nvs_get_str will fail after some time otherwise....   *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      N V S G E T S T R                                          *
+//**************************************************************************************************
+// Read a string from nvs.                                                                         *
+// A copy of the key is used because nvs_get_str will fail after some time otherwise....           *
+//**************************************************************************************************
 String nvsgetstr ( const char* key )
 {
   uint32_t      counter ;
@@ -887,12 +890,12 @@ String nvsgetstr ( const char* key )
 }
 
 
-//******************************************************************************************
-//                              N V S S E T S T R                                          *
-//******************************************************************************************
-// Put a key/value pair in nvs.  Length is limited to allow easy read-back.                *
-// No writing if no change.                                                                *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      N V S S E T S T R                                          *
+//**************************************************************************************************
+// Put a key/value pair in nvs.  Length is limited to allow easy read-back.                        *
+// No writing if no change.                                                                        *
+//**************************************************************************************************
 esp_err_t nvssetstr ( const char* key, String val )
 {
   String curcont ;                                         // Current contents
@@ -922,11 +925,11 @@ esp_err_t nvssetstr ( const char* key, String val )
 }
 
 
-//******************************************************************************************
-//                              N V S S E A R C H                                          *
-//******************************************************************************************
-// Check if key exists in nvs.                                                             *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      N V S S E A R C H                                          *
+//**************************************************************************************************
+// Check if key exists in nvs.                                                                     *
+//**************************************************************************************************
 bool nvssearch ( const char* key )
 {
   size_t        len = NVSBUFSIZE ;                      // Length of the string
@@ -937,13 +940,13 @@ bool nvssearch ( const char* key )
 }
 
 
-//******************************************************************************************
-//                              U T F 8 A S C I I                                          *
-//******************************************************************************************
-// UTF8-Decoder: convert UTF8-string to extended ASCII.                                    *
-// Convert a single Character from UTF8 to Extended ASCII.                                 *
-// Return "0" if a byte has to be ignored.                                                 *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      U T F 8 A S C I I                                          *
+//**************************************************************************************************
+// UTF8-Decoder: convert UTF8-string to extended ASCII.                                            *
+// Convert a single Character from UTF8 to Extended ASCII.                                         *
+// Return "0" if a byte has to be ignored.                                                         *
+//**************************************************************************************************
 byte utf8ascii ( byte ascii )
 {
   static const byte lut_C3[] =
@@ -975,11 +978,11 @@ byte utf8ascii ( byte ascii )
 }
 
 
-//******************************************************************************************
-//                              U T F 8 A S C I I                                          *
-//******************************************************************************************
-// In Place conversion UTF8-string to Extended ASCII (ASCII is shorter!).                  *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      U T F 8 A S C I I                                          *
+//**************************************************************************************************
+// In Place conversion UTF8-string to Extended ASCII (ASCII is shorter!).                          *
+//**************************************************************************************************
 void utf8ascii ( char* s )
 {
   int  i, k = 0 ;                     // Indexes for in en out string
@@ -997,11 +1000,11 @@ void utf8ascii ( char* s )
 }
 
 
-//******************************************************************************************
-//                              U T F 8 A S C I I                                          *
-//******************************************************************************************
-// Conversion UTF8-String to Extended ASCII String.                                        *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      U T F 8 A S C I I                                          *
+//**************************************************************************************************
+// Conversion UTF8-String to Extended ASCII String.                                                *
+//**************************************************************************************************
 String utf8ascii ( const char* s )
 {
   int  i ;                            // Index for input string
@@ -1020,12 +1023,12 @@ String utf8ascii ( const char* s )
 }
 
 
-//******************************************************************************************
-//                                  D B G P R I N T                                        *
-//******************************************************************************************
-// Send a line of info to serial output.  Works like vsprintf(), but checks the DEBUG flag.*
-// Print only if DEBUG flag is true.  Always returns the the formatted string.             *
-//******************************************************************************************
+//**************************************************************************************************
+//                                          D B G P R I N T                                        *
+//**************************************************************************************************
+// Send a line of info to serial output.  Works like vsprintf(), but checks the DEBUG flag.        *
+// Print only if DEBUG flag is true.  Always returns the the formatted string.                     *
+//**************************************************************************************************
 char* dbgprint ( const char* format, ... )
 {
   static char sbuf[DEBUG_BUFFER_SIZE] ;                // For debug lines
@@ -1043,13 +1046,13 @@ char* dbgprint ( const char* format, ... )
 }
 
 
-//******************************************************************************************
-//                          S E L E C T N E X T S D F I L E                                *
-//******************************************************************************************
-// Select the next mp3 file from SD.  If the last selected song was random, the next song  *
-// is a random one.  Otherwise the next node is choosen.                                   *
-// If nodeID is "0" choose a random nodeID.                                                *
-//******************************************************************************************
+//**************************************************************************************************
+//                                  S E L E C T N E X T S D F I L E                                *
+//**************************************************************************************************
+// Select the next mp3 file from SD.  If the last selected song was random, the next song          *
+// is a random one.  Otherwise the next node is choosen.                                           *
+// If nodeID is "0" choose a random nodeID.                                                        *
+//**************************************************************************************************
 void selectnextSDfile()
 {
   uint16_t        inx, inx2 ;                           // Position in nodelist
@@ -1077,12 +1080,12 @@ void selectnextSDfile()
 }
 
 
-//******************************************************************************************
-//                              G E T S D F I L E N A M E                                  *
-//******************************************************************************************
-// Translate the NnodeID of a track to the full filename that can be used as a station.    *
-// If nodeID is "0" choose a random nodeID.                                                *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      G E T S D F I L E N A M E                                  *
+//**************************************************************************************************
+// Translate the NnodeID of a track to the full filename that can be used as a station.            *
+// If nodeID is "0" choose a random nodeID.                                                        *
+//**************************************************************************************************
 String getSDfilename ( String nodeID )
 {
   String          res ;                                 // Function result
@@ -1128,17 +1131,17 @@ String getSDfilename ( String nodeID )
 }
 
 
-//******************************************************************************************
-//                              L I S T S D T R A C K S                                    *
-//******************************************************************************************
-// Search all MP3 files on directory of SD card.  Return the number of files found.        *
-// A "node" of max. 4 levels ( the subdirectory level) will be generated for every file.   *
-// The numbers within the node-array is the sequence number of the file/directory in that  *
-// subdirectory.                                                                           *
-// A node ID is a string like "2,1,4,0", which means the 4th file in the first directory   *
-// of the second directory.                                                                *
-// The list will be send to the webinterface if parameter "send"is true.                   *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      L I S T S D T R A C K S                                    *
+//**************************************************************************************************
+// Search all MP3 files on directory of SD card.  Return the number of files found.                *
+// A "node" of max. 4 levels ( the subdirectory level) will be generated for every file.           *
+// The numbers within the node-array is the sequence number of the file/directory in that          *
+// subdirectory.                                                                                   *
+// A node ID is a string like "2,1,4,0", which means the 4th file in the first directory           *
+// of the second directory.                                                                        *
+// The list will be send to the webinterface if parameter "send"is true.                           *
+//**************************************************************************************************
 int listsdtracks ( const char * dirname, int level = 0, bool send = true )
 {
   const  uint16_t SD_MAXDEPTH = 4 ;                     // Maximum depts.  Note: see mp3play_html.
@@ -1224,6 +1227,7 @@ int listsdtracks ( const char * dirname, int level = 0, bool send = true )
         }
       }
     }
+    mp3loop() ;                                         // Keep playing
   }
   if ( fcount != oldfcount )                            // Files in this directory?
   {
@@ -1238,11 +1242,11 @@ int listsdtracks ( const char * dirname, int level = 0, bool send = true )
 }
 
 
-//******************************************************************************************
-//                             G E T E N C R Y P T I O N T Y P E                           *
-//******************************************************************************************
-// Read the encryption type of the network and return as a 4 byte name                     *
-//******************************************************************************************
+//**************************************************************************************************
+//                                     G E T E N C R Y P T I O N T Y P E                           *
+//**************************************************************************************************
+// Read the encryption type of the network and return as a 4 byte name                             *
+//**************************************************************************************************
 const char* getEncryptionType ( wifi_auth_mode_t thisType )
 {
   switch (thisType)
@@ -1264,13 +1268,13 @@ const char* getEncryptionType ( wifi_auth_mode_t thisType )
 }
 
 
-//******************************************************************************************
-//                                L I S T N E T W O R K S                                  *
-//******************************************************************************************
-// List the available networks and select the strongest.                                   *
-// Acceptable networks are those who have a "SSID.pw" file in the SPIFFS.                  *
-// SSIDs of available networks will be saved for use in webinterface.                      *
-//******************************************************************************************
+//**************************************************************************************************
+//                                        L I S T N E T W O R K S                                  *
+//**************************************************************************************************
+// List the available networks and select the strongest.                                           *
+// Acceptable networks are those who have a "SSID.pw" file in the SPIFFS.                          *
+// SSIDs of available networks will be saved for use in webinterface.                              *
+//**************************************************************************************************
 void listNetworks()
 {
   wifi_auth_mode_t encryption ;       // TKIP(WPA), WEP, etc.
@@ -1310,14 +1314,14 @@ void listNetworks()
 }
 
 
-//******************************************************************************************
-//                                  T I M E R 1 0 S E C                                    *
-//******************************************************************************************
-// Extra watchdog.  Called every 10 seconds.                                               *
-// If totalcount has not been changed, there is a problem and playing will stop.           *
-// Note that calling timely procedures within this routine or in called functions will     *
-// cause a crash!                                                                          *
-//******************************************************************************************
+//**************************************************************************************************
+//                                          T I M E R 1 0 S E C                                    *
+//**************************************************************************************************
+// Extra watchdog.  Called every 10 seconds.                                                       *
+// If totalcount has not been changed, there is a problem and playing will stop.                   *
+// Note that calling timely procedures within this routine or in called functions will             *
+// cause a crash!                                                                                  *
+//**************************************************************************************************
 void IRAM_ATTR timer10sec()
 {
   static uint32_t oldtotalcount = 7321 ;          // Needed foor change detection
@@ -1360,12 +1364,12 @@ void IRAM_ATTR timer10sec()
 }
 
 
-//******************************************************************************************
-//                                  T I M E R 1 0 0                                        *
-//******************************************************************************************
-// Called every 100 msec on interrupt level, so must be in IRAM and no lengthy operations  *
-// allowed.                                                                                *
-//******************************************************************************************
+//**************************************************************************************************
+//                                          T I M E R 1 0 0                                        *
+//**************************************************************************************************
+// Called every 100 msec on interrupt level, so must be in IRAM and no lengthy operations          *
+// allowed.                                                                                        *
+//**************************************************************************************************
 void IRAM_ATTR timer100()
 {
   static int     count10sec = 0 ;                 // Counter for activatie 10 seconds process
@@ -1378,14 +1382,14 @@ void IRAM_ATTR timer100()
 }
 
 
-//******************************************************************************************
-//                                  I S R _ I R                                            *
-//******************************************************************************************
-// Interrupts received from VS1838B on every change of the signal.                         *
-// Intervals are 640 or 1640 microseconds for data.  syncpulses are 3400 micros or longer. *
-// Input is complete after 65 level changes.                                               *
-// Only the last 32 level changes are significant and will be handed over to common data.  *
-//******************************************************************************************
+//**************************************************************************************************
+//                                          I S R _ I R                                            *
+//**************************************************************************************************
+// Interrupts received from VS1838B on every change of the signal.                                 *
+// Intervals are 640 or 1640 microseconds for data.  syncpulses are 3400 micros or longer.         *
+// Input is complete after 65 level changes.                                                       *
+// Only the last 32 level changes are significant and will be handed over to common data.          *
+//**************************************************************************************************
 void IRAM_ATTR isr_IR()
 {
   static uint32_t t0 = 0 ;                           // To get the interval
@@ -1430,11 +1434,11 @@ void IRAM_ATTR isr_IR()
 }
 
 
-//******************************************************************************************
-//                              D I S P L A Y V O L U M E                                  *
-//******************************************************************************************
-// Show the current volume as an indicator on the screen.                                  *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      D I S P L A Y V O L U M E                                  *
+//**************************************************************************************************
+// Show the current volume as an indicator on the screen.                                          *
+//**************************************************************************************************
 void displayvolume()
 {
 #if defined ( USETFT )
@@ -1451,11 +1455,11 @@ void displayvolume()
 }
 
 
-//******************************************************************************************
-//                              D I S P L A Y I N F O                                      *
-//******************************************************************************************
-// Show a string on the LCD at a specified y-position in a specified color                 *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      D I S P L A Y I N F O                                      *
+//**************************************************************************************************
+// Show a string on the LCD at a specified y-position in a specified color                         *
+//**************************************************************************************************
 void displayinfo ( const char* str, uint16_t pos, uint16_t height, uint16_t color )
 {
 #if defined ( USETFT )
@@ -1471,12 +1475,12 @@ void displayinfo ( const char* str, uint16_t pos, uint16_t height, uint16_t colo
 }
 
 
-//******************************************************************************************
-//                        S H O W S T R E A M T I T L E                                    *
-//******************************************************************************************
-// Show artist and songtitle if present in metadata.                                       *
-// Show always if full=true.                                                               *
-//******************************************************************************************
+//**************************************************************************************************
+//                                S H O W S T R E A M T I T L E                                    *
+//**************************************************************************************************
+// Show artist and songtitle if present in metadata.                                               *
+// Show always if full=true.                                                                       *
+//**************************************************************************************************
 void showstreamtitle ( const char *ml, bool full )
 {
   char*             p1 ;
@@ -1528,11 +1532,11 @@ void showstreamtitle ( const char *ml, bool full )
 }
 
 
-//******************************************************************************************
-//                            S T O P _ M P 3 C L I E N T                                  *
-//******************************************************************************************
-// Disconnect from the server.                                                             *
-//******************************************************************************************
+//**************************************************************************************************
+//                                    S T O P _ M P 3 C L I E N T                                  *
+//**************************************************************************************************
+// Disconnect from the server.                                                                     *
+//**************************************************************************************************
 void stop_mp3client ()
 {
   while ( mp3client.connected() )
@@ -1547,11 +1551,11 @@ void stop_mp3client ()
 }
 
 
-//******************************************************************************************
-//                            C O N N E C T T O H O S T                                    *
-//******************************************************************************************
-// Connect to the Internet radio server specified by newpreset.                            *
-//******************************************************************************************
+//**************************************************************************************************
+//                                    C O N N E C T T O H O S T                                    *
+//**************************************************************************************************
+// Connect to the Internet radio server specified by newpreset.                                    *
+//**************************************************************************************************
 bool connecttohost()
 {
   int         inx ;                                 // Position of ":" in hostname
@@ -1611,12 +1615,12 @@ bool connecttohost()
 }
 
 
-//******************************************************************************************
-//                               C O N N E C T T O F I L E                                 *
-//******************************************************************************************
-// Open the local mp3-file.                                                                *
-// Not yet implemented.                                                                    *
-//******************************************************************************************
+//**************************************************************************************************
+//                                       C O N N E C T T O F I L E                                 *
+//**************************************************************************************************
+// Open the local mp3-file.                                                                        *
+// Not yet implemented.                                                                            *
+//**************************************************************************************************
 bool connecttofile()
 {
   String path ;                                           // Full file spec
@@ -1641,14 +1645,14 @@ bool connecttofile()
 }
 
 
-//******************************************************************************************
-//                               C O N N E C T W I F I                                     *
-//******************************************************************************************
-// Connect to WiFi using the SSID's available in wifiMulti.                                *
-// If only one AP if found in preferences (i.e. wifi_00) the connection is made without    *
-// using wifiMulti.                                                                        *
-// If connection fails, an AP is created and the function returns false.                   *
-//******************************************************************************************
+//**************************************************************************************************
+//                                       C O N N E C T W I F I                                     *
+//**************************************************************************************************
+// Connect to WiFi using the SSID's available in wifiMulti.                                        *
+// If only one AP if found in preferences (i.e. wifi_00) the connection is made without            *
+// using wifiMulti.                                                                                *
+// If connection fails, an AP is created and the function returns false.                           *
+//**************************************************************************************************
 bool connectwifi()
 {
   char*  pfs ;                                          // Pointer to formatted string
@@ -1698,23 +1702,23 @@ bool connectwifi()
 }
 
 
-//******************************************************************************************
-//                                   O T A S T A R T                                       *
-//******************************************************************************************
-// Update via WiFi has been started by Arduino IDE.                                        *
-//******************************************************************************************
+//**************************************************************************************************
+//                                           O T A S T A R T                                       *
+//**************************************************************************************************
+// Update via WiFi has been started by Arduino IDE.                                                *
+//**************************************************************************************************
 void otastart()
 {
   dbgprint ( "OTA Started" ) ;
 }
 
 
-//******************************************************************************************
-//                          R E A D H O S T F R O M P R E F                                *
-//******************************************************************************************
-// Read the mp3 host from the preferences specified by the parameter.                      *
-// The host will be returned.                                                              *
-//******************************************************************************************
+//**************************************************************************************************
+//                                  R E A D H O S T F R O M P R E F                                *
+//**************************************************************************************************
+// Read the mp3 host from the preferences specified by the parameter.                              *
+// The host will be returned.                                                                      *
+//**************************************************************************************************
 String readhostfrompref ( int8_t preset )
 {
   char           tkey[12] ;                            // Key as an array of chars
@@ -1732,12 +1736,12 @@ String readhostfrompref ( int8_t preset )
 }
 
 
-//******************************************************************************************
-//                          R E A D H O S T F R O M P R E F                                *
-//******************************************************************************************
-// Search for the next mp3 host in preferences specified newpreset.                        *
-// The host will be returned.  newpreset will be updated                                   *
-//******************************************************************************************
+//**************************************************************************************************
+//                                  R E A D H O S T F R O M P R E F                                *
+//**************************************************************************************************
+// Search for the next mp3 host in preferences specified newpreset.                                *
+// The host will be returned.  newpreset will be updated                                           *
+//**************************************************************************************************
 String readhostfrompref()
 {
   String contents = "" ;                                // Result of search
@@ -1759,11 +1763,11 @@ String readhostfrompref()
 }
 
 
-//******************************************************************************************
-//                               R E A D P R O G B U T T O N S                             *
-//******************************************************************************************
-// Read the preferences for the programmable input pins.                                   *
-//******************************************************************************************
+//**************************************************************************************************
+//                                       R E A D P R O G B U T T O N S                             *
+//**************************************************************************************************
+// Read the preferences for the programmable input pins.                                           *
+//**************************************************************************************************
 String readprogbuttons()
 {
   char        mykey[20] ;                                   // For numerated key
@@ -1789,13 +1793,13 @@ String readprogbuttons()
 }
 
 
-//******************************************************************************************
-//                               R E A D P R E F                                           *
-//******************************************************************************************
-// Read the preferences and interpret the commands.                                        *
-// If output == true, the key / value pairs are returned to the caller as a String.        *
-// preset_xx and wifi_xx are included.                                                     *
-//******************************************************************************************
+//**************************************************************************************************
+//                                       R E A D P R E F                                           *
+//**************************************************************************************************
+// Read the preferences and interpret the commands.                                                *
+// If output == true, the key / value pairs are returned to the caller as a String.                *
+// preset_xx and wifi_xx are included.                                                             *
+//**************************************************************************************************
 String readprefs ( bool output )
 {
   char* keys[] = { "mqttbroker", "mqttport", "mqttprefix",  // List of all defined keys
@@ -1864,6 +1868,10 @@ String readprefs ( bool output )
                       "\n" ;
           }
         }
+        if ( ( j % 100 ) == 0 )                             // Long time spend in loop?
+        {
+          mp3loop() ;                                       // Yes, keep playing
+        }
       }
     }
     else                                                    // Key exists?
@@ -1902,11 +1910,11 @@ String readprefs ( bool output )
 }
 
 
-//******************************************************************************************
-//                            M Q T T R E C O N N E C T                                    *
-//******************************************************************************************
-// Reconnect to broker.                                                                    *
-//******************************************************************************************
+//**************************************************************************************************
+//                                    M Q T T R E C O N N E C T                                    *
+//**************************************************************************************************
+// Reconnect to broker.                                                                            *
+//**************************************************************************************************
 bool mqttreconnect()
 {
   static uint32_t retrytime = 0 ;                         // Limit reconnect interval
@@ -1940,7 +1948,11 @@ bool mqttreconnect()
     sprintf ( subtopic, "%s/%s",                          // Add prefix to subtopic
               ini_block.mqttprefix.c_str(),
               MQTT_SUBTOPIC ) ;
-    mqttclient.subscribe ( NAME "/" MQTT_SUBTOPIC ) ;     // Subscribe to MQTT
+    res = mqttclient.subscribe ( subtopic ) ;             // Subscribe to MQTT
+    if ( !res )
+    {
+      dbgprint ( "MQTT subscribe failed!" ) ;             // Failure
+    }
     mqttpub.trigger ( MQTT_IP ) ;                         // Publish own IP
   }
   else
@@ -1953,13 +1965,13 @@ bool mqttreconnect()
 }
 
 
-//******************************************************************************************
-//                            O N M Q T T M E S S A G E                                    *
-//******************************************************************************************
-// Executed when a subscribed message is received.                                         *
-// Note that message is not delimited by a '\0'.                                           *
-// Note that cmd buffer is shared with serial input.                                       *
-//******************************************************************************************
+//**************************************************************************************************
+//                                    O N M Q T T M E S S A G E                                    *
+//**************************************************************************************************
+// Executed when a subscribed message is received.                                                 *
+// Note that message is not delimited by a '\0'.                                                   *
+// Note that cmd buffer is shared with serial input.                                               *
+//**************************************************************************************************
 void onMqttMessage ( char* topic, byte* payload, unsigned int len )
 {
   const char*  reply ;                                // Result from analyzeCmd
@@ -1979,11 +1991,11 @@ void onMqttMessage ( char* topic, byte* payload, unsigned int len )
 }
 
 
-//******************************************************************************************
-//                             S C A N S E R I A L                                         *
-//******************************************************************************************
-// Listen to commands on the Serial inputline.                                             *
-//******************************************************************************************
+//**************************************************************************************************
+//                                     S C A N S E R I A L                                         *
+//**************************************************************************************************
+// Listen to commands on the Serial inputline.                                                     *
+//**************************************************************************************************
 void scanserial()
 {
   static String serialcmd ;                      // Command from Serial input
@@ -2018,11 +2030,11 @@ void scanserial()
 }
 
 
-//******************************************************************************************
-//                             S C A N D I G I T A L                                       *
-//******************************************************************************************
-// Scan digital inputs.                                                                    *
-//******************************************************************************************
+//**************************************************************************************************
+//                                     S C A N D I G I T A L                                       *
+//**************************************************************************************************
+// Scan digital inputs.                                                                            *
+//**************************************************************************************************
 void  scandigital()
 {
   static uint32_t oldmillis = 5000 ;                        // To compare with current time
@@ -2059,11 +2071,11 @@ void  scandigital()
 }
 
 
-//******************************************************************************************
-//                             S C A N I R                                                 *
-//******************************************************************************************
-// See if IR input is available.  Execute the programmed command.                          *
-//******************************************************************************************
+//**************************************************************************************************
+//                                     S C A N I R                                                 *
+//**************************************************************************************************
+// See if IR input is available.  Execute the programmed command.                                  *
+//**************************************************************************************************
 void scanIR()
 {
   char        mykey[20] ;                                   // For numerated key
@@ -2091,16 +2103,16 @@ void scanIR()
 }
 
 
-//******************************************************************************************
-//                                   M K _ L S A N                                         *
-//******************************************************************************************
-// Make al list of acceptable networks in preferences.                                     *
-// The result will be stored in anetworks like "|SSID1|SSID2|......|SSIDn|".               *
-// The number of acceptable networks will be stored in num_an.                             *
-// Not that the last pound SSID and password are kept in common data.  If only one SSID is *
-// defined, the connect is made without using wifiMulti.  In this case a connection will   *
-// be made even if de SSID is hidden.                                                      *
-//******************************************************************************************
+//**************************************************************************************************
+//                                           M K _ L S A N                                         *
+//**************************************************************************************************
+// Make al list of acceptable networks in preferences.                                             *
+// The result will be stored in anetworks like "|SSID1|SSID2|......|SSIDn|".                       *
+// The number of acceptable networks will be stored in num_an.                                     *
+// Not that the last pound SSID and password are kept in common data.  If only one SSID is         *
+// defined, the connect is made without using wifiMulti.  In this case a connection will           *
+// be made even if de SSID is hidden.                                                              *
+//**************************************************************************************************
 void  mk_lsan()
 {
   int         i ;                                        // Loop control
@@ -2134,45 +2146,69 @@ void  mk_lsan()
 }
 
 
-//******************************************************************************************
-//                             G E T P R E S E T S                                         *
-//******************************************************************************************
-// Make a list of all preset stations.                                                     *
-// The result will be stored in the String presetlist (global data).                       *
-//******************************************************************************************
-void getpresets()
+//**************************************************************************************************
+//                                     G E T S E T T I N G S                                       *
+//**************************************************************************************************
+// Send some settings to the webserver.                                                            *
+// Included are the presets, the current station, the volume and the tone settings.                *
+//**************************************************************************************************
+void getsettings()
 {
-  String              val ;                              // Result of readhostfrompref
+  String              val ;                              // Result to send
+  String              statstr ;                          // Station string
   int                 inx ;                              // Position of search char in line
   int                 i ;                                // Loop control, preset number
-  char                vnr[3] ;                           // 2 digit presetnumber as string
-
-  presetlist = String ( "" ) ;                           // No result yet
+  char                tkey[12] ;                         // Key for preset preference
+  char                pnr[3] ;                           // Preset as 2 character, i.e. "03"
+  
   for ( i = 0 ; i < 100 ; i++ )                          // Max 99 presets
   {
-    val = readhostfrompref ( i ) ;                       // Get next preset
-    if ( val.length() )                                  // Does it exists?
+    sprintf ( tkey, "preset_%02d", i ) ;                 // Preset plus number
+    if ( nvssearch ( tkey ) )                            // Does it exists?
     {
+      // Get the contents
+      statstr = nvsgetstr ( tkey ) ;                     // Get the station
       // Show just comment if available.  Otherwise the preset itself.
-      inx = val.indexOf ( "#" ) ;                        // Get position of "#"
+      inx = statstr.indexOf ( "#" ) ;                    // Get position of "#"
       if ( inx > 0 )                                     // Hash sign present?
       {
-        val.remove ( 0, inx + 1 ) ;                      // Yes, remove non-comment part
+        statstr.remove ( 0, inx + 1 ) ;                  // Yes, remove non-comment part
       }
-      chomp ( val ) ;                                    // Remove garbage from description
-      sprintf ( vnr, "%02d", i ) ;                       // Preset number
-      presetlist += ( String ( vnr ) + val +             // 2 digits plus description plus separator
-                      String ( "|" ) ) ;
+      chomp ( statstr ) ;                                // Remove garbage from description
+      val += String ( tkey ) +
+             String ( "=" ) +
+             statstr +
+             String ( "\n" ) ;                           // Add delimeter
+      if ( val.length() > 1000 )                         // Time to flush?
+      {
+        cmdclient.print ( val ) ;                        // Yes, send
+        val = "" ;                                       // Start new string
+      }
     }
   }
+  sprintf ( pnr, "%02d", ini_block.newpreset ) ;         // Current preset
+  val += String ( "preset=" ) +                          // Add preset setting
+         String ( pnr ) +
+         String ( "\nvolume=" ) +                        // Add volume setting
+         String ( String ( ini_block.reqvol ) ) +
+         String ( "\ntoneha=" ) +                        // Add tone setting HA
+         String ( ini_block.rtone[0] ) +
+         String ( "\ntonehf=" ) +                        // Add tone setting HF
+         String ( ini_block.rtone[1] ) +
+         String ( "\ntonela=" ) +                        // Add tone setting LA
+         String ( ini_block.rtone[2] ) +
+         String ( "\ntonelf=" ) +                        // Add tone setting LF
+         String ( ini_block.rtone[3] ) +
+         String ( "\n\n" ) ;                             // End of reply
+  cmdclient.print ( val ) ;                              // And send
 }
 
 
-//******************************************************************************************
-//                                   S E T U P                                             *
-//******************************************************************************************
-// Setup for the program.                                                                  *
-//******************************************************************************************
+//**************************************************************************************************
+//                                           S E T U P                                             *
+//**************************************************************************************************
+// Setup for the program.                                                                          *
+//**************************************************************************************************
 void setup()
 {
   int      itrpt ;                                       // Interrupt number for DREQ
@@ -2186,9 +2222,9 @@ void setup()
   Serial.begin ( 115200 ) ;                              // For debug
   Serial.println() ;
   // Version tests for some vital include files
-  if ( about_html_version < 170626 )   dbgprint ( wvn, "about" ) ;
-  if ( config_html_version < 170626 )  dbgprint ( wvn, "config" ) ;
-  if ( index_html_version < 170626 )   dbgprint ( wvn, "index" ) ;
+  if ( about_html_version   < 170626 ) dbgprint ( wvn, "about" ) ;
+  if ( config_html_version  < 170626 ) dbgprint ( wvn, "config" ) ;
+  if ( index_html_version   < 170703 ) dbgprint ( wvn, "index" ) ;
   if ( mp3play_html_version < 170626 ) dbgprint ( wvn, "mp3play" ) ;
   // Print some memory and sketch info
   dbgprint ( "Starting ESP32-radio Version %s...  Free memory %d",
@@ -2242,7 +2278,6 @@ void setup()
   delay ( 100 ) ;
   listNetworks() ;                                       // Search for WiFi networks
   readprefs ( false ) ;                                  // Read preferences
-  getpresets() ;                                         // Get the presets from preferences
   tcpip_adapter_set_hostname ( TCPIP_ADAPTER_IF_STA, NAME ) ;
   SPI.begin() ;                                          // Init VSPI bus with default pins
   vs1053player.begin() ;                                 // Initialize VS1053 player
@@ -2308,11 +2343,11 @@ void setup()
 }
 
 
-//******************************************************************************************
-//                                R I N B Y T                                              *
-//******************************************************************************************
-// Read next byte from http inputbuffer.  Buffered for speed reasons.                      *
-//******************************************************************************************
+//**************************************************************************************************
+//                                        R I N B Y T                                              *
+//**************************************************************************************************
+// Read next byte from http inputbuffer.  Buffered for speed reasons.                              *
+//**************************************************************************************************
 uint8_t rinbyt ( bool forcestart )
 {
   static uint8_t  buf[1024] ;                           // Inputbuffer
@@ -2331,7 +2366,7 @@ uint8_t rinbyt ( bool forcestart )
       {
         if ( ++trycount > 3 )                           // Not for a long time?
         {
-          dbgprint ( "HTTP input shorter than expected" ) ;
+          dbgprint ( "HTTP input shorter then expected" ) ;
           return '\n' ;                                 // Error! No input
         }
         delay ( 10 ) ;                                  // Give communication some time
@@ -2350,11 +2385,11 @@ uint8_t rinbyt ( bool forcestart )
 }
 
 
-//******************************************************************************************
-//                                W R I T E P R E F S                                      *
-//******************************************************************************************
-// Update the preferences.  Called from the web interface.                                 *
-//******************************************************************************************
+//**************************************************************************************************
+//                                        W R I T E P R E F S                                      *
+//**************************************************************************************************
+// Update the preferences.  Called from the web interface.                                         *
+//**************************************************************************************************
 void writeprefs()
 {
   int     inx ;                                           // Position in inputstr
@@ -2406,11 +2441,11 @@ void writeprefs()
 }
 
 
-//******************************************************************************************
-//                                H A N D L E H T T P R E P L Y                            *
-//******************************************************************************************
-// Handle the output after an http request.                                                *
-//******************************************************************************************
+//**************************************************************************************************
+//                                        H A N D L E H T T P R E P L Y                            *
+//**************************************************************************************************
+// Handle the output after an http request.                                                        *
+//**************************************************************************************************
 void handlehttpreply()
 {
   const char*   p ;                                         // Pointer to reply if command
@@ -2452,11 +2487,17 @@ void handlehttpreply()
           {
             writeprefs() ;                                  // Yes, handle it
           }
-          else if ( http_getcmd.startsWith ("mp3list") )    // Is is a "Get SD MP3 tracklist"
+          else if ( http_getcmd.startsWith ( "mp3list" ) )  // Is is a "Get SD MP3 tracklist"?
           {
-            cmdclient.print ( sndstr ) ;                    // Send header
-            n = listsdtracks ( "/" ) ;                      // Yes, handle it
+            cmdclient.print ( sndstr ) ;                    // Yes, send header
+            n = listsdtracks ( "/" ) ;                      // Handle it
             dbgprint ( "%d tracks found on SD card", n ) ;
+            return ;                                        // Do not send empty line
+          }
+          else if ( http_getcmd.startsWith ( "settings" ) ) // Is is a "Get settings" (like presets and tone)?
+          {
+            cmdclient.print ( sndstr ) ;                    // Yes, send header
+            getsettings() ;                                 // Handle settings request
             return ;                                        // Do not send empty line
           }
           else
@@ -2486,11 +2527,11 @@ void handlehttpreply()
 }
 
 
-//******************************************************************************************
-//                                H A N D L E H T T P                                      *
-//******************************************************************************************
-// Handle the input of an http request.                                                    *
-//******************************************************************************************
+//**************************************************************************************************
+//                                        H A N D L E H T T P                                      *
+//**************************************************************************************************
+// Handle the input of an http request.                                                            *
+//**************************************************************************************************
 void handlehttp()
 {
   bool        first = true ;                                 // First call to rinbyt()
@@ -2581,11 +2622,11 @@ void handlehttp()
 }
 
 
-//******************************************************************************************
-//                                  X M L _ C A L L B A C K                                *
-//******************************************************************************************
-// Process XML tags into variables.                                                        *
-//******************************************************************************************
+//**************************************************************************************************
+//                                          X M L _ C A L L B A C K                                *
+//**************************************************************************************************
+// Process XML tags into variables.                                                                *
+//**************************************************************************************************
 void XML_callback ( uint8_t statusflags, char* tagName, uint16_t tagNameLen,
                     char* data,  uint16_t dataLen )
 {
@@ -2618,11 +2659,11 @@ void XML_callback ( uint8_t statusflags, char* tagName, uint16_t tagNameLen,
 }
 
 
-//******************************************************************************************
-//                                  X M L P A R S E                                        *
-//******************************************************************************************
-// Parses streams from XML data.                                                           *
-//******************************************************************************************
+//**************************************************************************************************
+//                                          X M L P A R S E                                        *
+//**************************************************************************************************
+// Parses streams from XML data.                                                                   *
+//**************************************************************************************************
 String xmlparse ( String mount )
 {
   // Example URL for XML Data Stream:
@@ -2713,13 +2754,13 @@ String xmlparse ( String mount )
 }
 
 
-//******************************************************************************************
-//                              H A N D L E S A V E R E Q                                  *
-//******************************************************************************************
-// Handle save volume/preset/tone.  This will save current settings every 10 minutes to    *
-// the preferences.  On the next restart these values will be loaded.                      *
-// Note that saving prefences will only take place if contents has changed.                *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      H A N D L E S A V E R E Q                                  *
+//**************************************************************************************************
+// Handle save volume/preset/tone.  This will save current settings every 10 minutes to            *
+// the preferences.  On the next restart these values will be loaded.                              *
+// Note that saving prefences will only take place if contents has changed.                        *
+//**************************************************************************************************
 void handleSaveReq()
 {
   static uint32_t savetime = 0 ;                          // Limit save to once per 10 minutes
@@ -2738,11 +2779,11 @@ void handleSaveReq()
 }
 
 
-//******************************************************************************************
-//                              H A N D L E I P P U B                                      *
-//******************************************************************************************
-// Handle publish op IP to MQTT.  This will happen every 10 minutes.                       *
-//******************************************************************************************
+//**************************************************************************************************
+//                                      H A N D L E I P P U B                                      *
+//**************************************************************************************************
+// Handle publish op IP to MQTT.  This will happen every 10 minutes.                               *
+//**************************************************************************************************
 void handleIpPub()
 {
   static uint32_t pubtime = 300000 ;                       // Limit save to once per 10 minutes
@@ -2756,14 +2797,14 @@ void handleIpPub()
 }
 
 
-//******************************************************************************************
-//                                   M P 3 L O O P                                         *
-//******************************************************************************************
-// Called from the mail loop() for the mp3 functions.                                      *
-// A connection to an MP3 server is active and we are ready to receive data.               *
-// Normally there is about 2 to 4 kB available in the data stream.  This depends on the    *
-// sender.                                                                                 *
-//******************************************************************************************
+//**************************************************************************************************
+//                                           M P 3 L O O P                                         *
+//**************************************************************************************************
+// Called from the mail loop() for the mp3 functions.                                              *
+// A connection to an MP3 server is active and we are ready to receive data.                       *
+// Normally there is about 2 to 4 kB available in the data stream.  This depends on the            *
+// sender.                                                                                         *
+//**************************************************************************************************
 void mp3loop()
 {
   static uint8_t  tmpbuff[1024] ;                        // Input buffer for mp3 stream
@@ -2915,11 +2956,11 @@ void mp3loop()
 }
 
 
-//******************************************************************************************
-//                                   L O O P                                               *
-//******************************************************************************************
-// Main loop of the program.                                                               *
-//******************************************************************************************
+//**************************************************************************************************
+//                                           L O O P                                               *
+//**************************************************************************************************
+// Main loop of the program.                                                                       *
+//**************************************************************************************************
 void loop()
 {
   mp3loop() ;                                               // Do mp3 related actions
@@ -2971,12 +3012,12 @@ void loop()
 }
 
 
-//******************************************************************************************
-//                            C H K H D R L I N E                                          *
-//******************************************************************************************
-// Check if a line in the header is a reasonable headerline.                               *
-// Normally it should contain something like "icy-xxxx:abcdef".                            *
-//******************************************************************************************
+//**************************************************************************************************
+//                                    C H K H D R L I N E                                          *
+//**************************************************************************************************
+// Check if a line in the header is a reasonable headerline.                                       *
+// Normally it should contain something like "icy-xxxx:abcdef".                                    *
+//**************************************************************************************************
 bool chkhdrline ( const char* str )
 {
   char    b ;                                         // Byte examined
@@ -3004,12 +3045,12 @@ bool chkhdrline ( const char* str )
 }
 
 
-//******************************************************************************************
-//                           H A N D L E B Y T E _ C H                                     *
-//******************************************************************************************
-// Handle the next byte of data from server.                                               *
-// Chunked transfer encoding aware. Chunk extensions are not supported.                    *
-//******************************************************************************************
+//**************************************************************************************************
+//                                   H A N D L E B Y T E _ C H                                     *
+//**************************************************************************************************
+// Handle the next byte of data from server.                                                       *
+// Chunked transfer encoding aware. Chunk extensions are not supported.                            *
+//**************************************************************************************************
 void handlebyte_ch ( uint8_t b, bool force )
 {
   static int  chunksize = 0 ;                         // Chunkcount read from stream
@@ -3052,14 +3093,14 @@ void handlebyte_ch ( uint8_t b, bool force )
 }
 
 
-//******************************************************************************************
-//                           H A N D L E B Y T E                                           *
-//******************************************************************************************
-// Handle the next byte of data from server.                                               *
-// This byte will be send to the VS1053 most of the time.                                  *
-// Note that the buffer the data chunk must start at an address that is a muttiple of 4.   *
-// Set force to true if chunkbuffer must be flushed.                                       *
-//******************************************************************************************
+//**************************************************************************************************
+//                                   H A N D L E B Y T E                                           *
+//**************************************************************************************************
+// Handle the next byte of data from server.                                                       *
+// This byte will be send to the VS1053 most of the time.                                          *
+// Note that the buffer the data chunk must start at an address that is a muttiple of 4.           *
+// Set force to true if chunkbuffer must be flushed.                                               *
+//**************************************************************************************************
 void handlebyte ( uint8_t b, bool force )
 {
   static uint16_t  playlistcnt ;                       // Counter to find right entry in playlist
@@ -3333,11 +3374,11 @@ void handlebyte ( uint8_t b, bool force )
 }
 
 
-//******************************************************************************************
-//                             G E T C O N T E N T T Y P E                                 *
-//******************************************************************************************
-// Returns the contenttype of a file to send.                                              *
-//******************************************************************************************
+//**************************************************************************************************
+//                                     G E T C O N T E N T T Y P E                                 *
+//**************************************************************************************************
+// Returns the contenttype of a file to send.                                                      *
+//**************************************************************************************************
 String getContentType ( String filename )
 {
   if      ( filename.endsWith ( ".html" ) ) return "text/html" ;
@@ -3354,11 +3395,11 @@ String getContentType ( String filename )
 }
 
 
-//******************************************************************************************
-//                                H A N D L E F S F                                        *
-//******************************************************************************************
-// Handling of requesting pages from the PROGMEM. Example: favicon.ico                     *
-//******************************************************************************************
+//**************************************************************************************************
+//                                        H A N D L E F S F                                        *
+//**************************************************************************************************
+// Handling of requesting pages from the PROGMEM. Example: favicon.ico                             *
+//**************************************************************************************************
 void handleFSf ( const String& pagename )
 {
   String                 ct ;                           // Content type
@@ -3447,12 +3488,12 @@ void handleFSf ( const String& pagename )
 }
 
 
-//******************************************************************************************
-//                             A N A L Y Z E C M D                                         *
-//******************************************************************************************
-// Handling of the various commands from remote webclient, Serial or MQTT.                 *
-// Version for handling string with: <parameter>=<value>                                   *
-//******************************************************************************************
+//**************************************************************************************************
+//                                     A N A L Y Z E C M D                                         *
+//**************************************************************************************************
+// Handling of the various commands from remote webclient, Serial or MQTT.                         *
+// Version for handling string with: <parameter>=<value>                                           *
+//**************************************************************************************************
 const char* analyzeCmd ( const char* str )
 {
   char*        value ;                           // Points to value after equalsign in command
@@ -3473,15 +3514,15 @@ const char* analyzeCmd ( const char* str )
 }
 
 
-//******************************************************************************************
-//                                 C H O M P                                               *
-//******************************************************************************************
-// Do some filtering on de inputstring:                                                    *
-//  - String comment part (starting with "#").                                             *
-//  - Strip trailing CR.                                                                   *
-//  - Strip leading spaces.                                                                *
-//  - Strip trailing spaces.                                                               *
-//******************************************************************************************
+//**************************************************************************************************
+//                                         C H O M P                                               *
+//**************************************************************************************************
+// Do some filtering on de inputstring:                                                            *
+//  - String comment part (starting with "#").                                                     *
+//  - Strip trailing CR.                                                                           *
+//  - Strip leading spaces.                                                                        *
+//  - Strip trailing spaces.                                                                       *
+//**************************************************************************************************
 void chomp ( String &str )
 {
   int   inx ;                                         // Index in de input string
@@ -3494,41 +3535,42 @@ void chomp ( String &str )
 }
 
 
-//******************************************************************************************
-//                             A N A L Y Z E C M D                                         *
-//******************************************************************************************
-// Handling of the various commands from remote webclient, serial or MQTT.                 *
-// par holds the parametername and val holds the value.                                    *
-// "wifi_00" and "preset_00" may appear more than once, like wifi_01, wifi_02, etc.        *
-// Examples with available parameters:                                                     *
-//   preset     = 12                        // Select start preset to connect to           *
-//   preset_00  = <mp3 stream>              // Specify station for a preset 00-99 *)       *
-//   volume     = 95                        // Percentage between 0 and 100                *
-//   upvolume   = 2                         // Add percentage to current volume            *
-//   downvolume = 2                         // Subtract percentage from current volume     *
-//   toneha     = <0..15>                   // Setting treble gain                         *
-//   tonehf     = <0..15>                   // Setting treble frequency                    *
-//   tonela     = <0..15>                   // Setting bass gain                           *
-//   tonelf     = <0..15>                   // Setting treble frequency                    *
-//   station    = <mp3 stream>              // Select new station (will not be saved)      *
-//   station    = <URL>.mp3                 // Play standalone .mp3 file (not saved)       *
-//   station    = <URL>.m3u                 // Select playlist (will not be saved)         *
-//   stop                                   // Stop playing                                *
-//   resume                                 // Resume playing                              *
-//   mute                                   // Mute/unmute the music (toggle)              *
-//   wifi_00    = mySSID/mypassword         // Set WiFi SSID and password *)               *
-//   mqttbroker = mybroker.com              // Set MQTT broker to use *)                   *
-//   mqttprefix = XP93g                     // Set MQTT broker to use                      *
-//   mqttport   = 1883                      // Set MQTT port to use, default 1883 *)       *
-//   mqttuser   = myuser                    // Set MQTT user for authentication *)         *
-//   mqttpasswd = mypassword                // Set MQTT password for authentication *)     *
-//   mp3track   = <nodeID>                  // Play track from SD card, nodeID 0 = random  *
-//   status                                 // Show current URL to play                    *
-//   test                                   // For test purposes                           *
-//   debug      = 0 or 1                    // Switch debugging on or off                  *
-//   reset                                  // Restart the ESP32                           *
-//  Commands marked with "*)" are sensible in ini-file only                                *
-//******************************************************************************************
+//**************************************************************************************************
+//                                     A N A L Y Z E C M D                                         *
+//**************************************************************************************************
+// Handling of the various commands from remote webclient, serial or MQTT.                         *
+// par holds the parametername and val holds the value.                                            *
+// "wifi_00" and "preset_00" may appear more than once, like wifi_01, wifi_02, etc.                *
+// Examples with available parameters:                                                             *
+//   preset     = 12                        // Select start preset to connect to                   *
+//   preset_00  = <mp3 stream>              // Specify station for a preset 00-99 *)               *
+//   volume     = 95                        // Percentage between 0 and 100                        *
+//   upvolume   = 2                         // Add percentage to current volume                    *
+//   downvolume = 2                         // Subtract percentage from current volume             *
+//   toneha     = <0..15>                   // Setting treble gain                                 *
+//   tonehf     = <0..15>                   // Setting treble frequency                            *
+//   tonela     = <0..15>                   // Setting bass gain                                   *
+//   tonelf     = <0..15>                   // Setting treble frequency                            *
+//   station    = <mp3 stream>              // Select new station (will not be saved)              *
+//   station    = <URL>.mp3                 // Play standalone .mp3 file (not saved)               *
+//   station    = <URL>.m3u                 // Select playlist (will not be saved)                 *
+//   stop                                   // Stop playing                                        *
+//   resume                                 // Resume playing                                      *
+//   mute                                   // Mute/unmute the music (toggle)                      *
+//   wifi_00    = mySSID/mypassword         // Set WiFi SSID and password *)                       *
+//   mqttbroker = mybroker.com              // Set MQTT broker to use *)                           *
+//   mqttprefix = XP93g                     // Set MQTT broker to use                              *
+//   mqttport   = 1883                      // Set MQTT port to use, default 1883 *)               *
+//   mqttuser   = myuser                    // Set MQTT user for authentication *)                 *
+//   mqttpasswd = mypassword                // Set MQTT password for authentication *)             *
+//   mp3track   = <nodeID>                  // Play track from SD card, nodeID 0 = random          *
+//   settings                               // Returns setting like presets and tone               *
+//   status                                 // Show current URL to play                            *
+//   test                                   // For test purposes                                   *
+//   debug      = 0 or 1                    // Switch debugging on or off                          *
+//   reset                                  // Restart the ESP32                                   *
+//  Commands marked with "*)" are sensible in ini-file only                                        *
+//**************************************************************************************************
 const char* analyzeCmd ( const char* par, const char* val )
 {
   String             argument ;                       // Argument as string
@@ -3731,10 +3773,6 @@ const char* analyzeCmd ( const char* par, const char* val )
   {
     sprintf ( reply, networks.c_str() ) ;             // Reply is SSIDs
   }
-  else if ( argument.startsWith ( "list" ) )          // List all presets?
-  {
-    return presetlist.c_str() ;                       // Send preset list as reply
-  }
   else
   {
     sprintf ( reply, "%s called with illegal parameter: %s",
@@ -3744,11 +3782,11 @@ const char* analyzeCmd ( const char* par, const char* val )
 }
 
 
-//******************************************************************************************
-//                             H T T P H E A D E R                                         *
-//******************************************************************************************
-// Set http headers to a string.                                                           *
-//******************************************************************************************
+//**************************************************************************************************
+//                                     H T T P H E A D E R                                         *
+//**************************************************************************************************
+// Set http headers to a string.                                                                   *
+//**************************************************************************************************
 String httpheader ( String contentstype )
 {
   return String ( "HTTP/1.1 200 OK\nContent-type:" ) +

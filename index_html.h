@@ -1,6 +1,6 @@
 // index.html file in raw data format for PROGMEM
 //
-#define index_html_version 170626
+#define index_html_version 170703
 const char index_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
@@ -33,9 +33,9 @@ const char index_html[] PROGMEM = R"=====(
    <table style="width:500px">
     <tr>
      <td colspan="2"><center>
-       <label for="selpres"><big>Preset:</big></label>
+       <label for="preset"><big>Preset:</big></label>
        <br>
-       <select class="select selectw" onChange="handlepreset(this)" id="selpres">
+       <select class="select selectw" onChange="handlepreset(this)" id="preset">
         <option value="-1">Select a preset here</option>
        </select>
        <br><br>
@@ -45,7 +45,7 @@ const char index_html[] PROGMEM = R"=====(
      <td><center>
       <label for="HA"><big>Treble Gain:</big></label>
       <br>
-      <select class="select" onChange="handletone(this)" id="HA">
+      <select class="select" onChange="handletone(this)" id="toneha">
        <option value="8">-12 dB</option>
        <option value="9">-10.5 dB</option>
        <option value="10">-9 dB</option>
@@ -68,7 +68,7 @@ const char index_html[] PROGMEM = R"=====(
      <td><center>
       <label for="HF"><big>Treble Freq:</big></label>
       <br>
-      <select class="select" onChange="handletone(this)" id="HF">
+      <select class="select" onChange="handletone(this)" id="tonehf">
         <option value="1">1 kHz</option>
         <option value="2">2 kHz</option>
         <option value="3">3 kHz</option>
@@ -93,7 +93,7 @@ const char index_html[] PROGMEM = R"=====(
      <td><center>
       <label for="LA"><big>Bass Gain:</big></label>
       <br>
-      <select class="select" onChange="handletone(this)" id="LA">
+      <select class="select" onChange="handletone(this)" id="tonela">
        <option value="0" selected>Off</option>
        <option value="1">+1 dB</option>
        <option value="2">+2 dB</option>
@@ -116,7 +116,7 @@ const char index_html[] PROGMEM = R"=====(
      <td><center>
       <label for="LF"><big>Bass Freq:</big></label>
       <br>
-      <select class="select" onChange="handletone(this)" id="LF">
+      <select class="select" onChange="handletone(this)" id="tonelf">
        <option value="2">10 Hz</option>
        <option value="3">20 Hz</option>
        <option value="4">30 Hz</option>
@@ -163,15 +163,12 @@ const char index_html[] PROGMEM = R"=====(
 
    function handlepreset ( presctrl )
    {
-    if ( presctrl.value >= 0 )
-    {
-      httpGet ( "preset=" + presctrl.value ) ;
-    }
+     httpGet ( "preset=" + presctrl.value ) ;
    }
 
    function handletone ( tonectrl )
    {
-     var theUrl = "/?tone" + tonectrl.id + "=" + tonectrl.value +
+     var theUrl = "/?" + tonectrl.id + "=" + tonectrl.value +
                   "&version=" + Math.random() ;
      var xhr = new XMLHttpRequest() ;
      xhr.onreadystatechange = function() {
@@ -197,22 +194,42 @@ const char index_html[] PROGMEM = R"=====(
      xhr.open ( "GET", theUrl, false ) ;
      xhr.send() ;
    }
+
+   function selectItemByValue(elmnt, value)
+   {
+     var sel = document.getElementById(elmnt) ;
+     for(var i=0; i < sel.options.length; i++)
+     {
+       if(sel.options[i].value == value)
+         sel.selectedIndex = i;
+     }
+   }
+   
    // Fill preset list initially
    //
-   var i, select, opt, stations ;
-   select = document.getElementById("selpres") ;
-   var theUrl = "/?list" + "&version=" + Math.random() ;
+   var i, sel, opt, lines, parts ;
+   var theUrl = "/?settings" + "&version=" + Math.random() ;
    var xhr = new XMLHttpRequest() ;
    xhr.onreadystatechange = function() {
      if ( xhr.readyState == XMLHttpRequest.DONE )
      {
-       stations = xhr.responseText.split ( "|" ) ;
-       for ( i = 0 ; i < ( stations.length - 1 ) ; i++ )
+       lines = xhr.responseText.split ( "\n" ) ;
+       for ( i = 0 ; i < ( lines.length-1 ) ; i++ )
        {
-         opt = document.createElement( "OPTION" ) ;
-         opt.value = stations[i].substring ( 0, 2 ) ;
-         opt.text = stations[i].substring ( 2 ) ;
-         select.add( opt ) ;
+         sel = document.getElementById ( "preset" ) ;
+         parts = lines[i].split ( "=" ) ;
+         if ( parts[0].indexOf ( "preset_" ) == 0 )
+         {
+           opt = document.createElement ( "OPTION" ) ;
+           opt.value = parts[0].substring ( 7 ) ;
+           opt.text = parts[1] ;
+           sel.add( opt ) ;
+         }
+         if ( ( parts[0].indexOf ( "tone" ) == 0 ) ||
+              ( parts[0] == "preset" ) )
+         {
+           selectItemByValue ( parts[0], parts[1] ) ;
+         }
        }
      }
    }
