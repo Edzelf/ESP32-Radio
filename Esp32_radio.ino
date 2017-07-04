@@ -80,11 +80,11 @@
 // 28-06-2017, ES: Added IR interface.
 // 30-06-2017, ES: Improved functions for SD card play.
 // 03-07-2017, ES: Webinterface control page shows current settings.
-// 04-07-2017, ES: Correction MQTT subscription. Keep playing during long oprerations.
+// 04-07-2017, ES: Correction MQTT subscription. Keep playing during long operations.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 4 Jul 2017 08:50:00 GMT"
+#define VERSION "Tue, 4 Jul 2017 12:50:00 GMT"
 
 // TFT.  Define USETFT if required.
 #define USETFT
@@ -151,7 +151,7 @@
 #define MQTT_SUBTOPIC     "command"           // Command to receive from MQTT
 //
 //**************************************************************************************************
-// Forward declaration of various functions                                                        *
+// Forward declaration of various functions.                                                       *
 //**************************************************************************************************
 void        displayinfo ( const char* str, uint16_t pos, uint16_t height, uint16_t color ) ;
 void        showstreamtitle ( const char* ml, bool full = false ) ;
@@ -164,6 +164,7 @@ const char* analyzeCmd ( const char* str ) ;
 const char* analyzeCmd ( const char* par, const char* val ) ;
 void        chomp ( String &str ) ;
 String      httpheader ( String contentstype ) ;
+
 
 //
 //**************************************************************************************************
@@ -294,6 +295,21 @@ progpin_struct   progpin[] =                               // Input pins with pr
   { -1, false,  "",          false, false }                // End of list
 } ;
 
+//**************************************************************************************************
+// Pages, CSS and data for the webinterface.                                                       *
+//**************************************************************************************************
+#include "about_html.h"
+#include "config_html.h"
+#include "index_html.h"
+#include "mp3play_html.h"
+#include "radio_css.h"
+#include "favicon_ico.h"
+#include "defaultprefs.h"
+
+//**************************************************************************************************
+// End of global data section.                                                                     *
+//**************************************************************************************************
+
 
 //**************************************************************************************************
 //                                     M Q T T P U B _ C L A S S                                   *
@@ -305,8 +321,8 @@ class mqttpubc                                             // For MQTT publishin
 {
     struct mqttpub_struct
     {
-      const char*    topic ;                                 // Topic as partial string (without prefix)
-      String*        payload ;                               // Payload for this topic
+      const char*    topic ;                               // Topic as partial string (without prefix)
+      String*        payload ;                             // Payload for this topic
       bool           topictrigger ;
     } ;
     // Publication topics for MQTT.  The topic will be pefixed by "PREFIX/", where PREFIX is replaced
@@ -314,15 +330,15 @@ class mqttpubc                                             // For MQTT publishin
   protected:
     mqttpub_struct amqttpub[5] =                           // Definitions of various MQTT topic to publish
     { // Index is equal to enum above
-      { "ip",              &ipaddress,      false },     // Definition for MQTT_IP
-      { "icy/name",        &icyname,        false },     // Definition for MQTT_ICYNAME
-      { "icy/streamtitle", &icystreamtitle, false },     // Definition for MQTT_STREAMTITLE
-      { "nowplaying",      &ipaddress,      false },     // Definition for MQTT_NOWPLAYING (not active)
-      { NULL,              NULL,            false }      // End of definitions
+      { "ip",              &ipaddress,      false },       // Definition for MQTT_IP
+      { "icy/name",        &icyname,        false },       // Definition for MQTT_ICYNAME
+      { "icy/streamtitle", &icystreamtitle, false },       // Definition for MQTT_STREAMTITLE
+      { "nowplaying",      &ipaddress,      false },       // Definition for MQTT_NOWPLAYING (not active)
+      { NULL,              NULL,            false }        // End of definitions
     } ;
   public:
-    void          trigger ( uint8_t item ) ;                // Trigger publishig for one item
-    void          publishtopic() ;                          // Publish triggerer items
+    void          trigger ( uint8_t item ) ;               // Trigger publishig for one item
+    void          publishtopic() ;                         // Publish triggerer items
 } ;
 
 //**************************************************************************************************
@@ -356,7 +372,7 @@ void mqttpubc::publishtopic()
     {
       amqttpub[i].topictrigger = false ;                      // Success or not: clear trigger
       sprintf ( topic, "%s/%s", ini_block.mqttprefix.c_str(),
-                amqttpub[i].topic ) ;                 // Add prefix to topic
+                amqttpub[i].topic ) ;                         // Add prefix to topic
       payload = (*amqttpub[i].payload).c_str() ;              // Get payload
       dbgprint ( "Publish to topic %s : %s",                  // Show for debug
                  topic, payload ) ;
@@ -370,22 +386,9 @@ void mqttpubc::publishtopic()
   }
 }
 
-mqttpubc mqttpub ;                                            // Instance for mqttpubc
+mqttpubc         mqttpub ;                                    // Instance for mqttpubc
 
-//**************************************************************************************************
-// End of global data section.                                                                     *
-//**************************************************************************************************
 
-//**************************************************************************************************
-// Pages, CSS and data for the webinterface.                                                       *
-//**************************************************************************************************
-#include "about_html.h"
-#include "config_html.h"
-#include "index_html.h"
-#include "mp3play_html.h"
-#include "radio_css.h"
-#include "favicon_ico.h"
-#include "defaultprefs.h"
 //
 //**************************************************************************************************
 // VS1053 stuff.  Based on maniacbug library.                                                      *
@@ -969,7 +972,7 @@ byte utf8ascii ( byte ascii )
         break ;
       case 0x82: if ( ascii == 0xAC )
         {
-          res = 'E' ;       // Special case Euro-symbol
+          res = 'E' ;                 // Special case Euro-symbol
         }
     }
     c1 = ascii ;                      // Remember actual character
@@ -1227,7 +1230,10 @@ int listsdtracks ( const char * dirname, int level = 0, bool send = true )
         }
       }
     }
-    mp3loop() ;                                         // Keep playing
+    if ( send )
+    {
+      mp3loop() ;                                       // Keep playing
+    }
   }
   if ( fcount != oldfcount )                            // Files in this directory?
   {
@@ -2334,7 +2340,7 @@ void setup()
     }
     else
     {
-      dbgprint ( "Locate mp3 files on SD, may take a while.." ) ;
+      dbgprint ( "Locate mp3 files on SD, may take a while..." ) ;
       SD_nodecount = listsdtracks ( "/", 0, false ) ;    // Build nodelist
       dbgprint ( "Finished, %d tracks found", SD_nodecount ) ;
     }
