@@ -37,4 +37,5 @@ Last changes:
 - 26-may-2017: Allow connection from single hidden AP.
 - 23-may-2017: First release, derived from ESP8266 version.
 
-
+Issue:
+The SD-card is pretty unreliable.  See https://github.com/espressif/arduino-esp32/issues/272
