@@ -1,5 +1,5 @@
 //***************************************************************************************************
-//*  Esp32_radio -- Webradio receiver for ESP32, 1.8 color display and VS1053 MP3 module.           *
+//*  ESP32_Radio -- Webradio receiver for ESP32, 1.8 color display and VS1053 MP3 module.           *
 //*                 By Ed Smallenburg.                                                              *
 //***************************************************************************************************
 // ESP32 libraries used:
@@ -81,10 +81,11 @@
 // 30-06-2017, ES: Improved functions for SD card play.
 // 03-07-2017, ES: Webinterface control page shows current settings.
 // 04-07-2017, ES: Correction MQTT subscription. Keep playing during long operations.
+// 08-07-2017, ES: More space for streamtitle on TFT.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 4 Jul 2017 12:50:00 GMT"
+#define VERSION "Sat, 8 Jul 2017 13:25:00 GMT"
 
 // TFT.  Define USETFT if required.
 #define USETFT
@@ -1534,7 +1535,7 @@ void showstreamtitle ( const char *ml, bool full )
     }
     strcpy ( p1, p2 ) ;                         // Shift 2nd part of title 2 or 3 places
   }
-  displayinfo ( streamtitle, 20, 40, CYAN ) ;   // Show title at position 20
+  displayinfo ( streamtitle, 20, 70, CYAN ) ;   // Show title at position 20-89
 }
 
 
@@ -1601,7 +1602,6 @@ bool connecttohost()
   }
   pfs = dbgprint ( "Connect to %s on port %d, extension %s",
                    hostwoext.c_str(), port, extension.c_str() ) ;
-  displayinfo ( pfs, 60, 66, YELLOW ) ;             // Show info at position 60..125
   if ( mp3client.connect ( hostwoext.c_str(), port ) )
   {
     dbgprint ( "Connected to server" ) ;
@@ -1644,7 +1644,7 @@ bool connecttofile()
   showstreamtitle ( p, true ) ;                           // Show the filename as title
   mqttpub.trigger ( MQTT_STREAMTITLE ) ;                  // Request publishing to MQTT
   displayinfo ( "Playing from local file",
-                60, 68, YELLOW ) ;                        // Show Source at position 60
+                90, 38, YELLOW ) ;                        // Show Source at position 90-127
   icyname = "" ;                                          // No icy name yet
   chunked = false ;                                       // File not chunked
   return true ;
@@ -1702,7 +1702,7 @@ bool connectwifi()
     pfs = dbgprint ( "IP = %s", ipaddress.c_str() ) ;   // String to dispay on TFT
   }
 #if defined ( USETFT )
-  displayinfo ( pfs, 60, 68, YELLOW ) ;                 // Show info at position 60
+  displayinfo ( pfs, 90, 68, YELLOW ) ;                 // Show info at position 90-127
 #endif
   return ( localAP == false ) ;                         // Return result of connection
 }
@@ -2235,10 +2235,30 @@ void setup()
   // Print some memory and sketch info
   dbgprint ( "Starting ESP32-radio Version %s...  Free memory %d",
              VERSION,
-             ESP.getFreeHeap() ) ;
+             ESP.getFreeHeap() ) ;                       // Normally about 199 kB
+  pinMode ( VS1053_CS, OUTPUT ) ;                        // Be sure to deselect VS1053
+  digitalWrite ( VS1053_CS, HIGH ) ;
 #if defined ( SDCARDCS )
   pinMode ( SDCARDCS, OUTPUT ) ;                         // Deselect SDCARD
   digitalWrite ( SDCARDCS, HIGH ) ;
+  if ( !SD.begin ( SDCARDCS ) )                          // Try to init SD card driver
+  {
+    dbgprint ( "SD Card Mount Failed!" ) ;               // No success, check formatting (FAT)
+  }
+  else
+  {
+    SDokay = ( SD.cardType() != CARD_NONE ) ;            // See if known card
+    if ( !SDokay )
+    {
+      dbgprint ( "No SD card attached" ) ;               // Card not readable
+    }
+    else
+    {
+      dbgprint ( "Locate mp3 files on SD, may take a while..." ) ;
+      SD_nodecount = listsdtracks ( "/", 0, false ) ;    // Build nodelist
+      dbgprint ( "Finished, %d tracks found", SD_nodecount ) ;
+    }
+  }
 #endif
   pinMode ( IR_PIN, INPUT ) ;                            // Pin for IR receiver VS1838B
   attachInterrupt ( IR_PIN, isr_IR, CHANGE ) ;           // Interrupts will be handle by isr_IR
@@ -2326,26 +2346,6 @@ void setup()
   timerAlarmWrite ( timer, 100000, true ) ;              // Alarm every 100 msec
   timerAlarmEnable ( timer ) ;                           // Enable the timer
   delay ( 1000 ) ;                                       // Show IP for a while
-#if defined ( SDCARDCS )
-  if ( !SD.begin ( SDCARDCS ) )                          // Try to init SD card driver
-  {
-    dbgprint ( "SD Card Mount Failed!" ) ;               // No success, check formatting (FAT)
-  }
-  else
-  {
-    SDokay = ( SD.cardType() != CARD_NONE ) ;            // See if known card
-    if ( !SDokay )
-    {
-      dbgprint ( "No SD card attached" ) ;               // Card not readable
-    }
-    else
-    {
-      dbgprint ( "Locate mp3 files on SD, may take a while..." ) ;
-      SD_nodecount = listsdtracks ( "/", 0, false ) ;    // Build nodelist
-      dbgprint ( "Finished, %d tracks found", SD_nodecount ) ;
-    }
-  }
-#endif
 }
 
 
@@ -3206,8 +3206,8 @@ void handlebyte ( uint8_t b, bool force )
         {
           icyname = metaline.substring(9) ;            // Get station name
           icyname.trim() ;                             // Remove leading and trailing spaces
-          displayinfo ( icyname.c_str(), 60, 68,
-                        YELLOW ) ;                     // Show station name at position 60
+          displayinfo ( icyname.c_str(), 90, 68,
+                        YELLOW ) ;                     // Show station name at position 90-127
           mqttpub.trigger ( MQTT_ICYNAME ) ;           // Request publishing to MQTT
         }
         else if ( lcml.startsWith ( "transfer-encoding:" ) )
