@@ -41,6 +41,11 @@ preset_09 = 94.23.66.155:8106                        #  9 - *ILR CHILL and GROOV
 preset_10 = ihr/IHR_IEDM                             # 10 - iHeartRadio IHR_IEDM
 preset_11 = ihr/IHR_TRAN                             # 11 - iHeartRadio IHR_TRAN
 #
+# Clock offset and daylight saving time
+clk_server = pool.ntp.org                            # Time server to be used
+clk_offset = 1                                       # Offset with respect to UTC in hours
+clk_dst = 1                                          # Offset during daylight saving time (hours)
+
 # Some IR codes
 ir_40BF = upvolume = 2
 ir_C03F = downvolume = 2

@@ -82,10 +82,11 @@
 // 03-07-2017, ES: Webinterface control page shows current settings.
 // 04-07-2017, ES: Correction MQTT subscription. Keep playing during long operations.
 // 08-07-2017, ES: More space for streamtitle on TFT.
+// 18-07-2017, ES: Time Of Day on TFT.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Sat, 8 Jul 2017 13:25:00 GMT"
+#define VERSION "Tue, 18 Jul 2017 10:25:00 GMT"
 
 // TFT.  Define USETFT if required.
 #define USETFT
@@ -104,6 +105,7 @@
 #include "SD.h"
 #include <ArduinoOTA.h>
 #include <TinyXML.h>
+#include "time.h"
 
 // Color definitions for the TFT screen (if used)
 #define	BLACK   0x0000
@@ -154,6 +156,7 @@
 //**************************************************************************************************
 // Forward declaration of various functions.                                                       *
 //**************************************************************************************************
+void        displaytime ( const char* str, uint16_t color, bool force = false ) ;
 void        displayinfo ( const char* str, uint16_t pos, uint16_t height, uint16_t color ) ;
 void        showstreamtitle ( const char* ml, bool full = false ) ;
 void        handlebyte ( uint8_t b, bool force = false ) ;
@@ -186,6 +189,9 @@ struct ini_struct
   uint8_t        reqvol ;                                  // Requested volume
   uint8_t        rtone[4] ;                                // Requested bass/treble settings
   int8_t         newpreset ;                               // Requested preset
+  String         clk_server ;                              // Server to be used for time of day clock
+  int8_t         clk_offset ;                              // Offset in hours with respect to UTC
+  int8_t         clk_dst ;                                 // Number of hours shift during DST
 } ;
 
 struct progpin_struct                                      // For programmable input pins
@@ -255,6 +261,9 @@ bool             http_reponse_flag = false ;               // Response required
 String           lssid, lpw ;                              // Last read SSID and password from wifi_xx
 bool             SDokay = false ;                          // True if SD card in place and readable
 uint16_t         ir_value = 0 ;                            // IR code
+struct tm        timeinfo ;                                // Will be filled by NTP server
+bool             time_req = false ;                        // Set time requested
+
 // XML parse globals.
 TinyXML     xml ;                                          // For XML parser
 const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
@@ -1051,6 +1060,50 @@ char* dbgprint ( const char* format, ... )
 
 
 //**************************************************************************************************
+//                                         G E T T I M E                                           *
+//**************************************************************************************************
+// Retrieve the local time from NTP server and convert to string.                                  *
+// Will be called every second.                                                                    *
+//**************************************************************************************************
+void gettime()
+{
+#if defined ( USETFT )
+  static int16_t delaycount = 0 ;                         // To reduce number of NTP requests
+  char            timetxt[9] ;                            // Coverted timeinfo
+  
+  if ( timeinfo.tm_year )                                 // Legal time found?
+  {
+    sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
+                       timeinfo.tm_hour,
+                       timeinfo.tm_min,
+                       timeinfo.tm_sec ) ;
+    displaytime ( timetxt, WHITE ) ;                      // Write to TFT screen
+  }
+  if ( --delaycount <= 0 )                                // Sync every 1 hour
+  {
+    delaycount = 3600 ;                                   // Reset counter
+    if ( timeinfo.tm_year )                               // Legal time found?
+    {
+      dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
+    }
+    if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
+    {
+        dbgprint ( "Failed to obtain time!" ) ;           // Error
+        timeinfo.tm_year = 0 ;                            // Set current time to illegal
+        return;
+    }
+    //timeinfo.tm_sec++ ;                                 // Compensate for network overhead
+    sprintf ( timetxt, "%02d:%02d:%02d",                  // Format new time to a string
+                       timeinfo.tm_hour,
+                       timeinfo.tm_min,
+                       timeinfo.tm_sec ) ;
+    dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
+  }
+#endif
+}
+
+
+//**************************************************************************************************
 //                                  S E L E C T N E X T S D F I L E                                *
 //**************************************************************************************************
 // Select the next mp3 file from SD.  If the last selected song was random, the next song          *
@@ -1386,6 +1439,22 @@ void IRAM_ATTR timer100()
     timer10sec() ;                                // Yes, do 10 second procedure
     count10sec = 0 ;                              // Reset count
   }
+  if ( ( count10sec % 10 ) == 0 )                 // One second over?
+  {
+    if ( ++timeinfo.tm_sec >= 60 )                // Yes, update number of seconds
+    {
+      timeinfo.tm_sec = 0 ;                       // Wrap after 60 seconds
+      if ( ++timeinfo.tm_min >= 60 )
+      {
+        timeinfo.tm_min = 0 ;                     // Wrap after 60 minutes
+        if ( ++timeinfo.tm_hour >= 24 ) 
+        {
+          timeinfo.tm_hour = 0 ;                  // Wrap after 24 hours
+        }
+      }
+    }
+    time_req = true ;                             // Yes, show current time request
+  }
 }
 
 
@@ -1449,15 +1518,48 @@ void IRAM_ATTR isr_IR()
 void displayvolume()
 {
 #if defined ( USETFT )
-  static uint8_t oldvol = 0 ;                        // Previous volume
-  uint8_t        pos ;                               // Positon of volume indicator
+  static uint8_t oldvol = 0 ;                         // Previous volume
+  uint8_t        newvol ;                             // Current setting
+  uint8_t pos ;                                       // Positon of volume indicator
 
-  if ( vs1053player.getVolume() != oldvol )
+  newvol = vs1053player.getVolume() ;                 // Get current volume setting
+  if ( newvol != oldvol )                             // Volume changed?
   {
-    pos = map ( vs1053player.getVolume(), 0, 100, 0, 160 ) ;
+    oldvol = newvol ;                                 // Remember for next compare
+    pos = map ( newvol, 0, 100, 0, 160 ) ;            // Compute position on TFT
+    tft.fillRect ( 0, 126, pos, 2, RED ) ;            // Paint red part
+    tft.fillRect ( pos, 126, 160 - pos, 2, GREEN ) ;  // Paint green part
   }
-  tft.fillRect ( 0, 126, pos, 2, RED ) ;             // Paint red part
-  tft.fillRect ( pos, 126, 160 - pos, 2, GREEN ) ;   // Paint green part
+#endif
+}
+
+
+//**************************************************************************************************
+//                                      D I S P L A Y T I M E                                      *
+//**************************************************************************************************
+// Show the time on the LCD at a fixed position in a specified color                               *
+// To prevent flickering, only the changed part of the timestring is displayed.                    *
+// A character on the screen is 8 pixels high and 6 pixels wide.                                   *
+//**************************************************************************************************
+void displaytime ( const char* str, uint16_t color, bool force )
+{
+#if defined ( USETFT )
+  static char oldstr[9] = "........" ;           // For compare
+  uint8_t     i ;                                // Index in strings
+  uint8_t     pos = 108 ;                        // X-position of character
+
+  tft.setTextColor ( color ) ;                   // Set the requested color
+  for ( i = 0 ; i < 8 ; i++ )                    // Compare old and new 
+  {
+    if ( ( str[i] != oldstr[i] ) || force )      // Difference?
+    {
+      tft.fillRect ( pos, 0, 6, 8, BLACK ) ;     // Clear the space for new character
+      tft.setCursor ( pos, 0 ) ;                 // Prepare to show the info
+      tft.print ( str[i] ) ;                     // Show the character
+      oldstr[i] = str[i] ;                       // Remember for next compare
+    }
+    pos += 6 ;                                   // Next position
+  }
 #endif
 }
 
@@ -1573,7 +1675,8 @@ bool connecttohost()
 
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
-  displayinfo ( "   ** Internet radio **", 0, 20, WHITE ) ;
+  displayinfo ( "ESP32-Radio", 0, 20, WHITE ) ;
+  displaytime ( "        ", WHITE, true ) ;         // Clear time on TFT screen
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
   if ( host.endsWith ( ".m3u" ) )                   // Is it an m3u playlist?
@@ -1632,7 +1735,8 @@ bool connecttofile()
   String path ;                                           // Full file spec
   char*  p ;                                              // Pointer to filename
 
-  displayinfo ( "   **** MP3 Player ****", 0, 20, WHITE ) ;
+  displayinfo ( "ESP32 MP3 Player", 0, 20, WHITE ) ;
+  displaytime ( "        ", WHITE, true ) ;               // Clear time on TFT screen
   path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
   mp3file = SD.open ( path ) ;                            // Open the file
   if ( !mp3file )
@@ -1822,6 +1926,10 @@ String readprefs ( bool output )
                    "preset_xx",
                    "#",                                     // Spacing in output
                    "gpio_xx",
+                   "#",                                     // Spacing in output
+                   "clk_server",
+                   "clk_offset",
+                   "clk_dst",
                    "#",                                     // Spacing in output
                    "ir_xx",
                    NULL                                     // Einde keys
@@ -2297,6 +2405,9 @@ void setup()
   memset ( &ini_block, 0, sizeof(ini_block) ) ;          // Init ini_block
   ini_block.mqttport = 1883 ;                            // Default port for MQTT
   ini_block.mqttprefix = "" ;                            // No prefix for MQTT topics seen yet
+  ini_block.clk_server = "pool.ntp.org" ;                // Default server for NTP
+  ini_block.clk_offset = 1 ;                             // Default Amsterdam time zone
+  ini_block.clk_dst = 1 ;                                // DST is +1 hour
   mk_lsan() ;                                            // Make al list of acceptable networks in preferences.
   WiFi.mode ( WIFI_STA ) ;                               // This ESP is a station
   //WiFi.persistent ( false ) ;                          // Do not save SSID and password
@@ -2346,6 +2457,10 @@ void setup()
   timerAlarmWrite ( timer, 100000, true ) ;              // Alarm every 100 msec
   timerAlarmEnable ( timer ) ;                           // Enable the timer
   delay ( 1000 ) ;                                       // Show IP for a while
+  configTime ( -ini_block.clk_offset * 3600,
+                ini_block.clk_dst * 3600,
+                ini_block.clk_server.c_str() ) ;         // GMT offset, daylight offset in seconds
+  timeinfo.tm_year = 0 ;                                 // Set TOD to illegal 
 }
 
 
@@ -3015,6 +3130,11 @@ void loop()
   }
   handleSaveReq() ;                                         // See if time to save settings
   handleIpPub() ;                                           // See if time to publish IP
+  if ( time_req )                                           // Time has changed?
+  {
+    gettime() ;                                             // Show time on TFT (if any)
+    time_req = false ;
+  }
 }
 
 
@@ -3569,13 +3689,16 @@ void chomp ( String &str )
 //   mqttport   = 1883                      // Set MQTT port to use, default 1883 *)               *
 //   mqttuser   = myuser                    // Set MQTT user for authentication *)                 *
 //   mqttpasswd = mypassword                // Set MQTT password for authentication *)             *
+//   clk_server = pool.ntp.org              // Time server to be used *)                           *
+//   clk_offset = <-11..+14>                // Offset with respect to UTC in hours *)              *
+//   clk_dst = <1..2>                       // Offset during daylight saving time in hours *)      *
 //   mp3track   = <nodeID>                  // Play track from SD card, nodeID 0 = random          *
 //   settings                               // Returns setting like presets and tone               *
 //   status                                 // Show current URL to play                            *
 //   test                                   // For test purposes                                   *
 //   debug      = 0 or 1                    // Switch debugging on or off                          *
 //   reset                                  // Restart the ESP32                                   *
-//  Commands marked with "*)" are sensible in ini-file only                                        *
+//  Commands marked with "*)" are sensible during initialization only                              *
 //**************************************************************************************************
 const char* analyzeCmd ( const char* par, const char* val )
 {
@@ -3778,6 +3901,21 @@ const char* analyzeCmd ( const char* par, const char* val )
   else if ( argument == "getnetworks" )               // List all WiFi networks?
   {
     sprintf ( reply, networks.c_str() ) ;             // Reply is SSIDs
+  }
+  else if ( argument.startsWith ( "clk_" ) )          // TOD parameter?
+  {
+    if ( argument.indexOf ( "server" ) > 0 )          // Yes, NTP server spec?
+    {
+      ini_block.clk_server = value ;                  // Yes, set server
+    }
+    if ( argument.indexOf ( "offset" ) > 0 )          // Offset with respect to UTC spec?
+    {
+      ini_block.clk_offset = ivalue ;                 // Yes, set offset
+    }
+    if ( argument.indexOf ( "dst" ) > 0 )             // Offset duringe DST spec?
+    {
+      ini_block.clk_dst = ivalue ;                    // Yes, set DST offset
+    }
   }
   else
   {
