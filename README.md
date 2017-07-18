@@ -24,10 +24,12 @@ Features:
 -	Saves volume, bass, treble and preset station over restart.
 - Configuration also possible if no WiFi connection can be established.
 - Can play iHeartRadio stations.
+- Displays time of day on TFT.
 
 See documentation in doc/pdf-file.
 
 Last changes:
+- 18-jul-2017: Show time of day on TFT.
 - 04-jul-2017: Correction MQTT subscription, keep playing during long oprerations.
 - 03-jul-2017: Webinterface control page shows current settings.
 - 30-jun-2017: Improved MP3 player.
@@ -36,6 +38,3 @@ Last changes:
 - 26-may-2017: Correction Upper/Lower Case compare.
 - 26-may-2017: Allow connection from single hidden AP.
 - 23-may-2017: First release, derived from ESP8266 version.
-
-Issue:
-The SD-card is pretty unreliable.  See https://github.com/espressif/arduino-esp32/issues/272
