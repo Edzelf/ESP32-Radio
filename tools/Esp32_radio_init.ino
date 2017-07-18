@@ -36,8 +36,8 @@ void setup()
   preferences.putString ( "mqttpasswd",   "none" ) |
   preferences.putString ( "mqtttpreset",  "none" ) |
   //
-  preferences.putString ( "wifi_00", "NETGEAR-11/xxxxx" ) |
-  preferences.putString ( "wifi_01", "ADSL-11/yyyyyy" ) |
+  preferences.putString ( "wifi_00", "NETGEAR-11/DEADC0DE11" ) |
+  preferences.putString ( "wifi_01", "ADSL-11/DEADC0DE11" ) |
   //
   preferences.putString ( "volume", "72" ) |
   preferences.putString ( "toneha", "0" ) |
@@ -58,6 +58,10 @@ void setup()
   preferences.putString ( "preset_09", "94.23.66.155:8106                        #  9 - *ILR CHILL and GROOVE" ) ;
   preferences.putString ( "preset_10", "ihr/IHR_IEDM                             # 10 - iHeartRadio IHR_IEDM" ) ;
   preferences.putString ( "preset_11", "ihr/IHR_TRAN                             # 11 - iHeartRadio IHR_TRAN" ) ;
+  //
+  preferences.putString ( "clk_server", "pool.ntp.org" ) ;        // Setting for Time Of Day clock on TFT
+  preferences.putString ( "clk_offset", "1" ) ;
+  preferences.putString ( "clk_dst",    "1" ) ;
   preferences.end() ;
   delay ( 1000 ) ;
 }
@@ -68,7 +72,7 @@ void setup()
 //******************************************************************************************
 void loop()
 {
-  Serial.println ( "ESP32_radio_init completed...") ;
+  Serial.println ( "ESP32_radio_init completed..." ) ;
   delay ( 10000 ) ;
 }
 
