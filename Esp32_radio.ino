@@ -83,10 +83,11 @@
 // 04-07-2017, ES: Correction MQTT subscription. Keep playing during long operations.
 // 08-07-2017, ES: More space for streamtitle on TFT.
 // 18-07-2017, ES: Time Of Day on TFT.
+// 19-07-2017, ES: Minor corrections.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 18 Jul 2017 10:25:00 GMT"
+#define VERSION "Wed, 19 Jul 2017 07:05:00 GMT"
 
 // TFT.  Define USETFT if required.
 #define USETFT
@@ -102,10 +103,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <FS.h>
-#include "SD.h"
+#include <SD.h>
 #include <ArduinoOTA.h>
 #include <TinyXML.h>
-#include "time.h"
+#include <time.h>
 
 // Color definitions for the TFT screen (if used)
 #define	BLACK   0x0000
@@ -1748,7 +1749,7 @@ bool connecttofile()
   showstreamtitle ( p, true ) ;                           // Show the filename as title
   mqttpub.trigger ( MQTT_STREAMTITLE ) ;                  // Request publishing to MQTT
   displayinfo ( "Playing from local file",
-                90, 38, YELLOW ) ;                        // Show Source at position 90-127
+                90, 36, YELLOW ) ;                        // Show Source at position 90-126
   icyname = "" ;                                          // No icy name yet
   chunked = false ;                                       // File not chunked
   return true ;
@@ -1806,7 +1807,7 @@ bool connectwifi()
     pfs = dbgprint ( "IP = %s", ipaddress.c_str() ) ;   // String to dispay on TFT
   }
 #if defined ( USETFT )
-  displayinfo ( pfs, 90, 68, YELLOW ) ;                 // Show info at position 90-127
+  displayinfo ( pfs, 90, 36, YELLOW ) ;                 // Show info at position 90-126
 #endif
   return ( localAP == false ) ;                         // Return result of connection
 }
@@ -2994,7 +2995,7 @@ void mp3loop()
     metaint = 0 ;                                        // No metaint known now
     datamode = STOPPED ;                                 // Yes, state becomes STOPPED
 #if defined ( USETFT )
-    tft.fillRect ( 0, 0, 160, 128, BLACK ) ;             // Clear screen does not work when rotated
+    tft.fillRect ( 0, 8, 160, 118, BLACK ) ;             // Clear most of the screen
 #endif
     delay ( 500 ) ;
   }
@@ -3103,7 +3104,6 @@ void loop()
   {
     vs1053player.setVolume ( ini_block.reqvol ) ;           // Unmute
   }
-  displayvolume() ;                                         // Show volume on display
   scanserial() ;                                            // Handle serial input
   scandigital() ;                                           // Scan digital inputs
   scanIR() ;                                                // See if IR input
@@ -3134,6 +3134,7 @@ void loop()
   {
     gettime() ;                                             // Show time on TFT (if any)
     time_req = false ;
+    displayvolume() ;                                       // Show volume on display
   }
 }
 
@@ -3326,8 +3327,8 @@ void handlebyte ( uint8_t b, bool force )
         {
           icyname = metaline.substring(9) ;            // Get station name
           icyname.trim() ;                             // Remove leading and trailing spaces
-          displayinfo ( icyname.c_str(), 90, 68,
-                        YELLOW ) ;                     // Show station name at position 90-127
+          displayinfo ( icyname.c_str(), 90, 36,
+                        YELLOW ) ;                     // Show station name at position 90-126
           mqttpub.trigger ( MQTT_ICYNAME ) ;           // Request publishing to MQTT
         }
         else if ( lcml.startsWith ( "transfer-encoding:" ) )
