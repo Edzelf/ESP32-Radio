@@ -29,6 +29,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 19-jul-2017: Minor corrections.
 - 18-jul-2017: Show time of day on TFT.
 - 04-jul-2017: Correction MQTT subscription, keep playing during long oprerations.
 - 03-jul-2017: Webinterface control page shows current settings.
