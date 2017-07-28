@@ -1,5 +1,7 @@
 # ESP32-Radio
 Internet radio based on ESP32, VS1053 and a TFT screen.  Will compile in Arduino IDE.
+The 28-jul-2017 is a major update.  You MUST include the GPIO pin assignments in the preferences.
+See the documentation and/or the defaultsettings in the config page of the webinterface.
 
 Features:
 -	Can connect to thousands of Internet radio stations that broadcast MP3 or Ogg audio streams.
