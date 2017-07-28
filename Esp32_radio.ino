@@ -3,15 +3,11 @@
 //*                 By Ed Smallenburg.                                                              *
 //***************************************************************************************************
 // ESP32 libraries used:
-//  - WiFi
 //  - WiFiMulti
 //  - nvs
-//  - SPI
-//  - Adafruit_GFX
-//  - TFT_ILI9163C
+//  - TFT_ILI9163C Sumotoy Version 0.9
 //  - ArduinoOTA
 //  - PubSubClient
-//  - TinyXML
 //  - SD
 //  - FS
 // A library for the VS1053 (for ESP32) is not available (or not easy to find).  Therefore
@@ -41,27 +37,32 @@
 // file has been changed to reflect this particular module.  TFT_ILI9163C.cpp has been
 // changed to use the full screenwidth if rotated to mode "3".  Now there is room for 26
 // characters per line and 16 lines.  Software will work without installing the display.
+// The SD card interface of the module may be used to play mp3-tracks on the SD card.
 //
 // For configuration of the WiFi network(s): see the global data section further on.
 //
-// The VSPI interface is used for VS1053 and TFT.
+// The VSPI interface is used for VS1053, TFT and SD.
 //
-// Wiring, note that Featherbord has other connections:
+// Wiring. Note that this is just an example.  Pins (except 18,19 and 23 of the SPI interface)
+// can be configured in the config page of the webinterface.
 // ESP32dev Signal  Wired to LCD        Wired to VS1053      SDCARD   Wired to the rest
 // -------- ------  --------------      -------------------  ------   ---------------
-// GPIO16           -                   pin 1 XDCS                    -
-// GPIO5            -                   pin 2 XCS                     -
-// GPIO4            -                   pin 4 DREQ                    -
-// GPIO2            pin 3 D/C           -                             -
+// GPIO16           -                   pin 1 XDCS            -       -
+// GPIO5            -                   pin 2 XCS             -        -
+// GPIO4            -                   pin 4 DREQ            -       -
+// GPIO2            pin 3 D/C           -                     -       -
 // GPIO18   SCLK    pin 5 CLK           pin 5 SCK             CLK     -
 // GPIO19   MISO    -                   pin 7 MISO            MISO    -
 // GPIO23   MOSI    pin 4 DIN           pin 6 MOSI            MOSI    -
 // GPIO21           -                   -                     CS      -
-// GPIO15           pin 2 CS            -                             -
-// GPI03    RXD0    -                   -                             Reserved serial input
-// GPIO1    TXD0    -                   -                             Reserved serial output
-// GPIO34   -       -                   -                             Optional pull-up resistor
-// GPIO35   -       -                   -                             Infrared receiver VS1838B
+// GPIO15           pin 2 CS            -                     -       -
+// GPI03    RXD0    -                   -                     -       Reserved serial input
+// GPIO1    TXD0    -                   -                     -       Reserved serial output
+// GPIO34   -       -                   -                     -       Optional pull-up resistor
+// GPIO35   -       -                   -                     -       Infrared receiver VS1838B
+// GPIO25   -       -                   -                     -       Rotary encoder CLK
+// GPIO26   -       -                   -                     -       Rotary encoder DT
+// GPIO27   -       -                   -                     -       Rotary encoder SW
 // -------  ------  ---------------     -------------------  ------   ----------------
 // GND      -       pin 8 GND           pin 8 GND                     Power supply GND
 // VCC 5 V  -       pin 7 BL            -                             Power supply
@@ -84,28 +85,22 @@
 // 08-07-2017, ES: More space for streamtitle on TFT.
 // 18-07-2017, ES: Time Of Day on TFT.
 // 19-07-2017, ES: Minor corrections.
+// 26-07-2017, ES: Flexible pin assignment. Add rotary encoder switch.
+// 27-07-2017, ES: Removed tinyXML library.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 19 Jul 2017 07:05:00 GMT"
+#define VERSION "Fri, 28 Jul 2017 12:05:00 GMT"
 
-// TFT.  Define USETFT if required.
-#define USETFT
-#include <WiFi.h>
 #include <nvs.h>
 #include <PubSubClient.h>
 #include <WiFiMulti.h>
-#include <SPI.h>
-#if defined ( USETFT )
-#include <Adafruit_GFX.h>
 #include <TFT_ILI9163C.h>
-#endif
 #include <stdio.h>
 #include <string.h>
 #include <FS.h>
 #include <SD.h>
 #include <ArduinoOTA.h>
-#include <TinyXML.h>
 #include <time.h>
 
 // Color definitions for the TFT screen (if used)
@@ -123,18 +118,11 @@
 #define VS1053_CS     32
 #define VS1053_DCS    33
 #define VS1053_DREQ   15
-#define SDCARDCS      14
 #else
 #define VS1053_CS     5
 #define VS1053_DCS    16
 #define VS1053_DREQ   4
-#define SDCARDCS      21
 #endif
-// Pins CS and DC for TFT module (if used, see definition of "USETFT")
-#define TFT_CS 15
-#define TFT_DC 2
-// Pin for IR receiver
-#define IR_PIN 35
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
 // Use a multiple of 1024 for optimal handling of bufferspace.  See definition of tmpbuff.
 #define RINGBFSIZ 20480
@@ -193,15 +181,16 @@ struct ini_struct
   String         clk_server ;                              // Server to be used for time of day clock
   int8_t         clk_offset ;                              // Offset in hours with respect to UTC
   int8_t         clk_dst ;                                 // Number of hours shift during DST
-} ;
-
-struct progpin_struct                                      // For programmable input pins
-{
-  int8_t         gpio ;                                    // Pin number
-  bool           avail ;                                   // Pin is available for a command
-  String         command ;                                 // Command to execute when activated
-  bool           cur ;                                     // Current state
-  bool           changed ;                                 // Change of state seen
+  int8_t         ir_pin ;                                  // GPIO connected to output of IR decoder
+  int8_t         enc_clk_pin ;                             // GPIO connected to CLK of rotary encoder
+  int8_t         enc_dt_pin ;                              // GPIO connected to DT of rotary encoder
+  int8_t         enc_sw_pin ;                              // GPIO connected to SW of rotary encoder
+  int8_t         tft_cs_pin ;                              // GPIO connected to CS of TFT screen
+  int8_t         tft_dc_pin ;                              // GPIO connected to D/C of TFT screen
+  int8_t         sd_cs_pin ;                               // GPIO connected to CS of SD card
+  int8_t         vs_cs_pin ;                               // GPIO connected to CS of VS1053
+  int8_t         vs_dcs_pin ;                              // GPIO connected to CS of VS1053
+  int8_t         vs_dreq_pin ;                             // GPIO connected to CS of VS1053
 } ;
 
 enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,          // State for datastream
@@ -221,9 +210,7 @@ WiFiClient       wmqttclient ;                             // An instance for mq
 PubSubClient     mqttclient ( wmqttclient ) ;              // Client for MQTT subscriber
 hw_timer_t*      timer = NULL ;                            // For timer
 char             cmd[130] ;                                // Command from MQTT or Serial
-#if defined ( USETFT )
-TFT_ILI9163C     tft = TFT_ILI9163C ( TFT_CS, TFT_DC ) ;
-#endif
+TFT_ILI9163C*    tft = NULL ;                              // For instance of TFT driver
 uint32_t         totalcount = 0 ;                          // Counter mp3 data
 datamode_t       datamode ;                                // State of datastream
 int              metacount ;                               // Number of bytes in metadata
@@ -260,50 +247,77 @@ String           http_getcmd ;                             // Contents of last G
 String           http_rqfile ;                             // Requested file
 bool             http_reponse_flag = false ;               // Response required
 String           lssid, lpw ;                              // Last read SSID and password from wifi_xx
-bool             SDokay = false ;                          // True if SD card in place and readable
 uint16_t         ir_value = 0 ;                            // IR code
 struct tm        timeinfo ;                                // Will be filled by NTP server
 bool             time_req = false ;                        // Set time requested
-
-// XML parse globals.
-TinyXML     xml ;                                          // For XML parser
-const char* xmlhost = "playerservices.streamtheworld.com" ;// XML data source
-const char* xmlget =  "GET /api/livestream"                // XML get parameters
-                      "?version=1.5"                       // API Version of IHeartRadio
-                      "&mount=%sAAC"                       // MountPoint with Station Callsign
-                      "&lang=en" ;                         // Language
-int         xmlport = 80 ;                                 // XML Port
-bool        xmlreq = false ;                               // Request for XML parse.
-uint8_t     xmlbuffer[150] ;                               // For XML decoding
-String      xmlOpen ;                                      // Opening XML tag
-String      xmlTag ;                                       // Current XML tag
-String      xmlData ;                                      // Data inside tag
-String      stationServer ;                                // Radio stream server
-String      stationPort ;                                  // Radio stream port
-String      stationMount ;                                 // Radio stream Callsign
-String      SD_nodelist ;                                  // Nodes of mp3-files on SD
-int         SD_nodecount = 0 ;                             // Number of nodes in SD_nodelist
-String      SD_currentnode ;                               // Node ID of song currently playing ("0" if random)
+bool             SD_okay = false ;                         // True if SD card in place and readable
+String           SD_nodelist ;                             // Nodes of mp3-files on SD
+int              SD_nodecount = 0 ;                        // Number of nodes in SD_nodelist
+String           SD_currentnode = "" ;                     // Node ID of song currently playing ("0" if random)
 // nvs stuff
-esp_err_t   nvserr ;                                       // Error code from nvs functions
-uint32_t    nvshandle = 0 ;                                // Handle for nvs access
-
+esp_err_t        nvserr ;                                  // Error code from nvs functions
+uint32_t         nvshandle = 0 ;                           // Handle for nvs access
+// Rotary encoder stuff
+uint16_t         clickcount = 0 ;                          // Incremented per encoder click, reset by timer
+int16_t          rotationcount = 0 ;                       // Current position of rotary switch
+uint16_t         enc_inactivity = false ;                  // Time inactive
+bool             singleclick = false ;                     // True if single click detected
+bool             doubleclick = false ;                     // True if double click detected
+bool             tripleclick = false ;                     // True if triple click detected
+bool             longclick = false ;                       // True if longclick detected
+enum enc_menu_t { VOLUME, PRESET, TRACK } ;                // State for rotary encoder menu
+enc_menu_t       enc_menu_mode = VOLUME ;                  // Default is VOLUME mode
 //
-progpin_struct   progpin[] =                               // Input pins with programmed function
+struct progpin_struct                                      // For programmable input pins
 {
-  {  0, true,  "uppreset=1", false, false },               // Example.  Can be re-programmed.
-  { 12, false,  "",          false, false },
-  { 13, false,  "",          false, false },
-  { 14, false,  "",          false, false },
-  { 17, false,  "",          false, false },
-  { 22, false,  "",          false, false },
-  { 25, false,  "",          false, false },
-  { 26, false,  "",          false, false },
-  { 27, false,  "",          false, false },
-  { 32, false,  "",          false, false },
-  { 33, false,  "",          false, false },
-  { 34, false,  "",          false, false },               // Note, no pull-up
-  { -1, false,  "",          false, false }                // End of list
+  int8_t         gpio ;                                    // Pin number
+  bool           reserved ;                                // Reserved for connected devices
+  bool           avail ;                                   // Pin is available for a command
+  String         command ;                                 // Command to execute when activated
+                                                           // Example: "uppreset=1"
+  bool           cur ;                                     // Current state, true = HIGH, false = LOW
+  bool           changed ;                                 // Change of state seen
+} ;
+
+progpin_struct   progpin[] =                               // Input pins and programmed function
+{
+  {  0, true,  true,   "", false, false },
+//{  1, true,  false,  "", false, false },                 // Reserved for TX Serial output
+  {  2, false, false,  "", false, false },
+//{  3, true,  false,  "", false, false },                 // Reserved for RX Serial input
+  {  4, false, false,  "", false, false },
+  {  5, false, false,  "", false, false },
+//{  6, true,  false,  "", false, false },                 // Reserved for FLASH SCK
+//{  7, true,  false,  "", false, false },                 // Reserved for FLASH D0
+//{  8, true,  false,  "", false, false },                 // Reserved for FLASH D1
+//{  9, true,  false,  "", false, false },                 // Reserved for FLASH D2
+//{ 10, true,  false,  "", false, false },                 // Reserved for FLASH D3
+//{ 11, true,  false,  "", false, false },                 // Reserved for FLASH CMD
+  { 12, false, false,  "", false, false },
+  { 13, false, false,  "", false, false },
+  { 14, false, false,  "", false, false },
+  { 15, false, false,  "", false, false },
+  { 16, false, false,  "", false, false },
+  { 17, false, false,  "", false, false },
+//{ 18, true,  false,  "", false, false },                 // Reserved for SPI CLK
+//{ 19, true,  false,  "", false, false },                 // Reserved for SPI MISO
+//{ 20, true,  false,  "", false, false },                 // Not exposed on DEV board
+  { 21, false, false,  "", false, false },                 // Also Wire SDA
+  { 22, false, false,  "", false, false },                 // Also Wire SCL
+//{ 23, true,  false,  "", false, false },                 // Reserved for SPI MOSI
+//{ 24, true,  false,  "", false, false },                 // Not exposed on DEV board
+  { 25, false, false,  "", false, false },
+  { 26, false, false,  "", false, false },
+  { 27, false, false,  "", false, false },
+//{ 28, true,  false,  "", false, false },                 // Not exposed on DEV board
+//{ 29, true,  false,  "", false, false },                 // Not exposed on DEV board
+//{ 30, true,  false,  "", false, false },                 // Not exposed on DEV board
+//{ 31, true,  false,  "", false, false },                 // Not exposed on DEV board
+  { 32, false, false,  "", false, false },
+  { 33, false, false,  "", false, false },
+  { 34, false, false,  "", false, false },                 // Note, no internal pull-up
+  { 35, false, false,  "", false, false },                 // Note, no internal pull-up
+  { -1, false, false,  "", false, false }                  // End of list
 } ;
 
 //**************************************************************************************************
@@ -644,7 +658,7 @@ void VS1053::begin()
   //printDetails ( "Right after reset/startup" ) ;
   delay ( 20 ) ;
   //printDetails ( "20 msec after reset" ) ;
-  testComm ( "Slow SPI,Testing VS1053 read/write registers..." ) ;
+  testComm ( "Slow SPI, Testing VS1053 read/write registers..." ) ;
   // Most VS1053 modules will start up in midi mode.  The result is that there is no audio
   // when playing MP3.  You can modify the board, but there is a more elegant way:
   wram_write ( 0xC017, 3 ) ;                            // GPIO DDR = 3
@@ -1068,80 +1082,97 @@ char* dbgprint ( const char* format, ... )
 //**************************************************************************************************
 void gettime()
 {
-#if defined ( USETFT )
-  static int16_t delaycount = 0 ;                         // To reduce number of NTP requests
-  char            timetxt[9] ;                            // Coverted timeinfo
-  
-  if ( timeinfo.tm_year )                                 // Legal time found?
+  static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
+  char            timetxt[9] ;                              // Coverted timeinfo
+
+  if ( tft )                                                // TFT used?
   {
-    sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
-                       timeinfo.tm_hour,
-                       timeinfo.tm_min,
-                       timeinfo.tm_sec ) ;
-    displaytime ( timetxt, WHITE ) ;                      // Write to TFT screen
-  }
-  if ( --delaycount <= 0 )                                // Sync every 1 hour
-  {
-    delaycount = 3600 ;                                   // Reset counter
-    if ( timeinfo.tm_year )                               // Legal time found?
+    if ( timeinfo.tm_year )                                 // Legal time found?
     {
-      dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
+      sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
+                timeinfo.tm_hour,
+                timeinfo.tm_min,
+                timeinfo.tm_sec ) ;
+      displaytime ( timetxt, WHITE ) ;                      // Write to TFT screen
     }
-    if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
+    if ( --delaycount <= 0 )                                // Sync every few hours
     {
+      delaycount = 7200 ;                                   // Reset counter
+      if ( timeinfo.tm_year )                               // Legal time found?
+      {
+        dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
+      }
+      if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
+      {
         dbgprint ( "Failed to obtain time!" ) ;           // Error
         timeinfo.tm_year = 0 ;                            // Set current time to illegal
         return;
+      }
+      sprintf ( timetxt, "%02d:%02d:%02d",                  // Format new time to a string
+                timeinfo.tm_hour,
+                timeinfo.tm_min,
+                timeinfo.tm_sec ) ;
+      dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
     }
-    //timeinfo.tm_sec++ ;                                 // Compensate for network overhead
-    sprintf ( timetxt, "%02d:%02d:%02d",                  // Format new time to a string
-                       timeinfo.tm_hour,
-                       timeinfo.tm_min,
-                       timeinfo.tm_sec ) ;
-    dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
   }
-#endif
 }
 
 
 //**************************************************************************************************
-//                                  S E L E C T N E X T S D F I L E                                *
+//                                  S E L E C T N E X T S D N O D E                                *
 //**************************************************************************************************
-// Select the next mp3 file from SD.  If the last selected song was random, the next song          *
-// is a random one.  Otherwise the next node is choosen.                                           *
+// Select the next or previous mp3 file from SD.  If the last selected song was random, the next   *
+// track is a random one too.  Otherwise the next/previous node is choosen.                        *
 // If nodeID is "0" choose a random nodeID.                                                        *
+// Delta is +1 or -1 for next or previous track.                                                   *
+// The nodeID will be returned to the caller.                                                      *
 //**************************************************************************************************
-void selectnextSDfile()
+String selectnextSDnode ( String curnod, int16_t delta )
 {
-  uint16_t        inx, inx2 ;                           // Position in nodelist
+  int16_t        inx, inx2 ;                           // Position in nodelist
 
-  if ( hostreq )                                        // Host request already set?
+  if ( hostreq )                                       // Host request already set?
   {
-    return ;                                            // Yes, no action
+    return "" ;                                        // Yes, no action
   }
-  if ( SD_currentnode == "0" )                          // Random playing?
+  if ( SD_currentnode == "0" )                         // Random playing?
   {
-    host = getSDfilename ( SD_currentnode ) ;           // Yes, select next random nodeID
+    return SD_currentnode ;                            // Yes, return random nodeID
   }
   else
   {
-    inx = SD_nodelist.indexOf ( SD_currentnode ) +     // Get position of next nodeID in list
-          SD_currentnode.length() + 1 ;
-    if ( inx >= SD_nodelist.length() )                 // End of list?
+    inx = SD_nodelist.indexOf ( curnod ) ;             // Get position of current nodeID in list
+    if ( delta > 0 )                                   // Next track?
     {
-      inx = 0 ;                                        // Yes, wrap around
+      inx += curnod.length() + 1 ;                     // Get position of next nodeID in list
+      if ( inx >= SD_nodelist.length() )               // End of list?
+      {
+        inx = 0 ;                                      // Yes, wrap around
+      }
+    }
+    else
+    {
+      if ( inx == 0 )                                  // At the begin of the list?
+      {
+        inx = SD_nodelist.length()  ;                  // Yes, goto end of list
+      }
+      inx-- ;                                          // Index of delimeter of previous node ID
+      while ( ( inx > 0 ) &&
+              ( SD_nodelist[inx - 1] != '\n' ) )
+      {
+        inx-- ;
+      }
     }
     inx2 = SD_nodelist.indexOf ( "\n", inx ) ;         // Find end of node ID
-    host = getSDfilename ( SD_nodelist.substring ( inx, inx2 ) ) ;
   }
-  hostreq = true ;                                     // Request new song 
+  return SD_nodelist.substring ( inx, inx2 ) ;         // Return nodeID
 }
 
 
 //**************************************************************************************************
 //                                      G E T S D F I L E N A M E                                  *
 //**************************************************************************************************
-// Translate the NnodeID of a track to the full filename that can be used as a station.            *
+// Translate the nodeID of a track to the full filename that can be used as a station.             *
 // If nodeID is "0" choose a random nodeID.                                                        *
 //**************************************************************************************************
 String getSDfilename ( String nodeID )
@@ -1204,7 +1235,7 @@ int listsdtracks ( const char * dirname, int level = 0, bool send = true )
 {
   const  uint16_t SD_MAXDEPTH = 4 ;                     // Maximum depts.  Note: see mp3play_html.
   static uint16_t fcount, oldfcount ;                   // Total number of files
-  static uint16_t SD_node[SD_MAXDEPTH+1] ;              // Node ISs, max levels deep
+  static uint16_t SD_node[SD_MAXDEPTH + 1] ;            // Node ISs, max levels deep
   static String   SD_outbuf ;                           // Output buffer for cmdclient
   uint16_t        ldirname ;                            // Length of dirname to remove from filename
   File            root, file ;                          // Handle to root and directory entry
@@ -1218,7 +1249,7 @@ int listsdtracks ( const char * dirname, int level = 0, bool send = true )
     memset ( SD_node, 0, sizeof(SD_node) ) ;            // And sequence counters
     SD_outbuf = String() ;                              // And output buffer
     SD_nodelist = String() ;                            // And nodelist
-    if ( !SDokay )                                      // See if known card
+    if ( !SD_okay )                                     // See if known card
     {
       if ( send )
       {
@@ -1273,7 +1304,7 @@ int listsdtracks ( const char * dirname, int level = 0, bool send = true )
           SD_outbuf += tmpstr +                         // Form line for mp3play_html page
                        utf8ascii ( file.name() +        // Filename starts after directoryname
                                    ldirname ) +
-                     String ( "\n" ) ;
+                       String ( "\n" ) ;
         }
         SD_nodelist += tmpstr + String ( "\n" ) ;       // Add to nodelist
         //dbgprint ( "Track: %s",                       // Show debug info
@@ -1310,7 +1341,7 @@ int listsdtracks ( const char * dirname, int level = 0, bool send = true )
 //**************************************************************************************************
 const char* getEncryptionType ( wifi_auth_mode_t thisType )
 {
-  switch (thisType)
+  switch ( thisType )
   {
     case WIFI_AUTH_OPEN:
       return "OPEN" ;
@@ -1433,7 +1464,9 @@ void IRAM_ATTR timer10sec()
 //**************************************************************************************************
 void IRAM_ATTR timer100()
 {
-  static int     count10sec = 0 ;                 // Counter for activatie 10 seconds process
+  static int16_t   count10sec = 0 ;               // Counter for activatie 10 seconds process
+  static int16_t   eqcount = 0 ;                  // Counter for equal number of clicks
+  static int16_t   oldclickcount = 0 ;            // To detect difference
 
   if ( ++count10sec == 100  )                     // 10 seconds passed?
   {
@@ -1448,13 +1481,50 @@ void IRAM_ATTR timer100()
       if ( ++timeinfo.tm_min >= 60 )
       {
         timeinfo.tm_min = 0 ;                     // Wrap after 60 minutes
-        if ( ++timeinfo.tm_hour >= 24 ) 
+        if ( ++timeinfo.tm_hour >= 24 )
         {
           timeinfo.tm_hour = 0 ;                  // Wrap after 24 hours
         }
       }
     }
     time_req = true ;                             // Yes, show current time request
+  }
+  // Handle rotary encoder. Inactivity counter will be reset by encoder interrupt
+  if ( enc_menu_mode != VOLUME )                  // In default mode?
+  {
+    if ( ++enc_inactivity > 40 )                  // No, more than 4 seconds inactive
+    {
+      enc_menu_mode = VOLUME ;                    // Return to VOLUME mode
+    }
+  }
+  // Now detection of single/double click of rotary encoder switch
+  if ( clickcount )                               // Any click?
+  {
+    if ( oldclickcount == clickcount )            // Yes, stable situation?
+    {
+      if ( ++eqcount == 5 )                       // Long time stable?
+      {
+        eqcount = 0 ;
+        if ( clickcount > 2 )                     // Triple click?
+        {
+          tripleclick = true ;                    // Yes, set result
+        }
+        else if ( clickcount == 2 )               // Double click?
+        {
+          doubleclick = true ;                    // Yes, set result
+        }
+        else
+        {
+          singleclick = true ;                    // Just one click seen
+        }
+        clickcount = 0 ;                          // Reset number of clicks
+      }
+    }
+    else
+    {
+      oldclickcount = clickcount ;                // To detect change
+      eqcount = 0 ;                               // Not stable, reset count
+    }
   }
 }
 
@@ -1512,26 +1582,85 @@ void IRAM_ATTR isr_IR()
 
 
 //**************************************************************************************************
+//                                          I S R _ E N C                                          *
+//**************************************************************************************************
+// Interrupts received from rotary encoder.                                                        *
+//**************************************************************************************************
+void IRAM_ATTR isr_enc()
+{
+  static uint32_t oldtime = 0 ;                            // Time in millis previous interrupt
+  static bool     sw_state ;                               // True is pushed (LOW)
+  static bool     clk_state ;                              // True is activated (LOW)
+  bool            newstate ;                               // Current state of input signal
+  uint32_t        newtime ;                                // Current timestamp
+
+  // Read current state of SW pin
+  newstate = ( digitalRead ( ini_block.enc_sw_pin ) == LOW ) ;
+  newtime = millis() ;
+  if ( newtime == oldtime )                                // Debounce
+  {
+    return ;
+  }
+  if ( newstate != sw_state )                              // State changed?
+  {
+    sw_state = newstate ;                                  // Yes, set current (new) state
+    if ( !sw_state )                                       // SW released?
+    {
+      if ( ( newtime - oldtime ) > 1000 )                  // More than 1 second?
+      {
+        longclick = true ;                                 // Yes, register longclick
+      }
+      else
+      {
+        clickcount++ ;                                     // Yes, click detected
+      }
+      enc_inactivity = 0 ;                                 // Not inactive anymore 
+    }
+  }
+  oldtime = newtime ;                                      // For next compare
+  // Read current state of CLK pin
+  newstate = ( digitalRead ( ini_block.enc_clk_pin ) == LOW ) ;
+  if ( newstate != clk_state )                             // State changed?
+  {
+    clk_state = newstate ;                                 // Yes, set current (new) state
+    if ( !clk_state )                                      // SW released?
+    {
+      if ( digitalRead ( ini_block.enc_dt_pin ) )          // Yes, detect right/left rotation
+      {
+        rotationcount-- ;                                  // Left rotation
+      }
+      else
+      {
+        rotationcount++ ;                                  // Right rotation
+      }
+      enc_inactivity = 0 ;                                 // Not inactive anymore 
+    }
+  }
+}
+
+
+//**************************************************************************************************
 //                                      D I S P L A Y V O L U M E                                  *
 //**************************************************************************************************
 // Show the current volume as an indicator on the screen.                                          *
 //**************************************************************************************************
 void displayvolume()
 {
-#if defined ( USETFT )
-  static uint8_t oldvol = 0 ;                         // Previous volume
-  uint8_t        newvol ;                             // Current setting
-  uint8_t pos ;                                       // Positon of volume indicator
-
-  newvol = vs1053player.getVolume() ;                 // Get current volume setting
-  if ( newvol != oldvol )                             // Volume changed?
+  if ( tft )
   {
-    oldvol = newvol ;                                 // Remember for next compare
-    pos = map ( newvol, 0, 100, 0, 160 ) ;            // Compute position on TFT
-    tft.fillRect ( 0, 126, pos, 2, RED ) ;            // Paint red part
-    tft.fillRect ( pos, 126, 160 - pos, 2, GREEN ) ;  // Paint green part
+    static uint8_t oldvol = 0 ;                         // Previous volume
+    uint8_t        newvol ;                             // Current setting
+    uint8_t pos ;                                       // Positon of volume indicator
+  
+    newvol = vs1053player.getVolume() ;                 // Get current volume setting
+    if ( newvol != oldvol )                             // Volume changed?
+    {
+      oldvol = newvol ;                                 // Remember for next compare
+      pos = map ( newvol, 0, 100, 0, 160 ) ;            // Compute position on TFT
+      tft->fillRect ( 0, 126, pos, 2, RED ) ;           // Paint red part
+      tft->fillRect ( pos, 126, 160 - pos, 2, GREEN ) ; // Paint green part
+    }
   }
-#endif
 }
 
 
@@ -1544,24 +1673,26 @@ void displayvolume()
 //**************************************************************************************************
 void displaytime ( const char* str, uint16_t color, bool force )
 {
-#if defined ( USETFT )
-  static char oldstr[9] = "........" ;           // For compare
-  uint8_t     i ;                                // Index in strings
-  uint8_t     pos = 108 ;                        // X-position of character
+  static char oldstr[9] = "........" ;             // For compare
 
-  tft.setTextColor ( color ) ;                   // Set the requested color
-  for ( i = 0 ; i < 8 ; i++ )                    // Compare old and new 
+  if ( tft )                                       // TFT active?
   {
-    if ( ( str[i] != oldstr[i] ) || force )      // Difference?
+    uint8_t     i ;                                // Index in strings
+    uint8_t     pos = 108 ;                        // X-position of character
+
+    tft->setTextColor ( color ) ;                  // Set the requested color
+    for ( i = 0 ; i < 8 ; i++ )                    // Compare old and new
     {
-      tft.fillRect ( pos, 0, 6, 8, BLACK ) ;     // Clear the space for new character
-      tft.setCursor ( pos, 0 ) ;                 // Prepare to show the info
-      tft.print ( str[i] ) ;                     // Show the character
-      oldstr[i] = str[i] ;                       // Remember for next compare
+      if ( ( str[i] != oldstr[i] ) || force )      // Difference?
+      {
+        tft->fillRect ( pos, 0, 6, 8, BLACK ) ;    // Clear the space for new character
+        tft->setCursor ( pos, 0 ) ;                // Prepare to show the info
+        tft->print ( str[i] ) ;                    // Show the character
+        oldstr[i] = str[i] ;                       // Remember for next compare
+      }
+      pos += 6 ;                                   // Next position
     }
-    pos += 6 ;                                   // Next position
   }
-#endif
 }
 
 
@@ -1572,16 +1703,16 @@ void displaytime ( const char* str, uint16_t color, bool force )
 //**************************************************************************************************
 void displayinfo ( const char* str, uint16_t pos, uint16_t height, uint16_t color )
 {
-#if defined ( USETFT )
-  char buf [ strlen ( str ) + 1 ] ;             // Need some buffer space
-
-  strcpy ( buf, str ) ;                         // Make a local copy of the string
-  utf8ascii ( buf ) ;                           // Convert possible UTF8
-  tft.fillRect ( 0, pos, 160, height, BLACK ) ; // Clear the space for new info
-  tft.setTextColor ( color ) ;                  // Set the requested color
-  tft.setCursor ( 0, pos ) ;                    // Prepare to show the info
-  tft.println ( buf ) ;                         // Show the string
-#endif
+  if ( tft )                                       // TFT active?
+  {
+    char buf [ strlen ( str ) + 1 ] ;              // Need some buffer space
+    strcpy ( buf, str ) ;                          // Make a local copy of the string
+    utf8ascii ( buf ) ;                            // Convert possible UTF8
+    tft->fillRect ( 0, pos, 160, height, BLACK ) ; // Clear the space for new info
+    tft->setTextColor ( color ) ;                  // Set the requested color
+    tft->setCursor ( 0, pos ) ;                    // Prepare to show the info
+    tft->println ( buf ) ;                         // Show the string
+  }
 }
 
 
@@ -1767,6 +1898,7 @@ bool connecttofile()
 bool connectwifi()
 {
   char*  pfs ;                                          // Pointer to formatted string
+  char*  pfs2 ;                                         // Pointer to formatted string
   bool   localAP = false ;                              // True if only local AP is left
 
   WiFi.disconnect() ;                                   // After restart the router could
@@ -1803,12 +1935,11 @@ bool connectwifi()
   else
   {
     ipaddress = WiFi.localIP().toString() ;             // Form IP address
-    dbgprint ( "Connected to %s", WiFi.SSID().c_str() ) ;
+    pfs2 = dbgprint ( "Connected to %s", WiFi.SSID().c_str() ) ;
+    tftlog ( pfs2 ) ;
     pfs = dbgprint ( "IP = %s", ipaddress.c_str() ) ;   // String to dispay on TFT
   }
-#if defined ( USETFT )
   displayinfo ( pfs, 90, 36, YELLOW ) ;                 // Show info at position 90-126
-#endif
   return ( localAP == false ) ;                         // Return result of connection
 }
 
@@ -1820,7 +1951,10 @@ bool connectwifi()
 //**************************************************************************************************
 void otastart()
 {
-  dbgprint ( "OTA Started" ) ;
+  char* p ;
+  
+  p = dbgprint ( "OTA update Started" ) ;
+  displayinfo ( p, 90, 36, YELLOW ) ;                 // Show info at position 90-126
 }
 
 
@@ -1905,7 +2039,81 @@ String readprogbuttons()
 
 
 //**************************************************************************************************
-//                                       R E A D P R E F                                           *
+//                                       R E S E R V E P I N                                       *
+//**************************************************************************************************
+// Set I/O pin to "reserved".                                                                      *
+// The pin is then not available for a programmeble function.                                      *
+//**************************************************************************************************
+void reservepin ( int8_t rpinnr )
+{
+  uint8_t i = 0 ;                                           // Index in progpin array
+  int8_t  pin ;                                             // Pin number in progpin array
+
+  while ( ( pin = progpin[i].gpio ) )                       // Find entry for requested pin
+  {
+    if ( pin == rpinnr )                                    // Entry found?
+    {
+      progpin[i].reserved = true ;                          // Yes, pin is reserved now
+      break ;                                               // No need to continue
+    }
+    i++ ;                                                   // Next entry
+  }
+}
+
+
+//**************************************************************************************************
+//                                       R E A D I O P R E F S                                     *
+//**************************************************************************************************
+// Scan the preferences for IO-pin definitions.                                                    *
+//**************************************************************************************************
+String readIOprefs()
+{
+  struct iosetting
+  {
+    char*   gname ;                                       // Name in preferences
+    int8_t* gnr ;                                         // GPIO pin number
+  };
+  struct iosetting klist[] = {                            // List of I/O related keys
+                 { "ir_pin",  &ini_block.ir_pin      },
+                 { "enc_clk", &ini_block.enc_clk_pin },
+                 { "enc_dt",  &ini_block.enc_dt_pin  },
+                 { "enc_sw",  &ini_block.enc_sw_pin  },
+                 { "tft_cs",  &ini_block.tft_cs_pin  },
+                 { "tft_dc",  &ini_block.tft_dc_pin  },
+                 { "sd_cs",   &ini_block.sd_cs_pin   },
+                 { "vs_cs",   &ini_block.vs_cs_pin   },
+                 { "vs_dcs",  &ini_block.vs_dcs_pin  },
+                 { "vs_dreq", &ini_block.vs_dreq_pin },
+                 { NULL,      NULL                   }    // End of list
+                 } ;
+  int         i ;                                         // Loop control
+  int         count = 0 ;                                 // Number of keys found
+  String      val ;                                       // Contents of preference entry
+  int8_t      ival ;                                      // Value converted to integer
+
+  for ( i = 0 ; klist[i].gname ; i++ )                    // Loop trough all I/O related keys
+  {
+    ival = -1 ;                                           // Assume pin number to be "unused"
+    if ( nvssearch ( klist[i].gname ) )                   // Does it exist?
+    {
+      val = nvsgetstr ( klist[i].gname ) ;                // Read value of key
+      if ( val.length() )                                 // Parameter in preference?
+      {
+        count++ ;                                         // Yes, count number of filled keys
+        ival = val.toInt() ;                              // Convert value to integer pinnumber
+        reservepin ( ival ) ;                             // Set pin to "reserved"
+      }
+    }
+    *klist[i].gnr = ival ;                                // Set pinnumber in ini_block
+    dbgprint ( "%s pin set to %d",                        // Show result
+               klist[i].gname,
+               ival ) ;
+  }
+}
+
+
+//**************************************************************************************************
+//                                       R E A D P R E F S                                         *
 //**************************************************************************************************
 // Read the preferences and interpret the commands.                                                *
 // If output == true, the key / value pairs are returned to the caller as a String.                *
@@ -1917,22 +2125,36 @@ String readprefs ( bool output )
                    "mqttuser",   "mqttpasswd",
                    "#",                                     // Spacing in output
                    "wifi_xx",
-                   "#",                                     // Spacing in output
+                   "#",
                    "volume",
                    "toneha", "tonehf",
                    "tonela", "tonelf",
-                   "#",                                     // Spacing in output
+                   "#",
                    "preset",
-                   "#",                                     // Spacing in output
+                   "#",
                    "preset_xx",
-                   "#",                                     // Spacing in output
+                   "#",
                    "gpio_xx",
-                   "#",                                     // Spacing in output
+                   "#",
                    "clk_server",
                    "clk_offset",
                    "clk_dst",
-                   "#",                                     // Spacing in output
+                   "#",
+                   "ir_pin",
                    "ir_xx",
+                   "#",
+                   "vs_cs",
+                   "vs_dcs",
+                   "vs_dreq",
+                   "#",
+                   "tft_cs",
+                   "tft_dc",
+                   "#",
+                   "enc_clk",
+                   "enc_dt",
+                   "enc_sw",
+                   "#",
+                   "sd_cs",
                    NULL                                     // Einde keys
                  } ;
   char        mykey[20] ;                                   // For numerated keys
@@ -1945,15 +2167,13 @@ String readprefs ( bool output )
   String      outstr = "" ;                                 // Outputstring
   int         count = 0 ;                                   // Number of keys found
   size_t      len ;
+  bool        sep = false ;                                 // Print separator
 
   for ( i = 0 ; keys[i] ; i++ )                             // Loop trough all possible keys
   {
     if ( strcmp ( keys[i], "#" ) == 0 )                     // Key equals "#"?
     {
-      if ( output )                                         // Output requested?
-      {
-        outstr += "#\n" ;                                   // Yes, add commemt line
-      }
+      sep = true ;                                          // Yes, add comment before next line
       continue ;                                            // Skip further key handling
     }
     p = strstr ( keys[i], "_xx"  ) ;                        // See if numerated key
@@ -1965,7 +2185,14 @@ String readprefs ( bool output )
       numformat = "_%02d" ;                                 // Format for numerated keys
       if ( strstr ( mykey, "ir_xx" ) )                      // Longer range for ir_xx
       {
-        jmax = 0x10000 ;                                    // > 64000 possibilities
+        if ( nvssearch ( "ir_pin" ) )                       // Necessary if IR in use
+        {
+           jmax = 0x10000 ;                                 // > 64000 possibilities
+        }
+        else
+        {
+          jmax = 0 ;                                        // Save some time
+        }
         numformat = "_%04X" ;                               // Different numeration
       }
       for ( j = 0 ; j < jmax ; j++ )                        // Try for 00 to jmax
@@ -2003,12 +2230,17 @@ String readprefs ( bool output )
               String ( val ) ;
         if ( output )
         {
+          if ( sep )                                       // Need for a separator
+          {
+            outstr += "#\n" ;                              // Yes, add one
+            sep = false ;                                  // Clear flag
+          }
           outstr += cmd.c_str() ;                          // Add to outstr
           outstr += String ( "\n" ) ;                      // Add newline
         }
         else
         {
-          if ( val.length() )                               // parameter in preference?
+          if ( val.length() )                               // Parameter in preference?
           {
             analyzeCmd ( cmd.c_str() ) ;                    // Analyze it
           }
@@ -2165,7 +2397,7 @@ void  scandigital()
   oldmillis = millis() ;                                    // 100 msec over
   for ( i = 0 ; ( pinnr = progpin[i].gpio ) >= 0 ; i++ )    // Scan all inputs
   {
-    if ( !progpin[i].avail )                                // Skip unused pins
+    if ( !progpin[i].avail || !progpin[i].reserved )        // Skip unused and reserved pins
     {
       continue ;
     }
@@ -2249,7 +2481,7 @@ void  mk_lsan()
       {
         lpw = buf.substring ( inx + 1 ) ;                // Isolate password
         lssid = buf.substring ( 0, inx ) ;               // Holds SSID now
-        dbgprint ( "Added SSID %s to list of networks",
+        dbgprint ( "Added %s to list of networks",
                    lssid.c_str() ) ;
         anetworks += lssid ;                             // Add to list
         anetworks += "|" ;                               // Separator
@@ -2275,7 +2507,7 @@ void getsettings()
   int                 i ;                                // Loop control, preset number
   char                tkey[12] ;                         // Key for preset preference
   char                pnr[3] ;                           // Preset as 2 character, i.e. "03"
-  
+
   for ( i = 0 ; i < 100 ; i++ )                          // Max 99 presets
   {
     sprintf ( tkey, "preset_%02d", i ) ;                 // Preset plus number
@@ -2320,6 +2552,20 @@ void getsettings()
 
 
 //**************************************************************************************************
+//                                           T F T L O G                                           *
+//**************************************************************************************************
+// Log to TFT if enabled.                                                                          *
+//**************************************************************************************************
+void tftlog ( const char *str )
+{
+    if ( tft )                                           // TFT configured?
+    {
+      tft->println ( str ) ;                             // Yes, show error on TFT
+    }
+}
+
+
+//**************************************************************************************************
 //                                           S E T U P                                             *
 //**************************************************************************************************
 // Setup for the program.                                                                          *
@@ -2341,50 +2587,18 @@ void setup()
   if ( config_html_version  < 170626 ) dbgprint ( wvn, "config" ) ;
   if ( index_html_version   < 170703 ) dbgprint ( wvn, "index" ) ;
   if ( mp3play_html_version < 170626 ) dbgprint ( wvn, "mp3play" ) ;
+  if ( defaultprefs_version < 170728 ) dbgprint ( wvn, "defaultprefs" ) ;
   // Print some memory and sketch info
   dbgprint ( "Starting ESP32-radio Version %s...  Free memory %d",
              VERSION,
              ESP.getFreeHeap() ) ;                       // Normally about 199 kB
-  pinMode ( VS1053_CS, OUTPUT ) ;                        // Be sure to deselect VS1053
-  digitalWrite ( VS1053_CS, HIGH ) ;
-#if defined ( SDCARDCS )
-  pinMode ( SDCARDCS, OUTPUT ) ;                         // Deselect SDCARD
-  digitalWrite ( SDCARDCS, HIGH ) ;
-  if ( !SD.begin ( SDCARDCS ) )                          // Try to init SD card driver
-  {
-    dbgprint ( "SD Card Mount Failed!" ) ;               // No success, check formatting (FAT)
-  }
-  else
-  {
-    SDokay = ( SD.cardType() != CARD_NONE ) ;            // See if known card
-    if ( !SDokay )
-    {
-      dbgprint ( "No SD card attached" ) ;               // Card not readable
-    }
-    else
-    {
-      dbgprint ( "Locate mp3 files on SD, may take a while..." ) ;
-      SD_nodecount = listsdtracks ( "/", 0, false ) ;    // Build nodelist
-      dbgprint ( "Finished, %d tracks found", SD_nodecount ) ;
-    }
-  }
-#endif
-  pinMode ( IR_PIN, INPUT ) ;                            // Pin for IR receiver VS1838B
-  attachInterrupt ( IR_PIN, isr_IR, CHANGE ) ;           // Interrupts will be handle by isr_IR
-#if defined ( USETFT )
-  tft.begin() ;                                          // Init TFT interface
-  tft.fillRect ( 0, 0, 160, 128, BLACK ) ;               // Clear screen does not work when rotated
-  tft.setRotation ( 3 ) ;                                // Use landscape format
-  tft.clearScreen() ;                                    // Clear screen
-  tft.setTextSize ( 1 ) ;                                // Small character font
-  tft.setTextColor ( WHITE ) ;                           // Info in white
-  tft.println ( "Starting..." ) ;
-  tft.print ( "Version:" ) ;
-  strncpy ( tmpstr, VERSION, 16 ) ;                      // Limit version length
-  tft.println ( tmpstr ) ;
-  tft.println ( "By Ed Smallenburg" ) ;
-#endif
-  ringbuf = (uint8_t*) malloc ( RINGBFSIZ ) ;            // Create ring buffer
+  memset ( &ini_block, 0, sizeof(ini_block) ) ;          // Init ini_block
+  ini_block.mqttport = 1883 ;                            // Default port for MQTT
+  ini_block.mqttprefix = "" ;                            // No prefix for MQTT topics seen yet
+  ini_block.clk_server = "pool.ntp.org" ;                // Default server for NTP
+  ini_block.clk_offset = 1 ;                             // Default Amsterdam time zone
+  ini_block.clk_dst = 1 ;                                // DST is +1 hour
+  readIOprefs() ;                                        // Read pins used for TFT, VS1053, IR, Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
   {
     pinMode ( pinnr, INPUT_PULLUP ) ;                    // Input for control button
@@ -2401,14 +2615,59 @@ void setup()
     dbgprint ( "GPIO%d is %s", pinnr, p ) ;
   }
   readprogbuttons() ;                                    // Program the free input pins
-  xml.init ( xmlbuffer, sizeof(xmlbuffer),               // Initilize XML stream.
-             &XML_callback ) ;
-  memset ( &ini_block, 0, sizeof(ini_block) ) ;          // Init ini_block
-  ini_block.mqttport = 1883 ;                            // Default port for MQTT
-  ini_block.mqttprefix = "" ;                            // No prefix for MQTT topics seen yet
-  ini_block.clk_server = "pool.ntp.org" ;                // Default server for NTP
-  ini_block.clk_offset = 1 ;                             // Default Amsterdam time zone
-  ini_block.clk_dst = 1 ;                                // DST is +1 hour
+  SPI.begin() ;                                          // Init VSPI bus with default pins
+  //pinMode ( VS1053_CS, OUTPUT ) ;                      // Be sure to deselect VS1053
+  //digitalWrite ( VS1053_CS, HIGH ) ;
+  pinMode ( ini_block.ir_pin, INPUT ) ;                  // Pin for IR receiver VS1838B
+  attachInterrupt ( ini_block.ir_pin, isr_IR, CHANGE ) ; // Interrupts will be handle by isr_IR
+  if ( ini_block.tft_cs_pin >= 0 )
+  {
+    dbgprint ( "Start TFT" ) ;
+    tft = new TFT_ILI9163C ( ini_block.tft_cs_pin,
+                             ini_block.tft_dc_pin ) ;    // Create an instant for TFT
+    tft->begin() ;                                       // Init TFT interface
+    tft->fillRect ( 0, 0, 160, 128, BLACK ) ;            // Clear screen does not work when rotated
+    tft->setRotation ( 3 ) ;                             // Use landscape format
+    tft->clearScreen() ;                                 // Clear screen
+    tft->setTextSize ( 1 ) ;                             // Small character font
+    tft->setTextColor ( WHITE ) ;                        // Info in white
+    tft->println ( "Starting..." ) ;
+    tft->print ( "Version:" ) ;
+    strncpy ( tmpstr, VERSION, 16 ) ;                    // Limit version length
+    tft->println ( tmpstr ) ;
+    tft->println ( "By Ed Smallenburg" ) ;
+  }
+  if ( ini_block.sd_cs_pin >= 0 )
+  {
+    pinMode ( ini_block.sd_cs_pin, OUTPUT ) ;            // Deselect SDCARD
+    digitalWrite ( ini_block.sd_cs_pin, HIGH ) ;
+  }
+  if ( !SD.begin ( ini_block.sd_cs_pin ) )               // Try to init SD card driver
+  {
+    p = dbgprint ( "SD Card Mount Failed!" ) ;           // No success, check formatting (FAT)
+    if ( tft )
+    {
+      tft->println ( p ) ;                               // Show error on TFT as well
+    }
+  }
+  else
+  {
+    SD_okay = ( SD.cardType() != CARD_NONE ) ;           // See if known card
+    if ( !SD_okay )
+    {
+      p = dbgprint ( "No SD card attached" ) ;           // Card not readable
+      tftlog ( p ) ;                                     // Show error on TFT as well
+    }
+    else
+    {
+      dbgprint ( "Locate mp3 files on SD, may take a while..." ) ;
+      tftlog ( "Read SD card" ) ;
+      SD_nodecount = listsdtracks ( "/", 0, false ) ;    // Build nodelist
+      p = dbgprint ( "%d tracks on SD", SD_nodecount ) ;
+      tftlog ( p ) ;                                     // Show number of tracks on TFT
+    }
+  }
+  ringbuf = (uint8_t*) malloc ( RINGBFSIZ ) ;            // Create ring buffer
   mk_lsan() ;                                            // Make al list of acceptable networks in preferences.
   WiFi.mode ( WIFI_STA ) ;                               // This ESP is a station
   //WiFi.persistent ( false ) ;                          // Do not save SSID and password
@@ -2417,10 +2676,10 @@ void setup()
   listNetworks() ;                                       // Search for WiFi networks
   readprefs ( false ) ;                                  // Read preferences
   tcpip_adapter_set_hostname ( TCPIP_ADAPTER_IF_STA, NAME ) ;
-  SPI.begin() ;                                          // Init VSPI bus with default pins
   vs1053player.begin() ;                                 // Initialize VS1053 player
   delay(10);
-  dbgprint ( "Connect to WiFi" ) ;
+  p = dbgprint ( "Connect to WiFi" ) ;                   // Show progress
+  tftlog ( p ) ;                                         // On TFT too
   NetworkFound = connectwifi() ;                         // Connect to WiFi network
   dbgprint ( "Start server for commands" ) ;
   cmdserver.begin() ;
@@ -2459,9 +2718,23 @@ void setup()
   timerAlarmEnable ( timer ) ;                           // Enable the timer
   delay ( 1000 ) ;                                       // Show IP for a while
   configTime ( -ini_block.clk_offset * 3600,
-                ini_block.clk_dst * 3600,
-                ini_block.clk_server.c_str() ) ;         // GMT offset, daylight offset in seconds
-  timeinfo.tm_year = 0 ;                                 // Set TOD to illegal 
+               ini_block.clk_dst * 3600,
+               ini_block.clk_server.c_str() ) ;          // GMT offset, daylight offset in seconds
+  timeinfo.tm_year = 0 ;                                 // Set TOD to illegal
+  // Init settings for rotary switch (if existing).
+  if ( ini_block.enc_clk_pin + ini_block.enc_dt_pin + ini_block.enc_sw_pin )
+  {
+    dbgprint ( "Rotary encoder is enabled" ) ;
+    attachInterrupt ( ini_block.enc_clk_pin, isr_enc, CHANGE ) ;
+    attachInterrupt ( ini_block.enc_sw_pin,  isr_enc, CHANGE ) ;
+  }
+  else
+  {
+    dbgprint ( "Rotary encoder is disabled (%d/%d/%d)",
+               ini_block.enc_clk_pin,
+               ini_block.enc_dt_pin,
+               ini_block.enc_sw_pin) ;
+  }
 }
 
 
@@ -2745,134 +3018,106 @@ void handlehttp()
 
 
 //**************************************************************************************************
-//                                          X M L _ C A L L B A C K                                *
+//                                          X M L P A R S E                                        *
 //**************************************************************************************************
-// Process XML tags into variables.                                                                *
+// Parses line with XML data and put result in variable specified by parameter.                    *
 //**************************************************************************************************
-void XML_callback ( uint8_t statusflags, char* tagName, uint16_t tagNameLen,
-                    char* data,  uint16_t dataLen )
+void xmlparse ( String &line, const char *selstr, String &res )
 {
-  if ( statusflags & STATUS_START_TAG )
+  String sel = "</" ;                                  // Will be like "</status-code"
+  int    inx ;                                         // Position of "</..." in line
+
+  sel += selstr ;                                      // Form searchstring
+  if ( line.endsWith ( sel ) )                         // Is this the line we are looking for?
   {
-    if ( tagNameLen )
-    {
-      xmlOpen = String ( tagName ) ;
-      //dbgprint ( "Start tag %s",tagName ) ;
-    }
-  }
-  else if ( statusflags & STATUS_END_TAG )
-  {
-    //dbgprint ( "End tag %s", tagName ) ;
-  }
-  else if ( statusflags & STATUS_TAG_TEXT )
-  {
-    xmlTag = String( tagName ) ;
-    xmlData = String( data ) ;
-    //dbgprint ( Serial.print( "Tag: %s, text: %s", tagName, data ) ;
-  }
-  else if ( statusflags & STATUS_ATTR_TEXT )
-  {
-    //dbgprint ( "Attribute: %s, text: %s", tagName, data ) ;
-  }
-  else if  ( statusflags & STATUS_ERROR )
-  {
-    //dbgprint ( "XML Parsing error  Tag: %s, text: %s", tagName, data ) ;
+    inx = line.indexOf ( sel ) ;                       // Get position of end tag
+    res = line.substring ( 0, inx ) ;                  // Set result
   }
 }
 
 
 //**************************************************************************************************
-//                                          X M L P A R S E                                        *
+//                                          X M L G E T H O S T                                    *
 //**************************************************************************************************
 // Parses streams from XML data.                                                                   *
+// Example URL for XML Data Stream:                                                                *
+// http://playerservices.streamtheworld.com/api/livestream?version=1.5&mount=IHR_TRANAAC&lang=en   *
 //**************************************************************************************************
-String xmlparse ( String mount )
+String xmlgethost  ( String mount )
 {
-  // Example URL for XML Data Stream:
-  // http://playerservices.streamtheworld.com/api/livestream?version=1.5&mount=IHR_TRANAAC&lang=en
-  // Clear all variables for use.
-  char   tmpstr[200] ;                              // Full GET command, later stream URL
-  char   c ;                                        // Next input character from reply
-  String urlout ;                                   // Result URL
-  bool   urlfound = false ;                         // Result found
+  const char* xmlhost = "playerservices.streamtheworld.com" ;  // XML data source
+  const char* xmlget =  "GET /api/livestream"                  // XML get parameters
+                        "?version=1.5"                         // API Version of IHeartRadio
+                        "&mount=%sAAC"                         // MountPoint with Station Callsign
+                        "&lang=en" ;                           // Language
 
-  stationServer = "" ;
-  stationPort = "" ;
-  stationMount = "" ;
-  xmlTag = "" ;
-  xmlData = "" ;
+  String   stationServer = "" ;                     // Radio stream server
+  String   stationPort = "" ;                       // Radio stream port
+  String   stationMount = "" ;                      // Radio stream Callsign
+  uint16_t timeout = 0 ;                            // To detect time-out
+  String   sreply = "" ;                            // Reply from playerservices.streamtheworld.com
+  String   statuscode = "200" ;                     // Assume good reply
+  char     tmpstr[200] ;                            // Full GET command, later stream URL
+  char     c ;                                      // Next input character from reply
+  String   urlout ;                                 // Result URL
+
   stop_mp3client() ; // Stop any current wificlient connections.
   dbgprint ( "Connect to new iHeartRadio host: %s", mount.c_str() ) ;
   datamode = INIT ;                                   // Start default in metamode
   chunked = false ;                                   // Assume not chunked
-  // Create a GET commmand for the request.
-  sprintf ( tmpstr, xmlget, mount.c_str() ) ;
+  sprintf ( tmpstr, xmlget, mount.c_str() ) ;         // Create a GET commmand for the request
   dbgprint ( "%s", tmpstr ) ;
-  // Connect to XML stream.
-  if ( mp3client.connect ( xmlhost, xmlport ) )
+  if ( mp3client.connect ( xmlhost, 80 ) )            // Connect to XML stream
   {
-    dbgprint ( "Connected!" ) ;
+    dbgprint ( "Connected to %s", xmlhost ) ;
     mp3client.print ( String ( tmpstr ) + " HTTP/1.1\r\n"
                       "Host: " + xmlhost + "\r\n"
                       "User-Agent: Mozilla/5.0\r\n"
                       "Connection: close\r\n\r\n" ) ;
-    dbgprint ( "XML parser processing..." ) ;
-    while ( true )                                    // Process XML Data.
+    while ( mp3client.available() == 0 )
     {
-      if ( mp3client.available() )
+      delay ( 200 ) ;                                 // Give server some time
+      if ( ++timeout > 25 )                           // No answer in 5 seconds?
       {
-        c = mp3client.read() ;
-        xml.processChar ( c ) ;
-        if ( xmlTag != "" )                           // Tag seen?
-        {
-          if ( xmlTag.endsWith ( "/status-code" ) )   // Status code seen?
-          {
-            if ( xmlData != "200" )                   // Good result?
-            {
-              dbgprint ( "Bad xml status-code %s",    // No, show and stop interpreting
-                         xmlData.c_str() ) ;
-              break ;
-            }
-          }
-          if ( xmlTag.endsWith ( "/ip" ) )
-          {
-            stationServer = xmlData ;
-          }
-          else if ( xmlTag.endsWith ( "/port" ) )
-          {
-            stationPort = xmlData ;
-          }
-          else if ( xmlTag.endsWith ( "/mount"  ) )
-          {
-            stationMount = xmlData ;
-          }
-        }
-      }
-      // Check if all the station values are stored.
-      urlfound = ( stationServer != "" && stationPort != "" && stationMount != "" ) ;
-      if ( urlfound )
-      {
-        xml.reset() ;
-        break ;
+        dbgprint ( "Client Timeout !" ) ;
       }
     }
-    tmpstr[0] = '\0' ;
-    if ( urlfound )
+    dbgprint ( "XML parser processing..." ) ;
+    while ( mp3client.available() )
     {
-      sprintf ( tmpstr, "%s:%s/%s_SC",                   // Build URL for ESP-Radio to stream.
-                stationServer.c_str(),
-                stationPort.c_str(),
-                stationMount.c_str() ) ;
+      sreply = mp3client.readStringUntil ( '>' ) ;
+      sreply.trim() ;
+      // Search for relevant info in in reply and store in variable
+      xmlparse ( sreply, "status-code", statuscode ) ;
+      xmlparse ( sreply, "ip",          stationServer ) ;
+      xmlparse ( sreply, "port",        stationPort ) ;
+      xmlparse ( sreply, "mount",       stationMount ) ;
+      if ( statuscode != "200" )                      // Good result sofar?
+      {
+         dbgprint ( "Bad xml status-code %s",         // No, show and stop interpreting
+                     statuscode.c_str() ) ;
+         tmpstr[0] = '\0' ;                           // Clear result
+         break ;
+      }
+    }
+    if ( ( stationServer != "" ) &&                   // Check if all station values are stored
+         ( stationPort != "" ) &&
+         ( stationMount != "" ) )
+    {
+      sprintf ( tmpstr, "%s:%s/%s_SC",                // Build URL for ESP-Radio to stream.
+                        stationServer.c_str(),
+                        stationPort.c_str(),
+                        stationMount.c_str() ) ;
       dbgprint ( "Found: %s", tmpstr ) ;
     }
-    dbgprint ( "Closing XML connection." ) ;
   }
   else
   {
-    dbgprint ( "Can't connect to XML host!" ) ;
+    dbgprint ( "Can't connect to XML host!" ) ;       // Connection failed
     tmpstr[0] = '\0' ;
   }
-  return String ( tmpstr ) ;                           // Return final streaming URL.
+  mp3client.stop() ;
+  return String ( tmpstr ) ;                          // Return final streaming URL.
 }
 
 
@@ -2918,6 +3163,131 @@ void handleIpPub()
   mqttpub.trigger ( MQTT_IP ) ;                            // Request re-publish IP
 }
 
+//**************************************************************************************************
+//                                           C H K _ E N C                                         *
+//**************************************************************************************************
+// See if rotary encoder is activated and perform its functions.                                   *
+//**************************************************************************************************
+void chk_enc()
+{
+  int16_t        delta ;                                      // -1 for left, +1 for rigth rotation
+  static int8_t  enc_preset ;                                 // Selected preset
+  static String  enc_nodeID ;                                 // Node of selected track
+  static String  enc_filename ;                               // Filename of selected track
+  String         tmp ;                                        // Temporary string
+  int16_t        inx ;                                        // Position in string
+
+  if ( tripleclick )                                          // First handle triple click
+  {
+    tripleclick = false ;
+    if ( SD_nodecount )                                       // Tracks on SD?
+    {
+      enc_menu_mode = TRACK ;                                 // Swich to TRACK mode
+      dbgprint ( "Encoder mode set to TRACK" ) ;
+      enc_nodeID = selectnextSDnode ( SD_currentnode, +1 ) ;  // Start with next file on SD
+      if ( enc_nodeID == "" )                                 // Current track available?
+      {
+        inx = SD_nodelist.indexOf ( "\n" ) ;                  // No, find first
+        enc_nodeID = SD_nodelist.substring ( 0, inx ) ;
+      }
+      if ( datamode != STOPPED )
+      {
+        datamode = STOPREQD ;                                 // Request STOP
+      }
+    }
+  }
+  if ( doubleclick )                                          // Handle the doubleclick
+  {
+    doubleclick = false ;
+    enc_menu_mode = PRESET ;                                  // Swich to PRESET mode
+    dbgprint ( "Encoder mode set to PRESET" ) ;
+    enc_preset = ini_block.newpreset + 1 ;                    // Start with current preset + 1
+  }
+  if ( singleclick )
+  {
+    singleclick = false ;
+    switch ( enc_menu_mode )                                  // Which mode (VOLUME, PRESET, TRACK)?
+    {
+      case VOLUME :
+        break ;                                               // No special action if in volume mode
+      case PRESET :
+        currentpreset = -1 ;                                  // Make sure current is different
+        ini_block.newpreset = enc_preset ;                    // Make a definite choice
+        break ;
+      case TRACK :
+        host = getSDfilename ( enc_nodeID ) ;                 // Select track as new host
+        hostreq = true ;                                      // Request this host
+        break ;
+    }
+    enc_menu_mode = VOLUME ;                                  // Back to default mode
+  }
+  if ( longclick )                                            // Check for long click
+  {
+    longclick = false ;                                       // Reset condition
+    dbgprint ( "Long click detected" ) ;
+    if ( SD_nodecount )                                       // Tracks on SD?
+    {
+      if ( datamode != STOPPED )
+      {
+        datamode = STOPREQD ;                                 // Request STOP
+      }
+      host = getSDfilename ( "0" ) ;                          // Get random track
+      hostreq = true ;                                        // Request this host
+    }
+  }
+  if ( rotationcount == 0 )                                   // Any rotation?
+  {
+    return ;                                                  // No, return
+  }
+  switch ( enc_menu_mode )                                    // Which mode (VOLUME, PRESET, TRACK)?
+  {
+    case VOLUME :
+      ini_block.reqvol += rotationcount ;
+      if ( ini_block.reqvol > 100 )
+      {
+        ini_block.reqvol = 100 ;                              // Limit to normal values
+      }
+      muteflag = false ;                                      // Mute off
+      break ;
+    case PRESET :
+      enc_preset += rotationcount ;                           // Change preset
+      if ( enc_preset < 0 )                                   // Check limits
+      {
+        enc_preset = 0 ;                                      // Not lower than 0
+      }
+      tmp = readhostfrompref ( enc_preset ) ;                 // Get host spec and possible comment
+      if ( tmp == "" )                                        // End of presets?
+      {
+        enc_preset = 0 ;                                      // Yes, wrap
+        tmp = readhostfrompref ( enc_preset ) ;               // Get host spec and possible comment
+      }
+      // Show just comment if available.  Otherwise the preset itself.
+      inx = tmp.indexOf ( "#" ) ;                             // Get position of "#"
+      if ( inx > 0 )                                          // Hash sign present?
+      {
+        tmp.remove ( 0, inx + 1 ) ;                           // Yes, remove non-comment part
+      }
+      chomp ( tmp ) ;                                         // Remove garbage from description
+      displayinfo ( tmp.c_str(),90, 36, YELLOW ) ;            // Show Source at position 90-126
+      break ;
+    case TRACK :
+      while ( rotationcount )                                 // Rotary encoder change?
+      {
+        delta = rotationcount < 0 ? -1 : +1 ;
+        rotationcount -= delta ;
+        enc_nodeID = selectnextSDnode ( enc_nodeID, delta ) ; // Select the next file on SD
+      }
+      enc_filename = getSDfilename ( enc_nodeID ) ;           // Set new filename
+      while ( ( inx = enc_filename.indexOf ( "/" ) ) >= 0 )   // Search for last slash
+      {
+        enc_filename.remove ( 0, inx + 1 ) ;                  // Remove before the slash
+      }
+      displayinfo ( enc_filename.c_str(),
+                    90, 36, YELLOW ) ;                        // Show Source at position 90-126
+  }
+  rotationcount = 0 ;                                         // Reset count in all cases
+}
+
 
 //**************************************************************************************************
 //                                           M P 3 L O O P                                         *
@@ -2935,6 +3305,7 @@ void mp3loop()
   int             i ;                                    // Index in tmpbuff
   uint32_t        rs ;                                   // Free space in ringbuffer
   uint32_t        av ;                                   // Available in stream
+  String          nodeID ;                               // Next nodeID of track on SD
 
   // Try to keep the ringbuffer filled up by adding as much bytes as possible
   if ( datamode & ( INIT | HEADER | DATA |               // Test op playing
@@ -2994,9 +3365,10 @@ void mp3loop()
     emptyring() ;                                        // Empty the ringbuffer
     metaint = 0 ;                                        // No metaint known now
     datamode = STOPPED ;                                 // Yes, state becomes STOPPED
-#if defined ( USETFT )
-    tft.fillRect ( 0, 8, 160, 118, BLACK ) ;             // Clear most of the screen
-#endif
+    if ( tft )
+    {
+      tft->fillRect ( 0, 8, 160, 118, BLACK ) ;          // Clear most of the screen
+    }
     delay ( 500 ) ;
   }
   if ( localfile )                                       // Playin from SD?
@@ -3006,10 +3378,12 @@ void mp3loop()
                       PLAYLISTHEADER |
                       PLAYLISTDATA ) )
     {
-      if ( ( av == 0 ) && ( ringavail() == 0 ) )         // End of mp3 data?
+      if ( ( av == 0 ) && ( ringavail() == 0 ) )           // End of mp3 data?
       {
-        datamode = STOPREQD ;                            // End of local mp3-file detected
-        selectnextSDfile() ;                             // Select the next file on SD
+        datamode = STOPREQD ;                              // End of local mp3-file detected
+        nodeID = selectnextSDnode ( SD_currentnode, +1 ) ; // Select the next file on SD
+        host = getSDfilename ( nodeID ) ;
+        hostreq = true ;                                   // Request this host
       }
     }
   }
@@ -3064,16 +3438,10 @@ void mp3loop()
       if ( host.startsWith ( "ihr/" ) )                   // iHeartRadio station requested?
       {
         host = host.substring ( 4 ) ;                     // Yes, remove "ihr/"
-        host = xmlparse ( host ) ;                        // Parse the xml to get the host
+        host = xmlgethost ( host ) ;                      // Parse the xml to get the host
       }
       connecttohost() ;                                   // Switch to new host
     }
-  }
-  if ( xmlreq )                                           // Directly xml requested?
-  {
-    xmlreq = false ;                                      // Yes, clear request flag
-    host = xmlparse ( host ) ;                            // Parse the xml to get the host
-    connecttohost() ;                                     // and connect to this host
   }
 }
 
@@ -3136,6 +3504,7 @@ void loop()
     time_req = false ;
     displayvolume() ;                                       // Show volume on display
   }
+  chk_enc() ;                                               // Check rotary encoder functions
 }
 
 
@@ -3308,7 +3677,8 @@ void handlebyte ( uint8_t b, bool force )
         if ( lcml.indexOf ( "content-type" ) >= 0)     // Line with "Content-Type: xxxx/yyy"
         {
           ctseen = true ;                              // Yes, remember seeing this
-          ct = metaline.substring ( 14 ) ;             // Set contentstype. Not used yet
+          ct = metaline.substring ( 13 ) ;             // Set contentstype. Not used yet
+          ct.trim() ;
           dbgprint ( "%s seen.", ct.c_str() ) ;
         }
         if ( lcml.startsWith ( "icy-br:" ) )
@@ -3616,6 +3986,27 @@ void handleFSf ( const String& pagename )
 
 
 //**************************************************************************************************
+//                                         C H O M P                                               *
+//**************************************************************************************************
+// Do some filtering on de inputstring:                                                            *
+//  - String comment part (starting with "#").                                                     *
+//  - Strip trailing CR.                                                                           *
+//  - Strip leading spaces.                                                                        *
+//  - Strip trailing spaces.                                                                       *
+//**************************************************************************************************
+void chomp ( String &str )
+{
+  int   inx ;                                         // Index in de input string
+
+  if ( ( inx = str.indexOf ( "#" ) ) >= 0 )           // Comment line or partial comment?
+  {
+    str.remove ( inx ) ;                              // Yes, remove
+  }
+  str.trim() ;                                        // Remove spaces and CR
+}
+
+
+//**************************************************************************************************
 //                                     A N A L Y Z E C M D                                         *
 //**************************************************************************************************
 // Handling of the various commands from remote webclient, Serial or MQTT.                         *
@@ -3638,27 +4029,6 @@ const char* analyzeCmd ( const char* str )
     res = analyzeCmd ( str, "0" ) ;              // No value, assume zero
   }
   return res ;
-}
-
-
-//**************************************************************************************************
-//                                         C H O M P                                               *
-//**************************************************************************************************
-// Do some filtering on de inputstring:                                                            *
-//  - String comment part (starting with "#").                                                     *
-//  - Strip trailing CR.                                                                           *
-//  - Strip leading spaces.                                                                        *
-//  - Strip trailing spaces.                                                                       *
-//**************************************************************************************************
-void chomp ( String &str )
-{
-  int   inx ;                                         // Index in de input string
-
-  if ( ( inx = str.indexOf ( "#" ) ) >= 0 )           // Comment line or partial comment?
-  {
-    str.remove ( inx ) ;                              // Yes, remove
-  }
-  str.trim() ;                                        // Remove spaces and CR
 }
 
 
@@ -3692,7 +4062,7 @@ void chomp ( String &str )
 //   mqttpasswd = mypassword                // Set MQTT password for authentication *)             *
 //   clk_server = pool.ntp.org              // Time server to be used *)                           *
 //   clk_offset = <-11..+14>                // Offset with respect to UTC in hours *)              *
-//   clk_dst = <1..2>                       // Offset during daylight saving time in hours *)      *
+//   clk_dst    = <1..2>                    // Offset during daylight saving time in hours *)      *
 //   mp3track   = <nodeID>                  // Play track from SD card, nodeID 0 = random          *
 //   settings                               // Returns setting like presets and tone               *
 //   status                                 // Show current URL to play                            *
