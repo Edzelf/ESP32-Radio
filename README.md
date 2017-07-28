@@ -14,6 +14,7 @@ Features:
 - Can be controlled over MQTT.
 - Can be controlled over Serial Input.
 - Can be controlled by IR.
+-	Can be controlled by rotary switch encoder.
 -	Up to 14 free input pins can be configured to control the radio.
 -	The strongest available WiFi network is automatically selected.
 -	Heavily commented source code, easy to add extra functionality.
@@ -29,6 +30,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 28-jul-2017: Added rotary swich encoder, flexible GPIO assignment.
 - 19-jul-2017: Minor corrections.
 - 18-jul-2017: Show time of day on TFT.
 - 04-jul-2017: Correction MQTT subscription, keep playing during long oprerations.
