@@ -87,10 +87,11 @@
 // 19-07-2017, ES: Minor corrections.
 // 26-07-2017, ES: Flexible pin assignment. Add rotary encoder switch.
 // 27-07-2017, ES: Removed tinyXML library.
+// 18-08-2017, Es: Minor corrections
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Fri, 28 Jul 2017 12:05:00 GMT"
+#define VERSION "Fri, 18 Aug 2017 14:15:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -2181,7 +2182,7 @@ String readprefs ( bool output )
     {
       strcpy ( mykey, keys[i] ) ;                           // Copy key
       p = strstr ( mykey, "_xx"  ) ;                        // Get position of "_" in numerated key
-      jmax = 100 ;                                          // Normally 100
+      jmax = 100 ;                                          // Assume max number of presets
       numformat = "_%02d" ;                                 // Format for numerated keys
       if ( strstr ( mykey, "ir_xx" ) )                      // Longer range for ir_xx
       {
@@ -2627,7 +2628,7 @@ void setup()
                              ini_block.tft_dc_pin ) ;    // Create an instant for TFT
     tft->begin() ;                                       // Init TFT interface
     tft->fillRect ( 0, 0, 160, 128, BLACK ) ;            // Clear screen does not work when rotated
-    tft->setRotation ( 3 ) ;                             // Use landscape format
+    tft->setRotation ( 3 ) ;                             // Use landscape format (1 for upside down)
     tft->clearScreen() ;                                 // Clear screen
     tft->setTextSize ( 1 ) ;                             // Small character font
     tft->setTextColor ( WHITE ) ;                        // Info in white
@@ -2722,7 +2723,7 @@ void setup()
                ini_block.clk_server.c_str() ) ;          // GMT offset, daylight offset in seconds
   timeinfo.tm_year = 0 ;                                 // Set TOD to illegal
   // Init settings for rotary switch (if existing).
-  if ( ini_block.enc_clk_pin + ini_block.enc_dt_pin + ini_block.enc_sw_pin )
+  if ( ( ini_block.enc_clk_pin + ini_block.enc_dt_pin + ini_block.enc_sw_pin ) > 2 )
   {
     dbgprint ( "Rotary encoder is enabled" ) ;
     attachInterrupt ( ini_block.enc_clk_pin, isr_enc, CHANGE ) ;
@@ -3673,7 +3674,8 @@ void handlebyte ( uint8_t b, bool force )
       {
         lcml = metaline ;                              // Use lower case for compare
         lcml.toLowerCase() ;
-        dbgprint ( metaline.c_str() ) ;                // Yes, Show it
+        dbgprint ( "Headerline: %s",
+                   metaline.c_str() ) ;                // Yes, Show it
         if ( lcml.indexOf ( "content-type" ) >= 0)     // Line with "Content-Type: xxxx/yyy"
         {
           ctseen = true ;                              // Yes, remember seeing this
