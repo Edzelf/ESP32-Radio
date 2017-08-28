@@ -32,6 +32,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 28-aug-2017: Preferences for SPI bus, touch pins. Corrected bug in handling programmable pins.
 - 28-jul-2017: Added rotary swich encoder, flexible GPIO assignment.
 - 19-jul-2017: Minor corrections.
 - 18-jul-2017: Show time of day on TFT.
