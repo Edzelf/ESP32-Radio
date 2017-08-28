@@ -94,7 +94,7 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 28 Aug 2017 17:30:00 GMT"
+#define VERSION "Mon, 28 Aug 2017 17:50:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -3809,6 +3809,11 @@ void handlebyte ( uint8_t b, bool force )
         lcml.toLowerCase() ;
         dbgprint ( "Headerline: %s",
                    metaline.c_str() ) ;                // Yes, Show it
+        if ( lcml.startsWith ( "location: http://" ) ) // Redirection?
+        {
+          host = metaline.substring ( 17 ) ;           // Yes, get new URL
+          hostreq = true ;                             // And request this one
+        }
         if ( lcml.indexOf ( "content-type" ) >= 0)     // Line with "Content-Type: xxxx/yyy"
         {
           ctseen = true ;                              // Yes, remember seeing this
