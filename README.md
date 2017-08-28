@@ -17,6 +17,7 @@ Features:
 - Can be controlled over Serial Input.
 - Can be controlled by IR.
 -	Can be controlled by rotary switch encoder.
+- Can be controlled by touch pins.
 -	Up to 14 free input pins can be configured to control the radio.
 -	The strongest available WiFi network is automatically selected.
 -	Heavily commented source code, easy to add extra functionality.
