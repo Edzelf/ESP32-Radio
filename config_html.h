@@ -1,6 +1,6 @@
 // config.html file in raw data format for PROGMEM
 //
-#define config_html_version 170626
+#define config_html_version 170828
 const char config_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
@@ -25,7 +25,7 @@ const char config_html[] PROGMEM = R"=====(
    <h3>Available WiFi networks
    <select class="select" onChange="handletone(this)" id="ssid"></select>
    </h3>
-   <textarea rows="20" cols="100" id="prefs">Space for preferences</textarea> 
+   <textarea rows="20" cols="100" id="prefs">Loading preferences</textarea> 
    <br>
    <button class="button" onclick="fsav()">Save</button>
    &nbsp;&nbsp;

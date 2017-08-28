@@ -51,7 +51,7 @@
 // GPIO5            -                   pin 2 XCS             -        -
 // GPIO4            -                   pin 4 DREQ            -       -
 // GPIO2            pin 3 D/C           -                     -       -
-// GPIO18   SCLK    pin 5 CLK           pin 5 SCK             CLK     -
+// GPIO18   SCK     pin 5 CLK           pin 5 SCK             CLK     -
 // GPIO19   MISO    -                   pin 7 MISO            MISO    -
 // GPIO23   MOSI    pin 4 DIN           pin 6 MOSI            MOSI    -
 // GPIO21           -                   -                     CS      -
@@ -88,10 +88,13 @@
 // 26-07-2017, ES: Flexible pin assignment. Add rotary encoder switch.
 // 27-07-2017, ES: Removed tinyXML library.
 // 18-08-2017, Es: Minor corrections
+// 28-08-2017, ES: Preferences for pins used for SPI bus,
+//                 Corrected bug in handling programmable pins
+//                 Introduced touch pins.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Fri, 18 Aug 2017 14:15:00 GMT"
+#define VERSION "Mon, 28 Aug 2017 17:30:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -105,6 +108,7 @@
 #include <time.h>
 
 // Color definitions for the TFT screen (if used)
+// TFT has bits 6 bits (0..5) for RED, 6 bits (6..11) for GREEN and 4 bits (12..15) for BLUE.
 #define	BLACK   0x0000
 #define	BLUE    0xF800
 #define	RED     0x001F
@@ -192,6 +196,9 @@ struct ini_struct
   int8_t         vs_cs_pin ;                               // GPIO connected to CS of VS1053
   int8_t         vs_dcs_pin ;                              // GPIO connected to CS of VS1053
   int8_t         vs_dreq_pin ;                             // GPIO connected to CS of VS1053
+  int8_t         spi_sck_pin ;                             // GPIO connected to SPI SCK pin
+  int8_t         spi_miso_pin ;                            // GPIO connected to SPI MISO pin
+  int8_t         spi_mosi_pin ;                            // GPIO connected to SPI MOSI pin
 } ;
 
 enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,          // State for datastream
@@ -277,49 +284,74 @@ struct progpin_struct                                      // For programmable i
   String         command ;                                 // Command to execute when activated
                                                            // Example: "uppreset=1"
   bool           cur ;                                     // Current state, true = HIGH, false = LOW
-  bool           changed ;                                 // Change of state seen
 } ;
 
 progpin_struct   progpin[] =                               // Input pins and programmed function
 {
-  {  0, true,  true,   "", false, false },
-//{  1, true,  false,  "", false, false },                 // Reserved for TX Serial output
-  {  2, false, false,  "", false, false },
-//{  3, true,  false,  "", false, false },                 // Reserved for RX Serial input
-  {  4, false, false,  "", false, false },
-  {  5, false, false,  "", false, false },
-//{  6, true,  false,  "", false, false },                 // Reserved for FLASH SCK
-//{  7, true,  false,  "", false, false },                 // Reserved for FLASH D0
-//{  8, true,  false,  "", false, false },                 // Reserved for FLASH D1
-//{  9, true,  false,  "", false, false },                 // Reserved for FLASH D2
-//{ 10, true,  false,  "", false, false },                 // Reserved for FLASH D3
-//{ 11, true,  false,  "", false, false },                 // Reserved for FLASH CMD
-  { 12, false, false,  "", false, false },
-  { 13, false, false,  "", false, false },
-  { 14, false, false,  "", false, false },
-  { 15, false, false,  "", false, false },
-  { 16, false, false,  "", false, false },
-  { 17, false, false,  "", false, false },
-//{ 18, true,  false,  "", false, false },                 // Reserved for SPI CLK
-//{ 19, true,  false,  "", false, false },                 // Reserved for SPI MISO
-//{ 20, true,  false,  "", false, false },                 // Not exposed on DEV board
-  { 21, false, false,  "", false, false },                 // Also Wire SDA
-  { 22, false, false,  "", false, false },                 // Also Wire SCL
-//{ 23, true,  false,  "", false, false },                 // Reserved for SPI MOSI
-//{ 24, true,  false,  "", false, false },                 // Not exposed on DEV board
-  { 25, false, false,  "", false, false },
-  { 26, false, false,  "", false, false },
-  { 27, false, false,  "", false, false },
-//{ 28, true,  false,  "", false, false },                 // Not exposed on DEV board
-//{ 29, true,  false,  "", false, false },                 // Not exposed on DEV board
-//{ 30, true,  false,  "", false, false },                 // Not exposed on DEV board
-//{ 31, true,  false,  "", false, false },                 // Not exposed on DEV board
-  { 32, false, false,  "", false, false },
-  { 33, false, false,  "", false, false },
-  { 34, false, false,  "", false, false },                 // Note, no internal pull-up
-  { 35, false, false,  "", false, false },                 // Note, no internal pull-up
-  { -1, false, false,  "", false, false }                  // End of list
+  {  0, false, false,  "", false },
+//{  1, true,  false,  "", false },                        // Reserved for TX Serial output
+  {  2, false, false,  "", false },
+//{  3, true,  false,  "", false },                        // Reserved for RX Serial input
+  {  4, false, false,  "", false },
+  {  5, false, false,  "", false },
+//{  6, true,  false,  "", false },                        // Reserved for FLASH SCK
+//{  7, true,  false,  "", false },                        // Reserved for FLASH D0
+//{  8, true,  false,  "", false },                        // Reserved for FLASH D1
+//{  9, true,  false,  "", false },                        // Reserved for FLASH D2
+//{ 10, true,  false,  "", false },                        // Reserved for FLASH D3
+//{ 11, true,  false,  "", false },                        // Reserved for FLASH CMD
+  { 12, false, false,  "", false },
+  { 13, false, false,  "", false },
+  { 14, false, false,  "", false },
+  { 15, false, false,  "", false },
+  { 16, false, false,  "", false },
+  { 17, false, false,  "", false },
+  { 18, false, false,  "", false },                        // Default for SPI CLK
+  { 19, false, false,  "", false },                        // Default for SPI MISO
+//{ 20, true,  false,  "", false },                        // Not exposed on DEV board
+  { 21, false, false,  "", false },                        // Also Wire SDA
+  { 22, false, false,  "", false },                        // Also Wire SCL
+  { 23, false, false,  "", false },                        // Default for SPI MOSI
+//{ 24, true,  false,  "", false },                        // Not exposed on DEV board
+  { 25, false, false,  "", false },
+  { 26, false, false,  "", false },
+  { 27, false, false,  "", false },
+//{ 28, true,  false,  "", false },                        // Not exposed on DEV board
+//{ 29, true,  false,  "", false },                        // Not exposed on DEV board
+//{ 30, true,  false,  "", false },                        // Not exposed on DEV board
+//{ 31, true,  false,  "", false },                        // Not exposed on DEV board
+  { 32, false, false,  "", false },
+  { 33, false, false,  "", false },
+  { 34, false, false,  "", false },                        // Note, no internal pull-up
+  { 35, false, false,  "", false },                        // Note, no internal pull-up
+  { -1, false, false,  "", false }                         // End of list
 } ;
+
+struct touchpin_struct                                     // For programmable input pins
+{
+  int8_t         gpio ;                                    // Pin number GPIO
+  bool           reserved ;                                // Reserved for connected devices
+  bool           avail ;                                   // Pin is available for a command
+  String         command ;                                 // Command to execute when activated
+                                                           // Example: "uppreset=1"
+  bool           cur ;                                     // Current state, true = HIGH, false = LOW
+  int16_t        count ;                                   // Counter number of times low level
+} ;
+touchpin_struct   touchpin[] =                             // Touch pins and programmed function
+{
+  {   4, false, false, "", false },                        // TOUCH0
+//{   0, true,  false, "", false },                        // TOUCH1, reserved for BOOT button
+  {   2, false, false, "", false },                        // TOUCH2
+  {  15, false, false, "", false },                        // TOUCH3
+  {  13, false, false, "", false },                        // TOUCH4
+  {  12, false, false, "", false },                        // TOUCH5
+  {  14, false, false, "", false },                        // TOUCH6
+  {  27, false, false, "", false },                        // TOUCH7
+  {  33, false, false, "", false },                        // TOUCH8
+  {  32, false, false, "", false },                        // TOUCH9
+  {  -1, false, false, "", false }                         // End of table
+} ;  
+
 
 //**************************************************************************************************
 // Pages, CSS and data for the webinterface.                                                       *
@@ -1084,7 +1116,8 @@ char* dbgprint ( const char* format, ... )
 void gettime()
 {
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
-  char            timetxt[9] ;                              // Coverted timeinfo
+  char           timetxt[9] ;                               // Coverted timeinfo
+  static int16_t retrycount = 100 ;
 
   if ( tft )                                                // TFT used?
   {
@@ -1105,15 +1138,22 @@ void gettime()
       }
       if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
       {
-        dbgprint ( "Failed to obtain time!" ) ;           // Error
-        timeinfo.tm_year = 0 ;                            // Set current time to illegal
-        return;
+        dbgprint ( "Failed to obtain time!" ) ;             // Error
+        timeinfo.tm_year = 0 ;                              // Set current time to illegal
+        if ( retrycount )                                   // Give up syncing?
+        { 
+          retrycount-- ;                                    // No try again
+          delaycount = 5 ;                                  // Retry after 5 seconds
+        }
       }
-      sprintf ( timetxt, "%02d:%02d:%02d",                  // Format new time to a string
-                timeinfo.tm_hour,
-                timeinfo.tm_min,
-                timeinfo.tm_sec ) ;
-      dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
+      else
+      {
+        sprintf ( timetxt, "%02d:%02d:%02d",                // Format new time to a string
+                  timeinfo.tm_hour,
+                  timeinfo.tm_min,
+                  timeinfo.tm_sec ) ;
+        dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
+      }
     }
   }
 }
@@ -2012,7 +2052,7 @@ String readhostfrompref()
 //**************************************************************************************************
 //                                       R E A D P R O G B U T T O N S                             *
 //**************************************************************************************************
-// Read the preferences for the programmable input pins.                                           *
+// Read the preferences for the programmable input pins and the touch pins.                        *
 //**************************************************************************************************
 String readprogbuttons()
 {
@@ -2029,10 +2069,39 @@ String readprogbuttons()
       val = nvsgetstr ( mykey ) ;                           // Get the contents
       if ( val.length() )                                   // Does it exists?
       {
-        progpin[i].avail = true ;                           // This one is active now
-        progpin[i].command = val ;                          // Set command
-        dbgprint ( "GPIO%d will execute %s",                // Show result
-                   pinnr, val.c_str() ) ;
+        if ( !progpin[i].reserved )                         // Do not use reserved pins
+        {
+          progpin[i].avail = true ;                         // This one is active now
+          progpin[i].command = val ;                        // Set command
+          dbgprint ( "gpio_%02d will execute %s",           // Show result
+                     pinnr, val.c_str() ) ;
+        }
+      }
+    }
+  }
+  // Now for the touch pins 0..9, identified by their GPIO pin number
+  for ( i = 0 ; ( pinnr = touchpin[i].gpio ) >= 0 ; i++ )   // Scan for all programmable pins
+  {
+    sprintf ( mykey, "touch_%02d", pinnr ) ;                // Form key in preferences
+    if ( nvssearch ( mykey ) )
+    {
+      val = nvsgetstr ( mykey ) ;                           // Get the contents
+      if ( val.length() )                                   // Does it exists?
+      {
+        if ( !touchpin[i].reserved )                        // Do not use reserved pins
+        {
+          touchpin[i].avail = true ;                        // This one is active now
+          touchpin[i].command = val ;                       // Set command
+          //pinMode ( touchpin[i].gpio,  INPUT ) ;          // Free floating input
+          dbgprint ( "touch_%02d will execute %s",          // Show result
+                     pinnr, val.c_str() ) ;
+        }
+        else
+        {
+          dbgprint ( "touch_%02d pin (GPIO%02d) is reserved for I/O!",
+                     pinnr, pinnr ) ;
+                     
+        }
       }
     }
   }
@@ -2043,18 +2112,31 @@ String readprogbuttons()
 //                                       R E S E R V E P I N                                       *
 //**************************************************************************************************
 // Set I/O pin to "reserved".                                                                      *
-// The pin is then not available for a programmeble function.                                      *
+// The pin is than not available for a programmable function.                                      *
 //**************************************************************************************************
 void reservepin ( int8_t rpinnr )
 {
-  uint8_t i = 0 ;                                           // Index in progpin array
+  uint8_t i = 0 ;                                           // Index in progpin/touchpin array
   int8_t  pin ;                                             // Pin number in progpin array
 
-  while ( ( pin = progpin[i].gpio ) )                       // Find entry for requested pin
+  while ( ( pin = progpin[i].gpio ) >= 0 )                  // Find entry for requested pin
   {
     if ( pin == rpinnr )                                    // Entry found?
     {
+      dbgprint ( "GPIO%02d unavailabe for 'gpio_'-command", pin ) ;
       progpin[i].reserved = true ;                          // Yes, pin is reserved now
+      break ;                                               // No need to continue
+    }
+    i++ ;                                                   // Next entry
+  }
+  // Also reserve touchpin numbers
+  i = 0 ;
+  while ( ( pin = touchpin[i].gpio ) >= 0 )                 // Find entry for requested pin
+  {
+    if ( pin == rpinnr )                                    // Entry found?
+    {
+      dbgprint ( "GPIO%02d unavailabe for 'touch'-command", pin ) ;
+      touchpin[i].reserved = true ;                         // Yes, pin is reserved now
       break ;                                               // No need to continue
     }
     i++ ;                                                   // Next entry
@@ -2075,16 +2157,19 @@ String readIOprefs()
     int8_t* gnr ;                                         // GPIO pin number
   };
   struct iosetting klist[] = {                            // List of I/O related keys
-                 { "ir_pin",  &ini_block.ir_pin      },
-                 { "enc_clk", &ini_block.enc_clk_pin },
-                 { "enc_dt",  &ini_block.enc_dt_pin  },
-                 { "enc_sw",  &ini_block.enc_sw_pin  },
-                 { "tft_cs",  &ini_block.tft_cs_pin  },
-                 { "tft_dc",  &ini_block.tft_dc_pin  },
-                 { "sd_cs",   &ini_block.sd_cs_pin   },
-                 { "vs_cs",   &ini_block.vs_cs_pin   },
-                 { "vs_dcs",  &ini_block.vs_dcs_pin  },
-                 { "vs_dreq", &ini_block.vs_dreq_pin },
+                 { "ir_pin",   &ini_block.ir_pin       },
+                 { "enc_clk",  &ini_block.enc_clk_pin  },
+                 { "enc_dt",   &ini_block.enc_dt_pin   },
+                 { "enc_sw",   &ini_block.enc_sw_pin   },
+                 { "tft_cs",   &ini_block.tft_cs_pin   },
+                 { "tft_dc",   &ini_block.tft_dc_pin   },
+                 { "sd_cs",    &ini_block.sd_cs_pin    },
+                 { "vs_cs",    &ini_block.vs_cs_pin    },
+                 { "vs_dcs",   &ini_block.vs_dcs_pin   },
+                 { "vs_dreq",  &ini_block.vs_dreq_pin  },
+                 { "spi_sck",  &ini_block.spi_sck_pin  },
+                 { "spi_miso", &ini_block.spi_miso_pin },
+                 { "spi_mosi", &ini_block.spi_mosi_pin },
                  { NULL,      NULL                   }    // End of list
                  } ;
   int         i ;                                         // Loop control
@@ -2137,9 +2222,15 @@ String readprefs ( bool output )
                    "#",
                    "gpio_xx",
                    "#",
+                   "touch_xx",
+                   "#",
                    "clk_server",
                    "clk_offset",
                    "clk_dst",
+                   "#",
+                   "spi_sck",
+                   "spi_miso",
+                   "spi_mosi",
                    "#",
                    "ir_pin",
                    "ir_xx",
@@ -2205,6 +2296,11 @@ String readprefs ( bool output )
           if ( val.length() )                               // Does it exists?
           {
             count++ ;                                       // Count number of keys
+            if ( sep )                                      // Need for a separator
+            {
+              outstr += "#\n" ;                             // Yes, add one
+              sep = false ;                                 // Clear flag
+            }
             outstr += String ( mykey ) +                    // Yes, form outputstring
                       " = " +
                       String ( val ) +
@@ -2390,28 +2486,62 @@ void  scandigital()
   int8_t          pinnr ;                                   // Pin number to check
   bool            level ;                                   // Input level
   const char*     reply ;                                   // Result of analyzeCmd
-
-  if ( millis() - oldmillis < 100 )                         // Debounce
+  int16_t         tlevel ;                                  // Level found by touch pin
+  const int16_t   THRESHOLD = 30 ;                          // Threshold or touch pins
+  
+  if ( ( millis() - oldmillis ) < 100 )                     // Debounce
   {
     return ;
   }
   oldmillis = millis() ;                                    // 100 msec over
   for ( i = 0 ; ( pinnr = progpin[i].gpio ) >= 0 ; i++ )    // Scan all inputs
   {
-    if ( !progpin[i].avail || !progpin[i].reserved )        // Skip unused and reserved pins
+    if ( !progpin[i].avail || progpin[i].reserved )         // Skip unused and reserved pins
     {
       continue ;
     }
     level = ( digitalRead ( pinnr ) == HIGH ) ;             // Sample the pin
     if ( level != progpin[i].cur )                          // Change seen?
     {
-      progpin[i].changed = true ;                           // Yes, register a change
       progpin[i].cur = level ;                              // And the new level
       if ( !level )                                         // HIGH to LOW change?
       {
-        dbgprint ( "GPIO%d is now LOW, execute %s",
+        dbgprint ( "GPIO_%02d is now LOW, execute %s",
                    pinnr, progpin[i].command.c_str() ) ;
         reply = analyzeCmd ( progpin[i].command.c_str() ) ; // Analyze command and handle it
+        dbgprint ( reply ) ;                                // Result for debugging
+      }
+    }
+  }
+  // Now for the touch pins
+  for ( i = 0 ; ( pinnr = touchpin[i].gpio ) >= 0 ; i++ )   // Scan all inputs
+  {
+    if ( !touchpin[i].avail || touchpin[i].reserved )       // Skip unused and reserved pins
+    {
+      continue ;
+    }
+    tlevel = ( touchRead ( pinnr ) ) ;                      // Sample the pin
+    level = ( tlevel >= 30 ) ;                              // True if below threshold
+    if ( level )                                            // Level HIGH?
+    {
+      touchpin[i].count = 0 ;                               // Reset count number of times
+    }
+    else
+    {
+      if ( ++touchpin[i].count < 3 )                        // Count number of times LOW
+      {
+        level = true ;                                      // Not long enough: handle as HIGH
+      }
+    }
+    if ( level != touchpin[i].cur )                         // Change seen?
+    {
+      touchpin[i].cur = level ;                             // And the new level
+      if ( !level )                                         // HIGH to LOW change?
+      {
+        dbgprint ( "TOUCH_%02d is now %d ( < %d ), execute %s",
+                   pinnr, tlevel, THRESHOLD,
+                   touchpin[i].command.c_str() ) ;
+        reply = analyzeCmd ( touchpin[i].command.c_str() ); // Analyze command and handle it
         dbgprint ( reply ) ;                                // Result for debugging
       }
     }
@@ -2585,7 +2715,7 @@ void setup()
   Serial.println() ;
   // Version tests for some vital include files
   if ( about_html_version   < 170626 ) dbgprint ( wvn, "about" ) ;
-  if ( config_html_version  < 170626 ) dbgprint ( wvn, "config" ) ;
+  if ( config_html_version  < 170828 ) dbgprint ( wvn, "config" ) ;
   if ( index_html_version   < 170703 ) dbgprint ( wvn, "index" ) ;
   if ( mp3play_html_version < 170626 ) dbgprint ( wvn, "mp3play" ) ;
   if ( defaultprefs_version < 170728 ) dbgprint ( wvn, "defaultprefs" ) ;
@@ -2599,7 +2729,10 @@ void setup()
   ini_block.clk_server = "pool.ntp.org" ;                // Default server for NTP
   ini_block.clk_offset = 1 ;                             // Default Amsterdam time zone
   ini_block.clk_dst = 1 ;                                // DST is +1 hour
-  readIOprefs() ;                                        // Read pins used for TFT, VS1053, IR, Rotary encoder
+  ini_block.spi_sck_pin = 18 ;                           // GPIO connected to SPI SCK pin
+  ini_block.spi_miso_pin = 19 ;                          // GPIO connected to SPI MISO pin
+  ini_block.spi_mosi_pin = 23 ;                          // GPIO connected to SPI MOSI pin
+  readIOprefs() ;                                        // Read pins used for SPI, TFT, VS1053, IR, Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
   {
     pinMode ( pinnr, INPUT_PULLUP ) ;                    // Input for control button
@@ -2616,9 +2749,9 @@ void setup()
     dbgprint ( "GPIO%d is %s", pinnr, p ) ;
   }
   readprogbuttons() ;                                    // Program the free input pins
-  SPI.begin() ;                                          // Init VSPI bus with default pins
-  //pinMode ( VS1053_CS, OUTPUT ) ;                      // Be sure to deselect VS1053
-  //digitalWrite ( VS1053_CS, HIGH ) ;
+  SPI.begin ( ini_block.spi_sck_pin,                     // Init VSPI bus with default or modified pins
+              ini_block.spi_miso_pin,
+              ini_block.spi_mosi_pin ) ;
   pinMode ( ini_block.ir_pin, INPUT ) ;                  // Pin for IR receiver VS1838B
   attachInterrupt ( ini_block.ir_pin, isr_IR, CHANGE ) ; // Interrupts will be handle by isr_IR
   if ( ini_block.tft_cs_pin >= 0 )
