@@ -92,14 +92,16 @@
 //                 Corrected bug in handling programmable pins,
 //                 Introduced touch pins.
 // 30-08-2017, ES: Limit number of retries foor MQTT connection.
+//                 Added MDNS responder.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 30 Aug 2017 08:20:00 GMT"
+#define VERSION "Wed, 30 Aug 2017 08:30:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
 #include <WiFiMulti.h>
+#include <ESPmDNS.h>
 #include <TFT_ILI9163C.h>
 #include <stdio.h>
 #include <string.h>
@@ -2841,6 +2843,14 @@ void setup()
       mqttclient.setServer(ini_block.mqttbroker.c_str(), // Specify the broker
                            ini_block.mqttport ) ;        // And the port
       mqttclient.setCallback ( onMqttMessage ) ;         // Set callback on receive
+      if ( MDNS.begin ( NAME ) )                         // Start MDNS transponder
+      {
+        dbgprint ( "MDNS responder started" ) ;
+      }
+      else
+      {
+        dbgprint ( "Error setting up MDNS responder!" ) ;
+      }
     }
   }
   else
