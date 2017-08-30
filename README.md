@@ -33,7 +33,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
-- 30-aug-2017: Limit number of retries foor MQTT connection.
+- 30-aug-2017: Limit number of retries foor MQTT connection. Added MDNS transponder.
 - 28-aug-2017: Preferences for SPI bus, touch pins.
                Corrected bug in handling programmable pins.
                Handling of http redirections.
