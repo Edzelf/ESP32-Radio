@@ -89,12 +89,13 @@
 // 27-07-2017, ES: Removed tinyXML library.
 // 18-08-2017, Es: Minor corrections
 // 28-08-2017, ES: Preferences for pins used for SPI bus,
-//                 Corrected bug in handling programmable pins
+//                 Corrected bug in handling programmable pins,
 //                 Introduced touch pins.
+// 30-08-2017, ES: Limit number of retries foor MQTT connection.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 28 Aug 2017 17:50:00 GMT"
+#define VERSION "Wed, 30 Aug 2017 08:20:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -138,7 +139,7 @@
 // Also used for other naming.
 #define NAME "ESP32Radio"
 // Maximum number of MQTT reconnects before give-up
-#define MAXMQTTCONNECTS 20
+#define MAXMQTTCONNECTS 5
 // Adjust size of buffer to the longest expected string for nvsgetstr
 #define NVSBUFSIZE 150
 //
@@ -2123,7 +2124,7 @@ void reservepin ( int8_t rpinnr )
   {
     if ( pin == rpinnr )                                    // Entry found?
     {
-      dbgprint ( "GPIO%02d unavailabe for 'gpio_'-command", pin ) ;
+      //dbgprint ( "GPIO%02d unavailabe for 'gpio_'-command", pin ) ;
       progpin[i].reserved = true ;                          // Yes, pin is reserved now
       break ;                                               // No need to continue
     }
@@ -2135,7 +2136,7 @@ void reservepin ( int8_t rpinnr )
   {
     if ( pin == rpinnr )                                    // Entry found?
     {
-      dbgprint ( "GPIO%02d unavailabe for 'touch'-command", pin ) ;
+      //dbgprint ( "GPIO%02d unavailabe for 'touch'-command", pin ) ;
       touchpin[i].reserved = true ;                         // Yes, pin is reserved now
       break ;                                               // No need to continue
     }
@@ -2372,14 +2373,14 @@ bool mqttreconnect()
     return res ;
   }
   retrytime = millis() ;                                  // Set time of last try
-  if ( retrycount > 50 )                                  // Tried too much?
+  if ( mqttcount > MAXMQTTCONNECTS )                      // Tried too much?
   {
     mqtt_on = false ;                                     // Yes, switch off forever
     return res ;                                          // and quit
   }
-  retrycount++ ;                                          // Count the retries
+  mqttcount++ ;                                          // Count the retries
   dbgprint ( "(Re)connecting number %d to MQTT %s",       // Show some debug info
-             retrycount,
+             mqttcount,
              ini_block.mqttbroker.c_str() ) ;
   sprintf ( clientid, "%s-%04d",                          // Generate client ID
             NAME, random ( 10000 ) ) ;
