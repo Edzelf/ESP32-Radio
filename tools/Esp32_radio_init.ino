@@ -36,8 +36,8 @@ void setup()
   preferences.putString ( "mqttpasswd",   "none" ) |
   preferences.putString ( "mqtttpreset",  "none" ) |
   //
-  preferences.putString ( "wifi_00", "NETGEAR-11/DEADC0DE11" ) |
-  preferences.putString ( "wifi_01", "ADSL-11/DEADC0DE11" ) |
+  preferences.putString ( "wifi_00", "ssid1/pw1" ) |
+  preferences.putString ( "wifi_01", "ssid2/pw2" ) |
   //
   preferences.putString ( "volume", "72" ) |
   preferences.putString ( "toneha", "0" ) |
