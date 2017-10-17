@@ -102,7 +102,6 @@
 #include <PubSubClient.h>
 #include <WiFiMulti.h>
 #include <ESPmDNS.h>
-#include <TFT_ILI9163C.h>
 #include <stdio.h>
 #include <string.h>
 #include <FS.h>
@@ -110,12 +109,26 @@
 #include <ArduinoOTA.h>
 #include <time.h>
 
-// Color definitions for the TFT screen (if used)
+//available display drivers for TFT
+#define ILI9163C 0
+#define ST7735 1
+// set DISP to one of the display drivers defined above
+#define DISP ILI9163C
+// Library include and color definitions for the TFT screen (if used)
 // TFT has bits 6 bits (0..5) for RED, 6 bits (6..11) for GREEN and 4 bits (12..15) for BLUE.
-#define	BLACK   0x0000
-#define	BLUE    0xF800
-#define	RED     0x001F
-#define	GREEN   0x07E0
+#if DISP == ILI9163C
+  #include <TFT_ILI9163C.h>
+  #define	BLACK   0x0000
+  #define	BLUE    0xF800
+  #define	RED     0x001F
+  #define	GREEN   0x07E0
+#else
+  #include <Adafruit_ST7735.h>
+  #define BLACK   ST7735_BLACK
+  #define BLUE    ST7735_BLUE
+  #define RED     ST7735_RED
+  #define GREEN   ST7735_GREEN
+#endif
 #define CYAN    GREEN | BLUE
 #define MAGENTA RED | BLUE
 #define YELLOW  RED | GREEN
@@ -221,7 +234,11 @@ WiFiClient       wmqttclient ;                             // An instance for mq
 PubSubClient     mqttclient ( wmqttclient ) ;              // Client for MQTT subscriber
 hw_timer_t*      timer = NULL ;                            // For timer
 char             cmd[130] ;                                // Command from MQTT or Serial
-TFT_ILI9163C*    tft = NULL ;                              // For instance of TFT driver
+#if DISP == ILI9163C
+  TFT_ILI9163C*  tft = NULL ;                            // For instance of TFT driver
+#else
+  Adafruit_ST7735* tft = NULL ;
+#endif
 uint32_t         totalcount = 0 ;                          // Counter mp3 data
 datamode_t       datamode ;                                // State of datastream
 int              metacount ;                               // Number of bytes in metadata
@@ -2760,12 +2777,21 @@ void setup()
   if ( ini_block.tft_cs_pin >= 0 )
   {
     dbgprint ( "Start TFT" ) ;
-    tft = new TFT_ILI9163C ( ini_block.tft_cs_pin,
-                             ini_block.tft_dc_pin ) ;    // Create an instant for TFT
-    tft->begin() ;                                       // Init TFT interface
-    tft->fillRect ( 0, 0, 160, 128, BLACK ) ;            // Clear screen does not work when rotated
+    #if DISP == ILI9163C
+      tft = new TFT_ILI9163C ( ini_block.tft_cs_pin,
+                               ini_block.tft_dc_pin ) ;  // Create an instant for TFT
+      tft->begin() ;                                     // Init TFT interface
+      tft->fillRect ( 0, 0, 160, 128, BLACK ) ;          // Clear screen does not work when rotated
+    #else
+      tft = new Adafruit_ST7735 ( ini_block.tft_cs_pin,
+                             ini_block.tft_dc_pin,0 ) ;  // Create an instant for TFT
+      tft->initR(INITR_BLACKTAB);                        // Init TFT interface
+      tft->fillScreen(BLACK);                     // Clear screen
+    #endif
     tft->setRotation ( 3 ) ;                             // Use landscape format (1 for upside down)
-    tft->clearScreen() ;                                 // Clear screen
+    #if DISP == ILI9163C
+      tft->clearScreen() ;                               // Clear screen
+    #endif
     tft->setTextSize ( 1 ) ;                             // Small character font
     tft->setTextColor ( WHITE ) ;                        // Info in white
     tft->println ( "Starting..." ) ;
