@@ -230,6 +230,7 @@ String           metaline ;                                // Readable line in m
 String           icystreamtitle ;                          // Streamtitle from metadata
 String           icyname ;                                 // Icecast station name
 String           ipaddress ;                               // Own IP-address
+String           onlinestatus = "online";                    // Status string for mqtt
 int              bitrate ;                                 // Bitrate in kb/sec
 int              metaint = 0 ;                             // Number of databytes between metadata
 int8_t           currentpreset = -1 ;                      // Preset station playing
@@ -376,7 +377,7 @@ touchpin_struct   touchpin[] =                             // Touch pins and pro
 //                                     M Q T T P U B _ C L A S S                                   *
 //**************************************************************************************************
 // ID's for the items to publish to MQTT.  Is index in amqttpub[]
-enum { MQTT_IP, MQTT_ICYNAME, MQTT_STREAMTITLE, MQTT_NOWPLAYING } ;
+enum { MQTT_IP, MQTT_ICYNAME, MQTT_STREAMTITLE, MQTT_NOWPLAYING, MQTT_STATUS } ;
 
 class mqttpubc                                             // For MQTT publishing
 {
@@ -389,13 +390,14 @@ class mqttpubc                                             // For MQTT publishin
     // Publication topics for MQTT.  The topic will be pefixed by "PREFIX/", where PREFIX is replaced
     // by the the mqttprefix in the preferences.
   protected:
-    mqttpub_struct amqttpub[5] =                           // Definitions of various MQTT topic to publish
+    mqttpub_struct amqttpub[6] =                           // Definitions of various MQTT topic to publish
     { // Index is equal to enum above
-      { "ip",              &ipaddress,      false },       // Definition for MQTT_IP
-      { "icy/name",        &icyname,        false },       // Definition for MQTT_ICYNAME
-      { "icy/streamtitle", &icystreamtitle, false },       // Definition for MQTT_STREAMTITLE
-      { "nowplaying",      &ipaddress,      false },       // Definition for MQTT_NOWPLAYING (not active)
-      { NULL,              NULL,            false }        // End of definitions
+      { "ip",              &ipaddress,         false },    // Definition for MQTT_IP
+      { "icy/name",        &icyname,           false },    // Definition for MQTT_ICYNAME
+      { "icy/streamtitle", &icystreamtitle,    false },    // Definition for MQTT_STREAMTITLE
+      { "nowplaying",      &ipaddress,         false },    // Definition for MQTT_NOWPLAYING (not active)
+      { "status",          &onlinestatus,      false },    // Definition for MQTT_STATUS
+      { NULL,              NULL,               false }     // End of definitions
     } ;
   public:
     void          trigger ( uint8_t item ) ;               // Trigger publishig for one item
@@ -437,7 +439,7 @@ void mqttpubc::publishtopic()
       payload = (*amqttpub[i].payload).c_str() ;              // Get payload
       dbgprint ( "Publish to topic %s : %s",                  // Show for debug
                  topic, payload ) ;
-      if ( !mqttclient.publish ( topic, payload ) )           // Publish!
+      if ( !mqttclient.publish ( topic, payload, true ) )     // Publish as retained!
       {
         dbgprint ( "MQTT publish failed!" ) ;                 // Failed
       }
@@ -2368,6 +2370,7 @@ bool mqttreconnect()
   static uint16_t retrycount = 0 ;                        // Give up after number of tries
   bool            res = false ;                           // Connect result
   char            clientid[20] ;                          // Client ID
+  char            topic[40];                              // Topic to publish last will
   char            subtopic[20] ;                          // Topic to subscribe
 
   if ( ( millis() - retrytime ) < 5000 )                  // Don't try to frequently
@@ -2386,9 +2389,15 @@ bool mqttreconnect()
              ini_block.mqttbroker.c_str() ) ;
   sprintf ( clientid, "%s-%04d",                          // Generate client ID
             NAME, random ( 10000 ) ) ;
-  res = mqttclient.connect ( clientid,                    // Connect to broker
+  sprintf ( topic, "%s/status",                           // Generate topic for last will
+            ini_block.mqttprefix.c_str()) ; 
+  res = mqttclient.connect ( clientid,                    // Connect to broker and register last will
                              ini_block.mqttuser.c_str(),
-                             ini_block.mqttpasswd.c_str()
+                             ini_block.mqttpasswd.c_str(),
+                             topic,
+                             0,
+                             true,
+                             "offline"
                            ) ;
   if ( res )
   {
@@ -2401,6 +2410,7 @@ bool mqttreconnect()
       dbgprint ( "MQTT subscribe failed!" ) ;             // Failure
     }
     mqttpub.trigger ( MQTT_IP ) ;                         // Publish own IP
+    mqttpub.trigger ( MQTT_STATUS ) ;                     // Publish online status
   }
   else
   {
@@ -3306,6 +3316,7 @@ void handleIpPub()
   }
   pubtime = millis() ;                                     // Set time of last publish
   mqttpub.trigger ( MQTT_IP ) ;                            // Request re-publish IP
+  mqttpub.trigger ( MQTT_STATUS ) ;                        // Request re-publish online status
 }
 
 //**************************************************************************************************
