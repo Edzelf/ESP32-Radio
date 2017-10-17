@@ -1435,7 +1435,9 @@ void listNetworks()
   int              i ;                // Loop control
   String           sassid ;           // Search string in anetworks
 
-  dbgprint ( "Scan Networks" ) ;      // Scan for nearby networks
+  WiFi.begin("ThisIsJustADummy","notApassword");  // Workaround for issue #27
+
+  dbgprint ( "Scan Networks" ) ;                  // Scan for nearby networks
   int numSsid = WiFi.scanNetworks() ;
   dbgprint ( "Scan completed" ) ;
   if ( numSsid <= 0 )
@@ -1964,6 +1966,9 @@ bool connectwifi()
 
   WiFi.disconnect() ;                                   // After restart the router could
   WiFi.softAPdisconnect(true) ;                         // still keep the old connection
+
+  WiFi.begin("ThisIsJustADummy","notApassword");        // Workaround for issue #27
+
   pfs = "IP = 192.168.4.1" ;                            // Default IP address (no AP found)
   if ( num_an )                                         // Any AP defined?
   {
@@ -4488,4 +4493,3 @@ String httpheader ( String contentstype )
                   "Cache-Control: " "max-age=3600\n"
                   "Last-Modified: " VERSION "\n\n" ) ;
 }
-
