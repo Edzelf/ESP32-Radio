@@ -33,6 +33,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 11-nov-2017: Increases ringbuffer size. Print measured bitrate at "test"-command.
 - 30-aug-2017: Limit number of retries foor MQTT connection. Added MDNS transponder.
 - 28-aug-2017: Preferences for SPI bus, touch pins.
                Corrected bug in handling programmable pins.
