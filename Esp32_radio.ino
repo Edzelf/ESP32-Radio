@@ -44,7 +44,7 @@
 // The VSPI interface is used for VS1053, TFT and SD.
 //
 // Wiring. Note that this is just an example.  Pins (except 18,19 and 23 of the SPI interface)
-// can be configured in the config page of the webinterface.
+// can be configured in the config page of the web interface.
 // ESP32dev Signal  Wired to LCD        Wired to VS1053      SDCARD   Wired to the rest
 // -------- ------  --------------      -------------------  ------   ---------------
 // GPIO16           -                   pin 1 XDCS            -       -
@@ -91,12 +91,13 @@
 // 28-08-2017, ES: Preferences for pins used for SPI bus,
 //                 Corrected bug in handling programmable pins,
 //                 Introduced touch pins.
-// 30-08-2017, ES: Limit number of retries foor MQTT connection.
+// 30-08-2017, ES: Limit number of retries for MQTT connection.
 //                 Added MDNS responder.
+// 11-11-2017, ES: Measure bit rate
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 30 Aug 2017 08:30:00 GMT"
+#define VERSION "Sat, 11 Nov 2017 19:30:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -133,7 +134,7 @@
 #endif
 // Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
 // Use a multiple of 1024 for optimal handling of bufferspace.  See definition of tmpbuff.
-#define RINGBFSIZ 20480
+#define RINGBFSIZ 40960
 // Debug buffer size
 #define DEBUG_BUFFER_SIZE 130
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
@@ -231,6 +232,7 @@ String           icystreamtitle ;                          // Streamtitle from m
 String           icyname ;                                 // Icecast station name
 String           ipaddress ;                               // Own IP-address
 int              bitrate ;                                 // Bitrate in kb/sec
+int              mbitrate ;                                // Measured bitrate
 int              metaint = 0 ;                             // Number of databytes between metadata
 int8_t           currentpreset = -1 ;                      // Preset station playing
 String           host ;                                    // The URL to connect to or file to play
@@ -271,7 +273,7 @@ uint32_t         nvshandle = 0 ;                           // Handle for nvs acc
 // Rotary encoder stuff
 uint16_t         clickcount = 0 ;                          // Incremented per encoder click, reset by timer
 int16_t          rotationcount = 0 ;                       // Current position of rotary switch
-uint16_t         enc_inactivity = false ;                  // Time inactive
+uint16_t         enc_inactivity = 0 ;                      // Time inactive
 bool             singleclick = false ;                     // True if single click detected
 bool             doubleclick = false ;                     // True if double click detected
 bool             tripleclick = false ;                     // True if triple click detected
@@ -530,19 +532,19 @@ class VS1053
     // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
     VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) ;
     void     begin() ;                                   // Begin operation.  Sets pins correctly,
-    // and prepares SPI bus.
+                                                         // and prepares SPI bus.
     void     startSong() ;                               // Prepare to start playing. Call this each
-    // time a new song starts.
+                                                         // time a new song starts.
     void     playChunk ( uint8_t* data, size_t len ) ;   // Play a chunk of data.  Copies the data to
-    // the chip.  Blocks until complete.
+                                                         // the chip.  Blocks until complete.
     void     stopSong() ;                                // Finish playing a song. Call this after
-    // the last playChunk call.
+                                                         // the last playChunk call.
     void     setVolume ( uint8_t vol ) ;                 // Set the player volume.Level from 0-100,
-    // higher is louder.
+                                                         // higher is louder.
     void     setTone ( uint8_t* rtone ) ;                // Set the player baas/treble, 4 nibbles for
-    // treble gain/freq and bass gain/freq
+                                                         // treble gain/freq and bass gain/freq
     uint8_t  getVolume() ;                               // Get the current volume setting.
-    // higher is louder.
+                                                         // higher is louder.
     void     printDetails ( const char *header ) ;       // Print configuration details to serial output.
     void     softReset() ;                               // Do a soft reset
     bool     testComm ( const char *header ) ;           // Test communication with module
@@ -933,7 +935,6 @@ esp_err_t nvsclear()
 //                                      N V S G E T S T R                                          *
 //**************************************************************************************************
 // Read a string from nvs.                                                                         *
-// A copy of the key is used because nvs_get_str will fail after some time otherwise....           *
 //**************************************************************************************************
 String nvsgetstr ( const char* key )
 {
@@ -1462,15 +1463,18 @@ void IRAM_ATTR timer10sec()
 {
   static uint32_t oldtotalcount = 7321 ;          // Needed foor change detection
   static uint8_t  morethanonce = 0 ;              // Counter for succesive fails
+  uint32_t        bytesplayed ;                   // Bytes send to MP3 converter
 
   if ( datamode & ( INIT | HEADER | DATA |        // Test op playing
                     METADATA | PLAYLISTINIT |
                     PLAYLISTHEADER |
                     PLAYLISTDATA ) )
   {
-    if ( totalcount == oldtotalcount )            // Still playing?
+    bytesplayed = totalcount - oldtotalcount ;    // Nunber of bytes played in the 10 seconds
+    oldtotalcount = totalcount ;                  // Save for comparison in next cycle
+    if ( bytesplayed == 0 )                       // Still playing?
     {
-      if ( morethanonce > 10 )                    // Happened too many times?
+      if ( morethanonce > 10 )                    // No! Happened too many times?
       {
         ESP.restart() ;                           // Reset the CPU, probably no return
       }
@@ -1490,11 +1494,10 @@ void IRAM_ATTR timer10sec()
     }
     else
     {
-      if ( morethanonce )                         // Recovered from data loss?
-      {
-        morethanonce = 0 ;                        // Data see, reset failcounter
-      }
-      oldtotalcount = totalcount ;                // Save for comparison in next cycle
+      //                                          // Data has been send to MP3 decoder
+      // Bitrate in kbits/s is bytesplayed / 10 / 1000 * 8
+      mbitrate = bytesplayed / 1250 ;             // Measured bitrate
+      morethanonce = 0 ;                          // Data seen, reset failcounter
     }
   }
 }
@@ -1667,7 +1670,7 @@ void IRAM_ATTR isr_enc()
   if ( newstate != clk_state )                             // State changed?
   {
     clk_state = newstate ;                                 // Yes, set current (new) state
-    if ( !clk_state )                                      // SW released?
+    if ( !clk_state )                                      // CLK released?
     {
       if ( digitalRead ( ini_block.enc_dt_pin ) )          // Yes, detect right/left rotation
       {
@@ -2034,7 +2037,7 @@ String readhostfrompref ( int8_t preset )
 String readhostfrompref()
 {
   String contents = "" ;                                // Result of search
-  int    maxtry ;                                       // Limit number of tries
+  int    maxtry = 0 ;                                   // Limit number of tries
 
   while ( ( contents = readhostfrompref ( ini_block.newpreset ) ) == "" )
   {
@@ -3444,7 +3447,7 @@ void chk_enc()
 //**************************************************************************************************
 void mp3loop()
 {
-  static uint8_t  tmpbuff[1024] ;                        // Input buffer for mp3 stream
+  static uint8_t  tmpbuff[2048] ;                        // Input buffer for mp3 stream
   uint32_t        maxchunk ;                             // Max number of bytes to read
   int             res = 0 ;                              // Result reading from mp3 stream
   int             i ;                                    // Index in tmpbuff
@@ -3784,16 +3787,17 @@ void handlebyte ( uint8_t b, bool force )
                      buf[i + 4], buf[i + 5], buf[i + 6], buf[i + 7] ) ;
         }
       }
+      totalcount += bufcnt ;                           // Count number of bytes, ignore overflow
       vs1053player.playChunk ( buf, bufcnt ) ;         // Yes, send to player
       bufcnt = 0 ;                                     // Reset count
     }
-    totalcount++ ;                                     // Count number of bytes, ignore overflow
     if ( metaint != 0 )                                // No METADATA on Ogg streams or mp3 files
     {
       if ( --datacount == 0 )                          // End of datablock?
       {
         if ( bufcnt )                                  // Yes, still data in buffer?
         {
+          totalcount += bufcnt ;                       // Count number of bytes, ignore overflow
           vs1053player.playChunk ( buf, bufcnt ) ;     // Yes, send to player
           bufcnt = 0 ;                                 // Reset count
         }
@@ -4366,8 +4370,8 @@ const char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
-    sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d",
-              ESP.getFreeHeap(), rcount, mp3client.available() ) ;
+    sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
+              ESP.getFreeHeap(), rcount, mp3client.available(), mbitrate ) ;
   }
   // Commands for bass/treble control
   else if ( argument.startsWith ( "tone" ) )          // Tone command
