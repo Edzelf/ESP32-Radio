@@ -93,11 +93,12 @@
 //                 Introduced touch pins.
 // 30-08-2017, ES: Limit number of retries for MQTT connection.
 //                 Added MDNS responder.
-// 11-11-2017, ES: Measure bit rate
+// 11-11-2017, ES: Increased ringbuffer.  Measure bit rate.
+// 13-11-2017, ES: Forward declarations.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Sat, 11 Nov 2017 19:30:00 GMT"
+#define VERSION "Mon, 13 Nov 2017 09:00:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -120,7 +121,6 @@
 #define CYAN    GREEN | BLUE
 #define MAGENTA RED | BLUE
 #define YELLOW  RED | GREEN
-#define WHITE   BLUE | RED | GREEN
 // Digital I/O used
 // Pins for VS1053 module
 #if defined ( ARDUINO_FEATHER_ESP32 )
@@ -166,6 +166,9 @@ const char* analyzeCmd ( const char* str ) ;
 const char* analyzeCmd ( const char* par, const char* val ) ;
 void        chomp ( String &str ) ;
 String      httpheader ( String contentstype ) ;
+bool        nvssearch ( const char* key ) ;
+void        mp3loop() ;
+void        tftlog ( const char *str ) ;
 
 
 //
@@ -344,17 +347,17 @@ struct touchpin_struct                                     // For programmable i
 } ;
 touchpin_struct   touchpin[] =                             // Touch pins and programmed function
 {
-  {   4, false, false, "", false },                        // TOUCH0
-//{   0, true,  false, "", false },                        // TOUCH1, reserved for BOOT button
-  {   2, false, false, "", false },                        // TOUCH2
-  {  15, false, false, "", false },                        // TOUCH3
-  {  13, false, false, "", false },                        // TOUCH4
-  {  12, false, false, "", false },                        // TOUCH5
-  {  14, false, false, "", false },                        // TOUCH6
-  {  27, false, false, "", false },                        // TOUCH7
-  {  33, false, false, "", false },                        // TOUCH8
-  {  32, false, false, "", false },                        // TOUCH9
-  {  -1, false, false, "", false }                         // End of table
+  {   4, false, false, "", false, 0 },                     // TOUCH0
+//{   0, true,  false, "", false, 0 },                     // TOUCH1, reserved for BOOT button
+  {   2, false, false, "", false, 0 },                     // TOUCH2
+  {  15, false, false, "", false, 0 },                     // TOUCH3
+  {  13, false, false, "", false, 0 },                     // TOUCH4
+  {  12, false, false, "", false, 0 },                     // TOUCH5
+  {  14, false, false, "", false, 0 },                     // TOUCH6
+  {  27, false, false, "", false, 0 },                     // TOUCH7
+  {  33, false, false, "", false, 0 },                     // TOUCH8
+  {  32, false, false, "", false, 0 },                     // TOUCH9
+  {  -1, false, false, "", false, 0 }                      // End of table
 } ;  
 
 
@@ -938,7 +941,6 @@ esp_err_t nvsclear()
 //**************************************************************************************************
 String nvsgetstr ( const char* key )
 {
-  uint32_t      counter ;
   static char   nvs_buf[NVSBUFSIZE] ;       // Buffer for contents
   size_t        len = NVSBUFSIZE ;          // Max length of the string, later real length
 
@@ -1225,7 +1227,7 @@ String getSDfilename ( String nodeID )
   String          res ;                                 // Function result
   File            root, file ;                          // Handle to root and directory entry
   uint16_t        n, i ;                                // Current sequence number and counter in directory
-  uint16_t        inx ;                                 // Position in nodeID
+  int16_t         inx ;                                 // Position in nodeID
   const char*     p = "/" ;                             // Points to directory/file
   uint16_t        rndnum ;                              // Random index in SD_nodelist
   int             nodeinx = 0 ;                         // Points to node ID in SD_nodecount
@@ -1400,6 +1402,8 @@ const char* getEncryptionType ( wifi_auth_mode_t thisType )
       return "WPA_WPA2_PSK" ;
     case WIFI_AUTH_MAX:
       return "MAX" ;
+    default:
+      break ;
   }
   return "????" ;
 }
@@ -1590,7 +1594,6 @@ void IRAM_ATTR isr_IR()
   uint32_t        t1, intval ;                       // Current time and interval since last change
   static uint32_t ir_locvalue = 0 ;                  // IR code
   static int      ir_loccount ;                      // Length of code
-  int             i ;                                // Loop control
   uint32_t        mask_in = 2 ;                      // Mask input for conversion
   uint16_t        mask_out = 1 ;                     // Mask output for conversion
 
@@ -1847,7 +1850,6 @@ void stop_mp3client ()
 bool connecttohost()
 {
   int         inx ;                                 // Position of ":" in hostname
-  char*       pfs ;                                 // Pointer to formatted string
   int         port = 80 ;                           // Port number for host
   String      extension = "/" ;                     // May be like "/mp3" in "skonto.ls.lv:8002/mp3"
   String      hostwoext ;                           // Host without extension and portnumber
@@ -1882,8 +1884,8 @@ bool connecttohost()
     port = host.substring ( inx + 1 ).toInt() ;     // Get portnumber as integer
     hostwoext = host.substring ( 0, inx ) ;         // Host without portnumber
   }
-  pfs = dbgprint ( "Connect to %s on port %d, extension %s",
-                   hostwoext.c_str(), port, extension.c_str() ) ;
+  dbgprint ( "Connect to %s on port %d, extension %s",
+             hostwoext.c_str(), port, extension.c_str() ) ;
   if ( mp3client.connect ( hostwoext.c_str(), port ) )
   {
     dbgprint ( "Connected to server" ) ;
@@ -1950,7 +1952,6 @@ bool connectwifi()
 
   WiFi.disconnect() ;                                   // After restart the router could
   WiFi.softAPdisconnect(true) ;                         // still keep the old connection
-  pfs = "IP = 192.168.4.1" ;                            // Default IP address (no AP found)
   if ( num_an )                                         // Any AP defined?
   {
     if ( num_an == 1 )                                  // Just one AP defined in preferences?
@@ -2060,7 +2061,7 @@ String readhostfrompref()
 //**************************************************************************************************
 // Read the preferences for the programmable input pins and the touch pins.                        *
 //**************************************************************************************************
-String readprogbuttons()
+void readprogbuttons()
 {
   char        mykey[20] ;                                   // For numerated key
   int8_t      pinnr ;                                       // GPIO pinnumber to fill
@@ -2155,12 +2156,12 @@ void reservepin ( int8_t rpinnr )
 //**************************************************************************************************
 // Scan the preferences for IO-pin definitions.                                                    *
 //**************************************************************************************************
-String readIOprefs()
+void readIOprefs()
 {
   struct iosetting
   {
-    char*   gname ;                                       // Name in preferences
-    int8_t* gnr ;                                         // GPIO pin number
+    const char* gname ;                                   // Name in preferences
+    int8_t*     gnr ;                                     // GPIO pin number
   };
   struct iosetting klist[] = {                            // List of I/O related keys
                  { "ir_pin",   &ini_block.ir_pin       },
@@ -2213,7 +2214,8 @@ String readIOprefs()
 //**************************************************************************************************
 String readprefs ( bool output )
 {
-  char* keys[] = { "mqttbroker", "mqttport", "mqttprefix",  // List of all defined keys
+  const char* keys[] = {
+                   "mqttbroker", "mqttport", "mqttprefix",  // List of all defined keys
                    "mqttuser",   "mqttpasswd",
                    "#",                                     // Spacing in output
                    "wifi_xx",
@@ -2259,12 +2261,11 @@ String readprefs ( bool output )
   char*       p ;                                           // Points to sequencenumber of numerated key
   int         i, j ;                                        // Loop control
   int         jmax ;                                        // Max numerated key
-  char*       numformat ;                                   // "_%02d" or "_%04X"
+  const char* numformat ;                                   // "_%02d" or "_%04X"
   String      val ;                                         // Contents of preference entry
   String      cmd ;                                         // Command for analyzCmd
   String      outstr = "" ;                                 // Outputstring
   int         count = 0 ;                                   // Number of keys found
-  size_t      len ;
   bool        sep = false ;                                 // Print separator
 
   for ( i = 0 ; keys[i] ; i++ )                             // Loop trough all possible keys
@@ -2368,7 +2369,6 @@ String readprefs ( bool output )
 bool mqttreconnect()
 {
   static uint32_t retrytime = 0 ;                         // Limit reconnect interval
-  static uint16_t retrycount = 0 ;                        // Give up after number of tries
   bool            res = false ;                           // Connect result
   char            clientid[20] ;                          // Client ID
   char            subtopic[20] ;                          // Topic to subscribe
@@ -2388,7 +2388,7 @@ bool mqttreconnect()
              mqttcount,
              ini_block.mqttbroker.c_str() ) ;
   sprintf ( clientid, "%s-%04d",                          // Generate client ID
-            NAME, random ( 10000 ) ) ;
+            NAME, (int) random ( 10000 ) % 10000 ) ;
   res = mqttclient.connect ( clientid,                    // Connect to broker
                              ini_block.mqttuser.c_str(),
                              ini_block.mqttpasswd.c_str()
@@ -2709,13 +2709,12 @@ void tftlog ( const char *str )
 //**************************************************************************************************
 void setup()
 {
-  int      itrpt ;                                       // Interrupt number for DREQ
-  int      i ;                                           // Loop control
-  int      pinnr ;                                       // Input pinnumber
-  char*    p ;
-  byte     mac[6] ;                                      // WiFi mac address
-  char     tmpstr[20] ;                                  // For version and Mac address
-  char*    wvn = "Include file %s_html has the wrong version number!  Replace header file." ;
+  int         i ;                                        // Loop control
+  int         pinnr ;                                    // Input pinnumber
+  const char* p ;
+  byte        mac[6] ;                                   // WiFi mac address
+  char        tmpstr[20] ;                               // For version and Mac address
+  const char* wvn = "Include file %s_html has the wrong version number!  Replace header file." ;
 
   Serial.begin ( 115200 ) ;                              // For debug
   Serial.println() ;
@@ -2937,7 +2936,6 @@ void writeprefs()
 {
   int     inx ;                                           // Position in inputstr
   char    c ;                                             // Input character
-  uint8_t nlcount = 0 ;                                   // For double newline detection
   String  inputstr = "" ;                                 // Input regel
   String  key, contents ;                                 // Pair for Preferences entry
 
@@ -3206,7 +3204,6 @@ String xmlgethost  ( String mount )
   String   sreply = "" ;                            // Reply from playerservices.streamtheworld.com
   String   statuscode = "200" ;                     // Assume good reply
   char     tmpstr[200] ;                            // Full GET command, later stream URL
-  char     c ;                                      // Next input character from reply
   String   urlout ;                                 // Result URL
 
   stop_mp3client() ; // Stop any current wificlient connections.
@@ -3447,10 +3444,9 @@ void chk_enc()
 //**************************************************************************************************
 void mp3loop()
 {
-  static uint8_t  tmpbuff[2048] ;                        // Input buffer for mp3 stream
+  static uint8_t  tmpbuff[RINGBFSIZ/20] ;                // Input buffer for mp3 stream
   uint32_t        maxchunk ;                             // Max number of bytes to read
   int             res = 0 ;                              // Result reading from mp3 stream
-  int             i ;                                    // Index in tmpbuff
   uint32_t        rs ;                                   // Free space in ringbuffer
   uint32_t        av ;                                   // Available in stream
   String          nodeID ;                               // Next nodeID of track on SD
@@ -3526,6 +3522,7 @@ void mp3loop()
                       PLAYLISTHEADER |
                       PLAYLISTDATA ) )
     {
+      av = mp3file.available() ;                           // Bytes left in file
       if ( ( av == 0 ) && ( ringavail() == 0 ) )           // End of mp3 data?
       {
         datamode = STOPREQD ;                              // End of local mp3-file detected
@@ -4234,7 +4231,6 @@ const char* analyzeCmd ( const char* par, const char* val )
   static char        reply[180] ;                     // Reply to client, will be returned
   uint8_t            oldvol ;                         // Current volume
   bool               relative ;                       // Relative argument (+ or -)
-  int                inx ;                            // Index in string
   String             tmpstr ;                         // Temporary for value
 
   strcpy ( reply, "Command accepted" ) ;              // Default reply
