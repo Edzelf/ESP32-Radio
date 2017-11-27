@@ -95,10 +95,13 @@
 //                 Added MDNS responder.
 // 11-11-2017, ES: Increased ringbuffer.  Measure bit rate.
 // 13-11-2017, ES: Forward declarations.
+// 16-11-2017, ES: Replaced ringbuffer by FreeRTOS queue, play function on second CPU,
+//                 Included improved rotary switch routines supplied by fenyvesi,
+//                 Better IR sensitivity.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 13 Nov 2017 09:00:00 GMT"
+#define VERSION "Mon, 27 Nov 2017 10:56:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -109,15 +112,18 @@
 #include <string.h>
 #include <FS.h>
 #include <SD.h>
+#include <SPI.h>
 #include <ArduinoOTA.h>
 #include <time.h>
+#include <freertos/queue.h>
+#include <freertos/task.h>
 
 // Color definitions for the TFT screen (if used)
 // TFT has bits 6 bits (0..5) for RED, 6 bits (6..11) for GREEN and 4 bits (12..15) for BLUE.
-#define	BLACK   0x0000
-#define	BLUE    0xF800
-#define	RED     0x001F
-#define	GREEN   0x07E0
+#define BLACK   0x0000
+#define BLUE    0xF800
+#define RED     0x001F
+#define GREEN   0x07E0
 #define CYAN    GREEN | BLUE
 #define MAGENTA RED | BLUE
 #define YELLOW  RED | GREEN
@@ -132,9 +138,8 @@
 #define VS1053_DCS    16
 #define VS1053_DREQ   4
 #endif
-// Ringbuffer for smooth playing. 20000 bytes is 160 Kbits, about 1.5 seconds at 128kb bitrate.
-// Use a multiple of 1024 for optimal handling of bufferspace.  See definition of tmpbuff.
-#define RINGBFSIZ 40960
+// Number of entries in the queue
+#define QSIZ 300
 // Debug buffer size
 #define DEBUG_BUFFER_SIZE 130
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
@@ -145,6 +150,8 @@
 #define MAXMQTTCONNECTS 5
 // Adjust size of buffer to the longest expected string for nvsgetstr
 #define NVSBUFSIZE 150
+// Position (column) of time in topline
+#define TIMEPOS 108
 //
 // Subscription topics for MQTT.  The topic will be pefixed by "PREFIX/", where PREFIX is replaced
 // by the the mqttprefix in the preferences.  The next definition will yield the topic "ESP32Radio/command"
@@ -152,10 +159,9 @@
 #define MQTT_SUBTOPIC     "command"           // Command to receive from MQTT
 //
 //**************************************************************************************************
-// Forward declaration of various functions.                                                       *
+// Forward declaration and prototypes of various functions.                                        *
 //**************************************************************************************************
-void        displaytime ( const char* str, uint16_t color, bool force = false ) ;
-void        displayinfo ( const char* str, uint16_t pos, uint16_t height, uint16_t color ) ;
+void        displaytime ( const char* str, uint16_t color = WHITE ) ;
 void        showstreamtitle ( const char* ml, bool full = false ) ;
 void        handlebyte ( uint8_t b, bool force = false ) ;
 void        handlebyte_ch ( uint8_t b, bool force = false ) ;
@@ -169,9 +175,60 @@ String      httpheader ( String contentstype ) ;
 bool        nvssearch ( const char* key ) ;
 void        mp3loop() ;
 void        tftlog ( const char *str ) ;
+void        playtask ( void * parameter ) ;
+void        gettime() ;
 
-
+//**************************************************************************************************
+// Several structs.                                                                                *
+//**************************************************************************************************
 //
+
+struct scrseg_struct                                  // For screen segments
+{
+  bool     update_req ;                               // Request update of screen
+  uint16_t color ;                                    // Textcolor
+  uint16_t y ;                                        // Begin of segment row
+  uint16_t height ;                                   // Height of segment
+  String   str ;                                      // String to be displayed
+} ;
+
+enum qdata_type { QDATA, QSTARTSONG, QSTOPSONG,
+                  QSTREAMTITLE, QTIME, QCLEARTFT
+                } ;                                   // datatyp in qdata_struct
+struct qdata_struct
+{
+  int datatyp ;                                       // Identifier
+  __attribute__((aligned(4))) uint8_t buf[32] ;       // Buffer for chunk
+} ;
+
+struct ini_struct
+{
+  String         mqttbroker ;                         // The name of the MQTT broker server
+  String         mqttprefix ;                         // Prefix to use for topics
+  uint16_t       mqttport ;                           // Port, default 1883
+  String         mqttuser ;                           // User for MQTT authentication
+  String         mqttpasswd ;                         // Password for MQTT authentication
+  uint8_t        reqvol ;                             // Requested volume
+  uint8_t        rtone[4] ;                           // Requested bass/treble settings
+  int8_t         newpreset ;                          // Requested preset
+  String         clk_server ;                         // Server to be used for time of day clock
+  int8_t         clk_offset ;                         // Offset in hours with respect to UTC
+  int8_t         clk_dst ;                            // Number of hours shift during DST
+  int8_t         ir_pin ;                             // GPIO connected to output of IR decoder
+  int8_t         enc_clk_pin ;                        // GPIO connected to CLK of rotary encoder
+  int8_t         enc_dt_pin ;                         // GPIO connected to DT of rotary encoder
+  int8_t         enc_sw_pin ;                         // GPIO connected to SW of rotary encoder
+  int8_t         tft_cs_pin ;                         // GPIO connected to CS of TFT screen
+  int8_t         tft_dc_pin ;                         // GPIO connected to D/C of TFT screen
+  int8_t         sd_cs_pin ;                          // GPIO connected to CS of SD card
+  int8_t         vs_cs_pin ;                          // GPIO connected to CS of VS1053
+  int8_t         vs_dcs_pin ;                         // GPIO connected to CS of VS1053
+  int8_t         vs_dreq_pin ;                        // GPIO connected to CS of VS1053
+  int8_t         spi_sck_pin ;                        // GPIO connected to SPI SCK pin
+  int8_t         spi_miso_pin ;                       // GPIO connected to SPI MISO pin
+  int8_t         spi_mosi_pin ;                       // GPIO connected to SPI MOSI pin
+} ;
+
 //**************************************************************************************************
 // Global data section.                                                                            *
 //**************************************************************************************************
@@ -180,109 +237,97 @@ void        tftlog ( const char *str ) ;
 // de read from these preferences.                                                                 *
 // Items in ini_block can be changed by commands from webserver/MQTT/Serial.                       *
 //**************************************************************************************************
-struct ini_struct
-{
-  String         mqttbroker ;                              // The name of the MQTT broker server
-  String         mqttprefix ;                              // Prefix to use for topics
-  uint16_t       mqttport ;                                // Port, default 1883
-  String         mqttuser ;                                // User for MQTT authentication
-  String         mqttpasswd ;                              // Password for MQTT authentication
-  uint8_t        reqvol ;                                  // Requested volume
-  uint8_t        rtone[4] ;                                // Requested bass/treble settings
-  int8_t         newpreset ;                               // Requested preset
-  String         clk_server ;                              // Server to be used for time of day clock
-  int8_t         clk_offset ;                              // Offset in hours with respect to UTC
-  int8_t         clk_dst ;                                 // Number of hours shift during DST
-  int8_t         ir_pin ;                                  // GPIO connected to output of IR decoder
-  int8_t         enc_clk_pin ;                             // GPIO connected to CLK of rotary encoder
-  int8_t         enc_dt_pin ;                              // GPIO connected to DT of rotary encoder
-  int8_t         enc_sw_pin ;                              // GPIO connected to SW of rotary encoder
-  int8_t         tft_cs_pin ;                              // GPIO connected to CS of TFT screen
-  int8_t         tft_dc_pin ;                              // GPIO connected to D/C of TFT screen
-  int8_t         sd_cs_pin ;                               // GPIO connected to CS of SD card
-  int8_t         vs_cs_pin ;                               // GPIO connected to CS of VS1053
-  int8_t         vs_dcs_pin ;                              // GPIO connected to CS of VS1053
-  int8_t         vs_dreq_pin ;                             // GPIO connected to CS of VS1053
-  int8_t         spi_sck_pin ;                             // GPIO connected to SPI SCK pin
-  int8_t         spi_miso_pin ;                            // GPIO connected to SPI MISO pin
-  int8_t         spi_mosi_pin ;                            // GPIO connected to SPI MOSI pin
-} ;
 
-enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,          // State for datastream
+enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,           // State for datastream
                   METADATA = 8, PLAYLISTINIT = 16,
                   PLAYLISTHEADER = 32, PLAYLISTDATA = 64,
                   STOPREQD = 128, STOPPED = 256
                 } ;
 
 // Global variables
-int              DEBUG = 1 ;                               // Debug on/off
-WiFiMulti        wifiMulti ;                               // Possible WiFi networks
-ini_struct       ini_block ;                               // Holds configurable data
-WiFiServer       cmdserver ( 80 ) ;                        // Instance of embedded webserver on port 80
-WiFiClient       mp3client ;                               // An instance of the mp3 client
-WiFiClient       cmdclient ;                               // An instance of the client for commands
-WiFiClient       wmqttclient ;                             // An instance for mqtt
-PubSubClient     mqttclient ( wmqttclient ) ;              // Client for MQTT subscriber
-hw_timer_t*      timer = NULL ;                            // For timer
-char             cmd[130] ;                                // Command from MQTT or Serial
-TFT_ILI9163C*    tft = NULL ;                              // For instance of TFT driver
-uint32_t         totalcount = 0 ;                          // Counter mp3 data
-datamode_t       datamode ;                                // State of datastream
-int              metacount ;                               // Number of bytes in metadata
-int              datacount ;                               // Counter databytes before metadata
-String           metaline ;                                // Readable line in metadata
-String           icystreamtitle ;                          // Streamtitle from metadata
-String           icyname ;                                 // Icecast station name
-String           ipaddress ;                               // Own IP-address
-int              bitrate ;                                 // Bitrate in kb/sec
-int              mbitrate ;                                // Measured bitrate
-int              metaint = 0 ;                             // Number of databytes between metadata
-int8_t           currentpreset = -1 ;                      // Preset station playing
-String           host ;                                    // The URL to connect to or file to play
-String           playlist ;                                // The URL of the specified playlist
-bool             hostreq = false ;                         // Request for new host
-bool             reqtone = false ;                         // New tone setting requested
-bool             muteflag = false ;                        // Mute output
-uint8_t*         ringbuf ;                                 // Ringbuffer for VS1053
-uint16_t         rbwindex = 0 ;                            // Fill pointer in ringbuffer
-uint16_t         rbrindex = RINGBFSIZ - 1 ;                // Emptypointer in ringbuffer
-uint16_t         rcount = 0 ;                              // Number of bytes in ringbuffer
-bool             resetreq = false ;                        // Request to reset the ESP32
-bool             NetworkFound = false ;                    // True if WiFi network connected
-bool             mqtt_on = false ;                         // MQTT in use
-String           networks ;                                // Found networks
-String           anetworks ;                               // Aceptable networks (present in preferences)
-uint8_t          num_an ;                                  // Number of acceptable networks in preferences
-uint16_t         mqttcount = 0 ;                           // Counter MAXMQTTCONNECTS
-int8_t           playlist_num = 0 ;                        // Nonzero for selection from playlist
-File             mp3file ;                                 // File containing mp3 on SPIFFS
-bool             localfile = false ;                       // Play from local mp3-file or not
-bool             chunked = false ;                         // Station provides chunked transfer
-int              chunkcount = 0 ;                          // Counter for chunked transfer
-String           http_getcmd ;                             // Contents of last GET command
-String           http_rqfile ;                             // Requested file
-bool             http_reponse_flag = false ;               // Response required
-String           lssid, lpw ;                              // Last read SSID and password from wifi_xx
-uint16_t         ir_value = 0 ;                            // IR code
-struct tm        timeinfo ;                                // Will be filled by NTP server
-bool             time_req = false ;                        // Set time requested
-bool             SD_okay = false ;                         // True if SD card in place and readable
-String           SD_nodelist ;                             // Nodes of mp3-files on SD
-int              SD_nodecount = 0 ;                        // Number of nodes in SD_nodelist
-String           SD_currentnode = "" ;                     // Node ID of song currently playing ("0" if random)
+int               DEBUG = 1 ;                               // Debug on/off
+WiFiMulti         wifiMulti ;                               // Possible WiFi networks
+ini_struct        ini_block ;                               // Holds configurable data
+WiFiServer        cmdserver ( 80 ) ;                        // Instance of embedded webserver on port 80
+WiFiClient        mp3client ;                               // An instance of the mp3 client
+WiFiClient        cmdclient ;                               // An instance of the client for commands
+WiFiClient        wmqttclient ;                             // An instance for mqtt
+PubSubClient      mqttclient ( wmqttclient ) ;              // Client for MQTT subscriber
+TaskHandle_t      maintask ;                                // Taskhandle for main task
+TaskHandle_t      xplaytask ;                               // Task handle for playtask
+SemaphoreHandle_t SPIsem = NULL ;                           // For exclusive SPI usage
+hw_timer_t*       timer = NULL ;                            // For timer
+char              cmd[130] ;                                // Command from MQTT or Serial
+TFT_ILI9163C*     tft = NULL ;                              // For instance of TFT driver
+QueueHandle_t     dataqueue ;
+qdata_struct      outchunk ;                                // Data to queue
+qdata_struct      inchunk ;                                 // Data from queue
+int               outqinx = 0 ;                             // Pointer to buffer in outchunk
+uint32_t          totalcount = 0 ;                          // Counter mp3 data
+datamode_t        datamode ;                                // State of datastream
+int               metacount ;                               // Number of bytes in metadata
+int               datacount ;                               // Counter databytes before metadata
+char              metalinebf[4096 + 1] ;                    // Buffer for metaline
+int16_t           metalinebfx ;                             // Index for metalinebf
+String            icystreamtitle ;                          // Streamtitle from metadata
+String            icyname ;                                 // Icecast station name
+String            ipaddress ;                               // Own IP-address
+int               bitrate ;                                 // Bitrate in kb/sec
+int               mbitrate ;                                // Measured bitrate
+int               metaint = 0 ;                             // Number of databytes between metadata
+int8_t            currentpreset = -1 ;                      // Preset station playing
+String            host ;                                    // The URL to connect to or file to play
+String            playlist ;                                // The URL of the specified playlist
+bool              hostreq = false ;                         // Request for new host
+bool              reqtone = false ;                         // New tone setting requested
+bool              muteflag = false ;                        // Mute output
+bool              resetreq = false ;                        // Request to reset the ESP32
+bool              NetworkFound = false ;                    // True if WiFi network connected
+bool              mqtt_on = false ;                         // MQTT in use
+String            networks ;                                // Found networks
+String            anetworks ;                               // Aceptable networks (present in preferences)
+uint8_t           num_an ;                                  // Number of acceptable networks in preferences
+uint16_t          mqttcount = 0 ;                           // Counter MAXMQTTCONNECTS
+int8_t            playlist_num = 0 ;                        // Nonzero for selection from playlist
+File              mp3file ;                                 // File containing mp3 on SD card
+bool              localfile = false ;                       // Play from local mp3-file or not
+bool              chunked = false ;                         // Station provides chunked transfer
+int               chunkcount = 0 ;                          // Counter for chunked transfer
+String            http_getcmd ;                             // Contents of last GET command
+String            http_rqfile ;                             // Requested file
+bool              http_reponse_flag = false ;               // Response required
+String            lssid, lpw ;                              // Last read SSID and password from wifi_xx
+uint16_t          ir_value = 0 ;                            // IR code
+struct tm         timeinfo ;                                // Will be filled by NTP server
+bool              time_req = false ;                        // Set time requested
+bool              SD_okay = false ;                         // True if SD card in place and readable
+String            SD_nodelist ;                             // Nodes of mp3-files on SD
+int               SD_nodecount = 0 ;                        // Number of nodes in SD_nodelist
+String            SD_currentnode = "" ;                     // Node ID of song currently playing ("0" if random)
 // nvs stuff
-esp_err_t        nvserr ;                                  // Error code from nvs functions
-uint32_t         nvshandle = 0 ;                           // Handle for nvs access
+esp_err_t         nvserr ;                                  // Error code from nvs functions
+uint32_t          nvshandle = 0 ;                           // Handle for nvs access
 // Rotary encoder stuff
-uint16_t         clickcount = 0 ;                          // Incremented per encoder click, reset by timer
-int16_t          rotationcount = 0 ;                       // Current position of rotary switch
-uint16_t         enc_inactivity = 0 ;                      // Time inactive
-bool             singleclick = false ;                     // True if single click detected
-bool             doubleclick = false ;                     // True if double click detected
-bool             tripleclick = false ;                     // True if triple click detected
-bool             longclick = false ;                       // True if longclick detected
-enum enc_menu_t { VOLUME, PRESET, TRACK } ;                // State for rotary encoder menu
-enc_menu_t       enc_menu_mode = VOLUME ;                  // Default is VOLUME mode
+uint16_t          clickcount = 0 ;                          // Incremented per encoder click, reset by timer
+int16_t           rotationcount = 0 ;                       // Current position of rotary switch
+uint16_t          enc_inactivity = 0 ;                      // Time inactive
+char              timetxt[9] ;                              // Converted timeinfo
+bool              singleclick = false ;                     // True if single click detected
+bool              doubleclick = false ;                     // True if double click detected
+bool              tripleclick = false ;                     // True if triple click detected
+bool              longclick = false ;                       // True if longclick detected
+enum enc_menu_t { VOLUME, PRESET, TRACK, SWMUTE } ;         // State for rotary encoder menu
+enc_menu_t        enc_menu_mode = VOLUME ;                  // Default is VOLUME mode
+// Data to display.  There are TFTSECS sections
+bool              tft_update_req ;                          // Global update request
+#define TFTSECS 4
+scrseg_struct     tftdata[TFTSECS] =                        // Screen divided in 3 segments + 1 overlay
+{
+  { false, WHITE,   1,  8, "" },                            // 1 top line, leave 1 line space from top
+  { false, CYAN,   20, 64, "" },                            // 8 lines in the middle
+  { false, YELLOW, 90, 32, "" },                            // 4 lines at the bottom
+  { false, GREEN,  90, 32, "" }                             // 4 lines at the bottom for rotary encoder
+} ;
 //
 struct progpin_struct                                      // For programmable input pins
 {
@@ -290,49 +335,49 @@ struct progpin_struct                                      // For programmable i
   bool           reserved ;                                // Reserved for connected devices
   bool           avail ;                                   // Pin is available for a command
   String         command ;                                 // Command to execute when activated
-                                                           // Example: "uppreset=1"
+  // Example: "uppreset=1"
   bool           cur ;                                     // Current state, true = HIGH, false = LOW
 } ;
 
 progpin_struct   progpin[] =                               // Input pins and programmed function
 {
-  {  0, false, false,  "", false },
-//{  1, true,  false,  "", false },                        // Reserved for TX Serial output
-  {  2, false, false,  "", false },
-//{  3, true,  false,  "", false },                        // Reserved for RX Serial input
-  {  4, false, false,  "", false },
-  {  5, false, false,  "", false },
-//{  6, true,  false,  "", false },                        // Reserved for FLASH SCK
-//{  7, true,  false,  "", false },                        // Reserved for FLASH D0
-//{  8, true,  false,  "", false },                        // Reserved for FLASH D1
-//{  9, true,  false,  "", false },                        // Reserved for FLASH D2
-//{ 10, true,  false,  "", false },                        // Reserved for FLASH D3
-//{ 11, true,  false,  "", false },                        // Reserved for FLASH CMD
-  { 12, false, false,  "", false },
-  { 13, false, false,  "", false },
-  { 14, false, false,  "", false },
-  { 15, false, false,  "", false },
-  { 16, false, false,  "", false },
-  { 17, false, false,  "", false },
-  { 18, false, false,  "", false },                        // Default for SPI CLK
-  { 19, false, false,  "", false },                        // Default for SPI MISO
-//{ 20, true,  false,  "", false },                        // Not exposed on DEV board
-  { 21, false, false,  "", false },                        // Also Wire SDA
-  { 22, false, false,  "", false },                        // Also Wire SCL
-  { 23, false, false,  "", false },                        // Default for SPI MOSI
-//{ 24, true,  false,  "", false },                        // Not exposed on DEV board
-  { 25, false, false,  "", false },
-  { 26, false, false,  "", false },
-  { 27, false, false,  "", false },
-//{ 28, true,  false,  "", false },                        // Not exposed on DEV board
-//{ 29, true,  false,  "", false },                        // Not exposed on DEV board
-//{ 30, true,  false,  "", false },                        // Not exposed on DEV board
-//{ 31, true,  false,  "", false },                        // Not exposed on DEV board
-  { 32, false, false,  "", false },
-  { 33, false, false,  "", false },
-  { 34, false, false,  "", false },                        // Note, no internal pull-up
-  { 35, false, false,  "", false },                        // Note, no internal pull-up
-  { -1, false, false,  "", false }                         // End of list
+    {  0, false, false,  "", false },
+  //{  1, true,  false,  "", false },                      // Reserved for TX Serial output
+    {  2, false, false,  "", false },
+  //{  3, true,  false,  "", false },                      // Reserved for RX Serial input
+    {  4, false, false,  "", false },
+    {  5, false, false,  "", false },
+  //{  6, true,  false,  "", false },                      // Reserved for FLASH SCK
+  //{  7, true,  false,  "", false },                      // Reserved for FLASH D0
+  //{  8, true,  false,  "", false },                      // Reserved for FLASH D1
+  //{  9, true,  false,  "", false },                      // Reserved for FLASH D2
+  //{ 10, true,  false,  "", false },                      // Reserved for FLASH D3
+  //{ 11, true,  false,  "", false },                      // Reserved for FLASH CMD
+    { 12, false, false,  "", false },
+    { 13, false, false,  "", false },
+    { 14, false, false,  "", false },
+    { 15, false, false,  "", false },
+    { 16, false, false,  "", false },
+    { 17, false, false,  "", false },
+    { 18, false, false,  "", false },                      // Default for SPI CLK
+    { 19, false, false,  "", false },                      // Default for SPI MISO
+  //{ 20, true,  false,  "", false },                      // Not exposed on DEV board
+    { 21, false, false,  "", false },                      // Also Wire SDA
+    { 22, false, false,  "", false },                      // Also Wire SCL
+    { 23, false, false,  "", false },                      // Default for SPI MOSI
+  //{ 24, true,  false,  "", false },                      // Not exposed on DEV board
+    { 25, false, false,  "", false },
+    { 26, false, false,  "", false },
+    { 27, false, false,  "", false },
+  //{ 28, true,  false,  "", false },                      // Not exposed on DEV board
+  //{ 29, true,  false,  "", false },                      // Not exposed on DEV board
+  //{ 30, true,  false,  "", false },                      // Not exposed on DEV board
+  //{ 31, true,  false,  "", false },                      // Not exposed on DEV board
+    { 32, false, false,  "", false },
+    { 33, false, false,  "", false },
+    { 34, false, false,  "", false },                      // Note, no internal pull-up
+    { 35, false, false,  "", false },                      // Note, no internal pull-up
+    { -1, false, false,  "", false }                       // End of list
 } ;
 
 struct touchpin_struct                                     // For programmable input pins
@@ -341,14 +386,14 @@ struct touchpin_struct                                     // For programmable i
   bool           reserved ;                                // Reserved for connected devices
   bool           avail ;                                   // Pin is available for a command
   String         command ;                                 // Command to execute when activated
-                                                           // Example: "uppreset=1"
+  // Example: "uppreset=1"
   bool           cur ;                                     // Current state, true = HIGH, false = LOW
   int16_t        count ;                                   // Counter number of times low level
 } ;
 touchpin_struct   touchpin[] =                             // Touch pins and programmed function
 {
   {   4, false, false, "", false, 0 },                     // TOUCH0
-//{   0, true,  false, "", false, 0 },                     // TOUCH1, reserved for BOOT button
+  //{   0, true,  false, "", false, 0 },                     // TOUCH1, reserved for BOOT button
   {   2, false, false, "", false, 0 },                     // TOUCH2
   {  15, false, false, "", false, 0 },                     // TOUCH3
   {  13, false, false, "", false, 0 },                     // TOUCH4
@@ -358,7 +403,7 @@ touchpin_struct   touchpin[] =                             // Touch pins and pro
   {  33, false, false, "", false, 0 },                     // TOUCH8
   {  32, false, false, "", false, 0 },                     // TOUCH9
   {  -1, false, false, "", false, 0 }                      // End of table
-} ;  
+} ;
 
 
 //**************************************************************************************************
@@ -375,7 +420,6 @@ touchpin_struct   touchpin[] =                             // Touch pins and pro
 //**************************************************************************************************
 // End of global data section.                                                                     *
 //**************************************************************************************************
-
 
 //**************************************************************************************************
 //                                     M Q T T P U B _ C L A S S                                   *
@@ -406,6 +450,7 @@ class mqttpubc                                             // For MQTT publishin
     void          trigger ( uint8_t item ) ;               // Trigger publishig for one item
     void          publishtopic() ;                         // Publish triggerer items
 } ;
+
 
 //**************************************************************************************************
 // MQTTPUB  class implementation.                                                                  *
@@ -501,7 +546,6 @@ class VS1053
     inline void control_mode_on() const
     {
       SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
-      digitalWrite ( dcs_pin, HIGH ) ;            // Bring slave in control mode
       digitalWrite ( cs_pin, LOW ) ;
     }
 
@@ -514,7 +558,7 @@ class VS1053
     inline void data_mode_on() const
     {
       SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
-      digitalWrite ( cs_pin, HIGH ) ;             // Bring slave in data mode
+      //digitalWrite ( cs_pin, HIGH ) ;             // Bring slave in data mode
       digitalWrite ( dcs_pin, LOW ) ;
     }
 
@@ -524,30 +568,31 @@ class VS1053
       SPI.endTransaction() ;                      // Allow other SPI users
     }
 
-    uint16_t read_register ( uint8_t _reg ) const ;
-    void     write_register ( uint8_t _reg, uint16_t _value ) const ;
-    void     sdi_send_buffer ( uint8_t* data, size_t len ) ;
-    void     sdi_send_fillers ( size_t length ) ;
-    void     wram_write ( uint16_t address, uint16_t data ) ;
-    uint16_t wram_read ( uint16_t address ) ;
+    uint16_t    read_register ( uint8_t _reg ) const ;
+    void        write_register ( uint8_t _reg, uint16_t _value ) const ;
+    inline bool sdi_send_buffer ( uint8_t* data, size_t len ) ;
+    void        sdi_send_fillers ( size_t length ) ;
+    void        wram_write ( uint16_t address, uint16_t data ) ;
+    uint16_t    wram_read ( uint16_t address ) ;
 
   public:
     // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
     VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) ;
     void     begin() ;                                   // Begin operation.  Sets pins correctly,
-                                                         // and prepares SPI bus.
+    // and prepares SPI bus.
     void     startSong() ;                               // Prepare to start playing. Call this each
-                                                         // time a new song starts.
-    void     playChunk ( uint8_t* data, size_t len ) ;   // Play a chunk of data.  Copies the data to
-                                                         // the chip.  Blocks until complete.
+    // time a new song starts.
+    inline bool playChunk ( uint8_t* data,               // Play a chunk of data.  Copies the data to
+                            size_t len ) ;               // the chip.  Blocks until complete.
+    // Returns true if more data can be added to fifo
     void     stopSong() ;                                // Finish playing a song. Call this after
-                                                         // the last playChunk call.
+    // the last playChunk call.
     void     setVolume ( uint8_t vol ) ;                 // Set the player volume.Level from 0-100,
-                                                         // higher is louder.
+    // higher is louder.
     void     setTone ( uint8_t* rtone ) ;                // Set the player baas/treble, 4 nibbles for
-                                                         // treble gain/freq and bass gain/freq
+    // treble gain/freq and bass gain/freq
     uint8_t  getVolume() ;                               // Get the current volume setting.
-                                                         // higher is louder.
+    // higher is louder.
     void     printDetails ( const char *header ) ;       // Print configuration details to serial output.
     void     softReset() ;                               // Do a soft reset
     bool     testComm ( const char *header ) ;           // Test communication with module
@@ -591,24 +636,25 @@ void VS1053::write_register ( uint8_t _reg, uint16_t _value ) const
   control_mode_off() ;
 }
 
-void VS1053::sdi_send_buffer ( uint8_t* data, size_t len )
+bool VS1053::sdi_send_buffer ( uint8_t* data, size_t len )
 {
   size_t chunk_length ;                            // Length of chunk 32 byte or shorter
 
   data_mode_on() ;
   while ( len )                                    // More to do?
   {
-    await_data_request() ;                         // Wait for space available
     chunk_length = len ;
     if ( len > vs1053_chunk_size )
     {
       chunk_length = vs1053_chunk_size ;
     }
     len -= chunk_length ;
+    await_data_request() ;                         // Wait for space available
     SPI.writeBytes ( data, chunk_length ) ;
     data += chunk_length ;
   }
   data_mode_off() ;
+  return data_request() ;                          // True if more data can de stored in fifo
 }
 
 void VS1053::sdi_send_fillers ( size_t len )
@@ -696,6 +742,8 @@ void VS1053::begin()
   delay ( 100 ) ;
   // Init SPI in slow mode ( 0.2 MHz )
   VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
+  SPI.setDataMode ( SPI_MODE0 ) ;
+  SPI.setBitOrder ( MSBFIRST ) ;
   //printDetails ( "Right after reset/startup" ) ;
   delay ( 20 ) ;
   //printDetails ( "20 msec after reset" ) ;
@@ -712,7 +760,7 @@ void VS1053::begin()
   // The next clocksetting allows SPI clocking at 5 MHz, 4 MHz is safe then.
   write_register ( SCI_CLOCKF, 6 << 12 ) ;              // Normal clock settings multiplyer 3.0 = 12.2 MHz
   //SPI Clock to 4 MHz. Now you can set high speed SPI clock.
-  VS1053_SPI = SPISettings ( 4000000, MSBFIRST, SPI_MODE0 ) ;
+  VS1053_SPI = SPISettings ( 5000000, MSBFIRST, SPI_MODE0 ) ;
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_LINE1 ) ) ;
   testComm ( "Fast SPI, Testing VS1053 read/write registers again..." ) ;
   delay ( 10 ) ;
@@ -762,9 +810,9 @@ void VS1053::startSong()
   sdi_send_fillers ( 10 ) ;
 }
 
-void VS1053::playChunk ( uint8_t* data, size_t len )
+bool VS1053::playChunk ( uint8_t* data, size_t len )
 {
-  sdi_send_buffer ( data, len ) ;
+  return sdi_send_buffer ( data, len ) ;                // True if more data can be added to fifo
 }
 
 void VS1053::stopSong()
@@ -822,84 +870,6 @@ VS1053 vs1053player (  VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
 //**************************************************************************************************
 // End VS1053 stuff.                                                                               *
 //**************************************************************************************************
-
-
-//**************************************************************************************************
-// Ringbuffer (fifo) routines.                                                                     *
-//**************************************************************************************************
-//**************************************************************************************************
-//                                          R I N G S P A C E                                      *
-//**************************************************************************************************
-uint16_t ringspace()
-{
-  return ( RINGBFSIZ - rcount ) ;     // Free space available
-}
-
-
-//**************************************************************************************************
-//                                         R I N G A V A I L                                       *
-//**************************************************************************************************
-inline uint16_t ringavail()
-{
-  return rcount ;                     // Return number of bytes available for getring()
-}
-
-
-//**************************************************************************************************
-//                                        P U T R I N G                                            *
-//**************************************************************************************************
-// Version of putring to write a buffer to the ringbuffer.                                         *
-// No check on available space.  See ringspace().                                                  *
-//**************************************************************************************************
-void putring ( uint8_t* buf, uint16_t len )
-{
-  uint16_t partl ;                                                // Partial length to xfer
-
-  if ( len )                                                      // anything to do?
-  {
-    // First see if we must split the transfer.  We cannot write past the ringbuffer end.
-    if ( ( rbwindex + len ) >= RINGBFSIZ  )
-    {
-      partl = RINGBFSIZ - rbwindex ;                              // Part of length to xfer
-      memcpy ( ringbuf + rbwindex, buf, partl ) ;                 // Copy next part
-      rbwindex = 0 ;
-      rcount += partl ;                                           // Adjust number of bytes
-      buf += partl ;                                              // Point to next free byte
-      len -= partl ;                                              // Adjust rest length
-    }
-    if ( len )                                                    // Rest to do?
-    {
-      memcpy ( ringbuf + rbwindex, buf, len ) ;                   // Copy full or last part
-      rbwindex += len ;                                           // Point to next free byte
-      rcount += len ;                                             // Adjust number of bytes
-    }
-  }
-}
-
-
-//**************************************************************************************************
-//                                        G E T R I N G                                            *
-//**************************************************************************************************
-uint8_t getring()
-{
-  // Assume there is always something in the bufferpace.  See ringavail()
-  if ( ++rbrindex == RINGBFSIZ )      // Increment pointer and
-  {
-    rbrindex = 0 ;                    // wrap at end
-  }
-  rcount-- ;                          // Count is now one less
-  return *(ringbuf + rbrindex) ;      // return the oldest byte
-}
-
-//**************************************************************************************************
-//                                       E M P T Y R I N G                                         *
-//**************************************************************************************************
-void emptyring()
-{
-  rbwindex = 0 ;                      // Reset ringbuffer administration
-  rbrindex = RINGBFSIZ - 1 ;
-  rcount = 0 ;
-}
 
 
 //**************************************************************************************************
@@ -993,6 +963,54 @@ esp_err_t nvssetstr ( const char* key, String val )
 
 
 //**************************************************************************************************
+//                                      C L A I M S P I                                            *
+//**************************************************************************************************
+// Claim the SPI bus.  Uses FreeRTOS semaphores.                                                   *
+//**************************************************************************************************
+void claimSPI ( const char* p )
+{
+  const        TickType_t ctry = 10 ;                       // Time to wait for semaphore
+  uint32_t     count = 0 ;                                  // Wait time in ticks
+
+  while ( xSemaphoreTake ( SPIsem, ctry ) != pdTRUE  ) ;  // Claim SPI bus
+  {
+    if ( count++ > 10 )
+    {
+      dbgprint ( "SPI semaphore not taken within %d ticks by CPU %d, id %s",
+                 count * ctry,
+                 xPortGetCoreID(),
+                 p ) ;
+    }
+  }
+}
+
+
+//**************************************************************************************************
+//                                   R E L E A S E S P I                                           *
+//**************************************************************************************************
+// Free the the SPI bus.  Uses FreeRTOS semaphores.                                                *
+//**************************************************************************************************
+void releaseSPI()
+{
+    xSemaphoreGive ( SPIsem ) ;                             // Release SPI bus
+}
+
+
+//**************************************************************************************************
+//                                      Q U E U E F U N C                                          *
+//**************************************************************************************************
+// Queue a special function for the play task.                                                     *
+//**************************************************************************************************
+void queuefunc ( int func )
+{
+  qdata_struct     specchunk ;                          // Special function to queue
+
+  specchunk.datatyp = func ;                            // Put function in datatyp
+  xQueueSend ( dataqueue, &specchunk, 200 ) ;           // Send to queue
+}
+
+
+//**************************************************************************************************
 //                                      N V S S E A R C H                                          *
 //**************************************************************************************************
 // Check if key exists in nvs.                                                                     *
@@ -1004,6 +1022,29 @@ bool nvssearch ( const char* key )
   nvsopen() ;                                           // Be sure to open nvs
   nvserr = nvs_get_str ( nvshandle, key, NULL, &len ) ; // Get length of contents
   return ( nvserr == ESP_OK ) ;                         // Return true if found
+}
+
+
+//**************************************************************************************************
+//                                      T F T S E T                                                *
+//**************************************************************************************************
+// Request to display a segment on TFT.  Version for char* and String parameter.                   *
+//**************************************************************************************************
+void tftset ( uint16_t inx, const char *str )
+{
+  if ( str )                                            // String specified?
+  {
+    tftdata[inx].str = String ( str ) ;                 // Yes, set string
+  }
+  tftdata[inx].update_req = true ;                      // and request flag
+  tft_update_req = true ;                               // and global flag
+}
+
+void tftset ( uint16_t inx, String& str )
+{
+  tftdata[inx].str = str ;                              // Set string
+  tftdata[inx].update_req = true ;                      // and request flag
+  tft_update_req = true ;                               // and global flag
 }
 
 
@@ -1113,56 +1154,6 @@ char* dbgprint ( const char* format, ... )
 }
 
 
-//**************************************************************************************************
-//                                         G E T T I M E                                           *
-//**************************************************************************************************
-// Retrieve the local time from NTP server and convert to string.                                  *
-// Will be called every second.                                                                    *
-//**************************************************************************************************
-void gettime()
-{
-  static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
-  char           timetxt[9] ;                               // Coverted timeinfo
-  static int16_t retrycount = 100 ;
-
-  if ( tft )                                                // TFT used?
-  {
-    if ( timeinfo.tm_year )                                 // Legal time found?
-    {
-      sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
-                timeinfo.tm_hour,
-                timeinfo.tm_min,
-                timeinfo.tm_sec ) ;
-      displaytime ( timetxt, WHITE ) ;                      // Write to TFT screen
-    }
-    if ( --delaycount <= 0 )                                // Sync every few hours
-    {
-      delaycount = 7200 ;                                   // Reset counter
-      if ( timeinfo.tm_year )                               // Legal time found?
-      {
-        dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
-      }
-      if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
-      {
-        dbgprint ( "Failed to obtain time!" ) ;             // Error
-        timeinfo.tm_year = 0 ;                              // Set current time to illegal
-        if ( retrycount )                                   // Give up syncing?
-        { 
-          retrycount-- ;                                    // No try again
-          delaycount = 5 ;                                  // Retry after 5 seconds
-        }
-      }
-      else
-      {
-        sprintf ( timetxt, "%02d:%02d:%02d",                // Format new time to a string
-                  timeinfo.tm_hour,
-                  timeinfo.tm_min,
-                  timeinfo.tm_sec ) ;
-        dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
-      }
-    }
-  }
-}
 
 
 //**************************************************************************************************
@@ -1254,10 +1245,15 @@ String getSDfilename ( String nodeID )
     {
       nodeID = nodeID.substring ( inx + 1 ) ;           // Remove sequence in this level from nodeID
     }
+    claimSPI ( "sdopen" ) ;                             // Claim SPI bus
     root = SD.open ( p ) ;                              // Open the directory (this level)
+    releaseSPI() ;                                      // Release SPI bus
     for ( i = 1 ; i <=  n ; i++ )
     {
+      claimSPI ( "sdopenxt" ) ;                         // Claim SPI bus
       file = root.openNextFile() ;                      // Get next directory entry
+      releaseSPI() ;                                    // Release SPI bus
+      delay ( 10 ) ;                                    // Allow playtask
       //dbgprint ( "file nr %d/%d is %s", i, n, file.name() ) ;
     }
     p = file.name() ;                                   // Points to directory- or file name
@@ -1308,15 +1304,24 @@ int listsdtracks ( const char * dirname, int level = 0, bool send = true )
   oldfcount = fcount ;                                  // To see if files found in this directory
   //dbgprint ( "SD directory is %s", dirname ) ;        // Show current directory
   ldirname = strlen ( dirname ) ;                       // Length of dirname to remove from filename
+  claimSPI ( "sdopen2" ) ;                              // Claim SPI bus
   root = SD.open ( dirname ) ;                          // Open the current directory level
+  releaseSPI() ;                                        // Release SPI bus
   if ( !root || !root.isDirectory() )                   // Success?
   {
     dbgprint ( "%s is not a directory or not root",     // No, print debug message
                dirname ) ;
     return fcount ;                                     // and return
   }
-  while ( ( file = root.openNextFile() ) )
+  while ( true )                                        // Find all mp3 files
   {
+    claimSPI ( "opennextf" ) ;                          // Claim SPI bus
+    file = root.openNextFile() ;                        // Try to open next
+    releaseSPI() ;                                      // Release SPI bus
+    if ( !file )
+    {
+      break ;                                           // End of list
+    }
     SD_node[level]++ ;                                  // Set entry sequence of current level
     if ( file.name()[0] == '.' )                        // Skip hidden directories
     {
@@ -1465,7 +1470,7 @@ void listNetworks()
 //**************************************************************************************************
 void IRAM_ATTR timer10sec()
 {
-  static uint32_t oldtotalcount = 7321 ;          // Needed foor change detection
+  static uint32_t oldtotalcount = 7321 ;          // Needed for change detection
   static uint8_t  morethanonce = 0 ;              // Counter for succesive fails
   uint32_t        bytesplayed ;                   // Bytes send to MP3 converter
 
@@ -1500,7 +1505,7 @@ void IRAM_ATTR timer10sec()
     {
       //                                          // Data has been send to MP3 decoder
       // Bitrate in kbits/s is bytesplayed / 10 / 1000 * 8
-      mbitrate = bytesplayed / 1250 ;             // Measured bitrate
+      mbitrate = ( bytesplayed + 625 ) / 1250 ;   // Measured bitrate
       morethanonce = 0 ;                          // Data seen, reset failcounter
     }
   }
@@ -1541,13 +1546,10 @@ void IRAM_ATTR timer100()
     time_req = true ;                             // Yes, show current time request
   }
   // Handle rotary encoder. Inactivity counter will be reset by encoder interrupt
-  if ( enc_menu_mode != VOLUME )                  // In default mode?
+  if ( ++enc_inactivity == 36000 )                // Count inactivity time
   {
-    if ( ++enc_inactivity > 40 )                  // No, more than 4 seconds inactive
-    {
-      enc_menu_mode = VOLUME ;                    // Return to VOLUME mode
-    }
-  }
+    enc_inactivity = 1000 ;                       // Prevent wrap
+  }                         
   // Now detection of single/double click of rotary encoder switch
   if ( clickcount )                               // Any click?
   {
@@ -1600,12 +1602,12 @@ void IRAM_ATTR isr_IR()
   t1 = micros() ;                                    // Get current time
   intval = t1 - t0 ;                                 // Compute interval
   t0 = t1 ;                                          // Save for next compare
-  if ( ( intval > 400 ) && ( intval < 700 ) )        // Short pulse?
+  if ( ( intval > 300 ) && ( intval < 800 ) )        // Short pulse?
   {
     ir_locvalue = ir_locvalue << 1 ;                 // Shift in a "zero" bit
     ir_loccount++ ;                                  // Count number of received bits
   }
-  else if ( ( intval > 1600 ) && ( intval < 1700 ) ) // Long pulse?
+  else if ( ( intval > 1500 ) && ( intval < 1800 ) ) // Long pulse?
   {
     ir_locvalue = ( ir_locvalue << 1 ) + 1 ;         // Shift in a "one" bit
     ir_loccount++ ;                                  // Count number of received bits
@@ -1632,15 +1634,14 @@ void IRAM_ATTR isr_IR()
 
 
 //**************************************************************************************************
-//                                          I S R _ E N C                                          *
+//                                          I S R _ E N C _ S W I T C H                            *
 //**************************************************************************************************
-// Interrupts received from rotary encoder.                                                        *
+// Interrupts received from rotary encoder switch.                                                 *
 //**************************************************************************************************
-void IRAM_ATTR isr_enc()
+void IRAM_ATTR isr_enc_switch()
 {
   static uint32_t oldtime = 0 ;                            // Time in millis previous interrupt
   static bool     sw_state ;                               // True is pushed (LOW)
-  static bool     clk_state ;                              // True is activated (LOW)
   bool            newstate ;                               // Current state of input signal
   uint32_t        newtime ;                                // Current timestamp
 
@@ -1664,105 +1665,59 @@ void IRAM_ATTR isr_enc()
       {
         clickcount++ ;                                     // Yes, click detected
       }
-      enc_inactivity = 0 ;                                 // Not inactive anymore 
+      enc_inactivity = 0 ;                                 // Not inactive anymore
     }
   }
   oldtime = newtime ;                                      // For next compare
-  // Read current state of CLK pin
-  newstate = ( digitalRead ( ini_block.enc_clk_pin ) == LOW ) ;
-  if ( newstate != clk_state )                             // State changed?
-  {
-    clk_state = newstate ;                                 // Yes, set current (new) state
-    if ( !clk_state )                                      // CLK released?
-    {
-      if ( digitalRead ( ini_block.enc_dt_pin ) )          // Yes, detect right/left rotation
-      {
-        rotationcount-- ;                                  // Left rotation
-      }
-      else
-      {
-        rotationcount++ ;                                  // Right rotation
-      }
-      enc_inactivity = 0 ;                                 // Not inactive anymore 
-    }
-  }
 }
 
 
+
+
 //**************************************************************************************************
-//                                      D I S P L A Y V O L U M E                                  *
+//                                          I S R _ E N C _ T U R N                                *
 //**************************************************************************************************
-// Show the current volume as an indicator on the screen.                                          *
+// Interrupts received from rotary encoder (clk signal) knob turn.                                 *
+// The encoder is a Manchester coded device, the outcomes (-1,0,1) of all the previous state and   *
+// actual state are stored in the enc_states[].                                                    *
+// Full_status is a 4 bit variable, the upper 2 bits are the previous encoder values, the lower    *
+// ones are the actual ones.                                                                       *
+// 4 bits cover all the possible previous and actual states of the 2 PINs, so this variable is     *
+// the index enc_states[].                                                                         *
+// No debouncing is needed, because only the valid states produce values different from 0.         *
 //**************************************************************************************************
-void displayvolume()
+void IRAM_ATTR isr_enc_turn()
 {
-  if ( tft )
-  {
-    static uint8_t oldvol = 0 ;                         // Previous volume
-    uint8_t        newvol ;                             // Current setting
-    uint8_t pos ;                                       // Positon of volume indicator
-  
-    newvol = vs1053player.getVolume() ;                 // Get current volume setting
-    if ( newvol != oldvol )                             // Volume changed?
-    {
-      oldvol = newvol ;                                 // Remember for next compare
-      pos = map ( newvol, 0, 100, 0, 160 ) ;            // Compute position on TFT
-      tft->fillRect ( 0, 126, pos, 2, RED ) ;           // Paint red part
-      tft->fillRect ( pos, 126, 160 - pos, 2, GREEN ) ; // Paint green part
-    }
-  }
-}
+  static uint8_t      old_state = 0x0001 ;                    // Previous state
+  uint8_t             act_state ;                             // The current state of the 2 PINs
+  uint8_t             inx ;                                   // Index in enc_state
+  static const int8_t enc_states [] =
+                                      { 0,                    // 00 -> 00
+                                       -1,                    // 00 -> 01
+                                        1,                    // 00 -> 10
+                                        0,                    // 00 -> 11
+                                        1,                    // 01 -> 00
+                                        0,                    // 01 -> 01
+                                        0,                    // 01 -> 10
+                                       -1,                    // 01 -> 11
+                                       -1,                    // 10 -> 00
+                                        0,                    // 10 -> 01
+                                        0,                    // 10 -> 10
+                                        1,                    // 10 -> 11
+                                        0,                    // 11 -> 00
+                                        1,                    // 11 -> 01
+                                       -1,                    // 11 -> 10
+                                        0                     // 11 -> 11
+                                      } ;
+  static int8_t num ;
 
-
-//**************************************************************************************************
-//                                      D I S P L A Y T I M E                                      *
-//**************************************************************************************************
-// Show the time on the LCD at a fixed position in a specified color                               *
-// To prevent flickering, only the changed part of the timestring is displayed.                    *
-// A character on the screen is 8 pixels high and 6 pixels wide.                                   *
-//**************************************************************************************************
-void displaytime ( const char* str, uint16_t color, bool force )
-{
-  static char oldstr[9] = "........" ;             // For compare
-
-  if ( tft )                                       // TFT active?
-  {
-    uint8_t     i ;                                // Index in strings
-    uint8_t     pos = 108 ;                        // X-position of character
-
-    tft->setTextColor ( color ) ;                  // Set the requested color
-    for ( i = 0 ; i < 8 ; i++ )                    // Compare old and new
-    {
-      if ( ( str[i] != oldstr[i] ) || force )      // Difference?
-      {
-        tft->fillRect ( pos, 0, 6, 8, BLACK ) ;    // Clear the space for new character
-        tft->setCursor ( pos, 0 ) ;                // Prepare to show the info
-        tft->print ( str[i] ) ;                    // Show the character
-        oldstr[i] = str[i] ;                       // Remember for next compare
-      }
-      pos += 6 ;                                   // Next position
-    }
-  }
-}
-
-
-//**************************************************************************************************
-//                                      D I S P L A Y I N F O                                      *
-//**************************************************************************************************
-// Show a string on the LCD at a specified y-position in a specified color                         *
-//**************************************************************************************************
-void displayinfo ( const char* str, uint16_t pos, uint16_t height, uint16_t color )
-{
-  if ( tft )                                       // TFT active?
-  {
-    char buf [ strlen ( str ) + 1 ] ;              // Need some buffer space
-    strcpy ( buf, str ) ;                          // Make a local copy of the string
-    utf8ascii ( buf ) ;                            // Convert possible UTF8
-    tft->fillRect ( 0, pos, 160, height, BLACK ) ; // Clear the space for new info
-    tft->setTextColor ( color ) ;                  // Set the requested color
-    tft->setCursor ( 0, pos ) ;                    // Prepare to show the info
-    tft->println ( buf ) ;                         // Show the string
-  }
+  // Read current state of CLK, DT pin. Result is a 2 bit binairy number: 00, 01, 10 or 11.
+  act_state = ( digitalRead ( ini_block.enc_clk_pin ) << 1 ) +
+              digitalRead ( ini_block.enc_dt_pin ) ;            
+  inx = ( old_state << 2 ) + act_state ;                        // Form index in enc_states
+  rotationcount += enc_states[inx] ;                            // Get delta: 0, +1 or -1
+  old_state = act_state ;                                       // Remember current status
+  enc_inactivity = 0 ;
 }
 
 
@@ -1819,7 +1774,7 @@ void showstreamtitle ( const char *ml, bool full )
     }
     strcpy ( p1, p2 ) ;                         // Shift 2nd part of title 2 or 3 places
   }
-  displayinfo ( streamtitle, 20, 70, CYAN ) ;   // Show title at position 20-89
+  tftset ( 1, streamtitle ) ;                   // Set screen segment text middle part
 }
 
 
@@ -1830,6 +1785,7 @@ void showstreamtitle ( const char *ml, bool full )
 //**************************************************************************************************
 void stop_mp3client ()
 {
+
   while ( mp3client.connected() )
   {
     dbgprint ( "Stopping client" ) ;               // Stop connection to host
@@ -1850,14 +1806,14 @@ void stop_mp3client ()
 bool connecttohost()
 {
   int         inx ;                                 // Position of ":" in hostname
-  int         port = 80 ;                           // Port number for host
+  uint16_t    port = 80 ;                           // Port number for host
   String      extension = "/" ;                     // May be like "/mp3" in "skonto.ls.lv:8002/mp3"
-  String      hostwoext ;                           // Host without extension and portnumber
+  String      hostwoext = host ;                    // Host without extension and portnumber
 
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
-  displayinfo ( "ESP32-Radio", 0, 20, WHITE ) ;
-  displaytime ( "        ", WHITE, true ) ;         // Clear time on TFT screen
+  tftset ( 0,"ESP32-Radio" ) ;                      // Set screen segment text top line
+  displaytime ( "" ) ;                              // Clear time on TFT screen
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
   if ( host.endsWith ( ".m3u" ) )                   // Is it an m3u playlist?
@@ -1877,8 +1833,8 @@ bool connecttohost()
     extension = host.substring ( inx ) ;            // Yes, change the default
     hostwoext = host.substring ( 0, inx ) ;         // Host without extension
   }
-  // In the URL there may be a portnumber
-  inx = host.indexOf ( ":" ) ;                      // Search for separator
+  // In the host there may be a portnumber
+  inx = hostwoext.indexOf ( ":" ) ;                 // Search for separator
   if ( inx >= 0 )                                   // Portnumber available?
   {
     port = host.substring ( inx + 1 ).toInt() ;     // Get portnumber as integer
@@ -1916,22 +1872,26 @@ bool connecttofile()
   String path ;                                           // Full file spec
   char*  p ;                                              // Pointer to filename
 
-  displayinfo ( "ESP32 MP3 Player", 0, 20, WHITE ) ;
-  displaytime ( "        ", WHITE, true ) ;               // Clear time on TFT screen
+  tftset ( 0, "ESP32 MP3 Player" ) ;                      // Set screen segment top line
+  displaytime ( "" ) ;                                    // Clear time on TFT screen
   path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
+  //dbgprint ( "Open SD %s", path.c_str() ) ;
+  claimSPI ( "sdopen3" ) ;                                // Claim SPI bus
   mp3file = SD.open ( path ) ;                            // Open the file
+  releaseSPI() ;                                          // Release SPI bus
   if ( !mp3file )
   {
     dbgprint ( "Error opening file %s", path.c_str() ) ;  // No luck
     return false ;
   }
+  //dbgprint ( "File is open now" ) ;
   p = (char*)path.c_str() + 1 ;                           // Point to filename
-  showstreamtitle ( p, true ) ;                           // Show the filename as title
+  showstreamtitle ( p, true ) ;                           // Show the filename as title (middle part)
   mqttpub.trigger ( MQTT_STREAMTITLE ) ;                  // Request publishing to MQTT
-  displayinfo ( "Playing from local file",
-                90, 36, YELLOW ) ;                        // Show Source at position 90-126
+  tftset ( 2, "Playing from local file" ) ;               // Set screen segment bottom part
   icyname = "" ;                                          // No icy name yet
   chunked = false ;                                       // File not chunked
+  metaint = 0 ;                                           // No metadata
   return true ;
 }
 
@@ -1978,7 +1938,6 @@ bool connectwifi()
     dbgprint ( "WiFi Failed!  Trying to setup AP with name %s and password %s.", NAME, NAME ) ;
     WiFi.softAP ( NAME, NAME ) ;                        // This ESP will be an AP
     pfs = dbgprint ( "IP = 192.168.4.1" ) ;             // Address for AP
-    delay ( 5000 ) ;
   }
   else
   {
@@ -1987,7 +1946,8 @@ bool connectwifi()
     tftlog ( pfs2 ) ;
     pfs = dbgprint ( "IP = %s", ipaddress.c_str() ) ;   // String to dispay on TFT
   }
-  displayinfo ( pfs, 90, 36, YELLOW ) ;                 // Show info at position 90-126
+  tftlog ( pfs ) ;                                      // Show IP
+  delay ( 3000 ) ;                                      // Allow user to read this
   return ( localAP == false ) ;                         // Return result of connection
 }
 
@@ -2000,9 +1960,9 @@ bool connectwifi()
 void otastart()
 {
   char* p ;
-  
+
   p = dbgprint ( "OTA update Started" ) ;
-  displayinfo ( p, 90, 36, YELLOW ) ;                 // Show info at position 90-126
+  tftset ( 2, p ) ;                                   // Set screen segment bottom part
 }
 
 
@@ -2107,7 +2067,7 @@ void readprogbuttons()
         {
           dbgprint ( "touch_%02d pin (GPIO%02d) is reserved for I/O!",
                      pinnr, pinnr ) ;
-                     
+
         }
       }
     }
@@ -2164,21 +2124,21 @@ void readIOprefs()
     int8_t*     gnr ;                                     // GPIO pin number
   };
   struct iosetting klist[] = {                            // List of I/O related keys
-                 { "ir_pin",   &ini_block.ir_pin       },
-                 { "enc_clk",  &ini_block.enc_clk_pin  },
-                 { "enc_dt",   &ini_block.enc_dt_pin   },
-                 { "enc_sw",   &ini_block.enc_sw_pin   },
-                 { "tft_cs",   &ini_block.tft_cs_pin   },
-                 { "tft_dc",   &ini_block.tft_dc_pin   },
-                 { "sd_cs",    &ini_block.sd_cs_pin    },
-                 { "vs_cs",    &ini_block.vs_cs_pin    },
-                 { "vs_dcs",   &ini_block.vs_dcs_pin   },
-                 { "vs_dreq",  &ini_block.vs_dreq_pin  },
-                 { "spi_sck",  &ini_block.spi_sck_pin  },
-                 { "spi_miso", &ini_block.spi_miso_pin },
-                 { "spi_mosi", &ini_block.spi_mosi_pin },
-                 { NULL,      NULL                   }    // End of list
-                 } ;
+    { "ir_pin",   &ini_block.ir_pin       },
+    { "enc_clk",  &ini_block.enc_clk_pin  },
+    { "enc_dt",   &ini_block.enc_dt_pin   },
+    { "enc_sw",   &ini_block.enc_sw_pin   },
+    { "tft_cs",   &ini_block.tft_cs_pin   },
+    { "tft_dc",   &ini_block.tft_dc_pin   },
+    { "sd_cs",    &ini_block.sd_cs_pin    },
+    { "vs_cs",    &ini_block.vs_cs_pin    },
+    { "vs_dcs",   &ini_block.vs_dcs_pin   },
+    { "vs_dreq",  &ini_block.vs_dreq_pin  },
+    { "spi_sck",  &ini_block.spi_sck_pin  },
+    { "spi_miso", &ini_block.spi_miso_pin },
+    { "spi_mosi", &ini_block.spi_mosi_pin },
+    { NULL,      NULL                   }    // End of list
+  } ;
   int         i ;                                         // Loop control
   int         count = 0 ;                                 // Number of keys found
   String      val ;                                       // Contents of preference entry
@@ -2215,48 +2175,48 @@ void readIOprefs()
 String readprefs ( bool output )
 {
   const char* keys[] = {
-                   "mqttbroker", "mqttport", "mqttprefix",  // List of all defined keys
-                   "mqttuser",   "mqttpasswd",
-                   "#",                                     // Spacing in output
-                   "wifi_xx",
-                   "#",
-                   "volume",
-                   "toneha", "tonehf",
-                   "tonela", "tonelf",
-                   "#",
-                   "preset",
-                   "#",
-                   "preset_xx",
-                   "#",
-                   "gpio_xx",
-                   "#",
-                   "touch_xx",
-                   "#",
-                   "clk_server",
-                   "clk_offset",
-                   "clk_dst",
-                   "#",
-                   "spi_sck",
-                   "spi_miso",
-                   "spi_mosi",
-                   "#",
-                   "ir_pin",
-                   "ir_xx",
-                   "#",
-                   "vs_cs",
-                   "vs_dcs",
-                   "vs_dreq",
-                   "#",
-                   "tft_cs",
-                   "tft_dc",
-                   "#",
-                   "enc_clk",
-                   "enc_dt",
-                   "enc_sw",
-                   "#",
-                   "sd_cs",
-                   NULL                                     // Einde keys
-                 } ;
+    "mqttbroker", "mqttport", "mqttprefix",  // List of all defined keys
+    "mqttuser",   "mqttpasswd",
+    "#",                                     // Spacing in output
+    "wifi_xx",
+    "#",
+    "volume",
+    "toneha", "tonehf",
+    "tonela", "tonelf",
+    "#",
+    "preset",
+    "#",
+    "preset_xx",
+    "#",
+    "gpio_xx",
+    "#",
+    "touch_xx",
+    "#",
+    "clk_server",
+    "clk_offset",
+    "clk_dst",
+    "#",
+    "spi_sck",
+    "spi_miso",
+    "spi_mosi",
+    "#",
+    "ir_pin",
+    "ir_xx",
+    "#",
+    "vs_cs",
+    "vs_dcs",
+    "vs_dreq",
+    "#",
+    "tft_cs",
+    "tft_dc",
+    "#",
+    "enc_clk",
+    "enc_dt",
+    "enc_sw",
+    "#",
+    "sd_cs",
+    NULL                                     // Einde keys
+  } ;
   char        mykey[20] ;                                   // For numerated keys
   char*       p ;                                           // Points to sequencenumber of numerated key
   int         i, j ;                                        // Loop control
@@ -2286,7 +2246,7 @@ String readprefs ( bool output )
       {
         if ( nvssearch ( "ir_pin" ) )                       // Necessary if IR in use
         {
-           jmax = 0x10000 ;                                 // > 64000 possibilities
+          jmax = 0x10000 ;                                 // > 64000 possibilities
         }
         else
         {
@@ -2314,7 +2274,7 @@ String readprefs ( bool output )
                       "\n" ;
           }
         }
-        if ( ( j % 100 ) == 0 )                             // Long time spend in loop?
+        if ( ( j % 200 ) == 0 )                             // Long time spend in loop?
         {
           mp3loop() ;                                       // Yes, keep playing
         }
@@ -2494,7 +2454,7 @@ void  scandigital()
   const char*     reply ;                                   // Result of analyzeCmd
   int16_t         tlevel ;                                  // Level found by touch pin
   const int16_t   THRESHOLD = 30 ;                          // Threshold or touch pins
-  
+
   if ( ( millis() - oldmillis ) < 100 )                     // Debounce
   {
     return ;
@@ -2695,10 +2655,10 @@ void getsettings()
 //**************************************************************************************************
 void tftlog ( const char *str )
 {
-    if ( tft )                                           // TFT configured?
-    {
-      tft->println ( str ) ;                             // Yes, show error on TFT
-    }
+  if ( tft )                                           // TFT configured?
+  {
+    tft->println ( str ) ;                             // Yes, show error on TFT
+  }
 }
 
 
@@ -2720,14 +2680,23 @@ void setup()
   Serial.println() ;
   // Version tests for some vital include files
   if ( about_html_version   < 170626 ) dbgprint ( wvn, "about" ) ;
-  if ( config_html_version  < 170828 ) dbgprint ( wvn, "config" ) ;
+  if ( config_html_version  < 171120 ) dbgprint ( wvn, "config" ) ;
   if ( index_html_version   < 170703 ) dbgprint ( wvn, "index" ) ;
   if ( mp3play_html_version < 170626 ) dbgprint ( wvn, "mp3play" ) ;
   if ( defaultprefs_version < 170728 ) dbgprint ( wvn, "defaultprefs" ) ;
   // Print some memory and sketch info
-  dbgprint ( "Starting ESP32-radio Version %s...  Free memory %d",
+  dbgprint ( "Starting ESP32-radio running on CPU %d at %d MHz.  Version %s.  Free memory %d",
+             xPortGetCoreID(),
+             ESP.getCpuFreqMHz(),
              VERSION,
              ESP.getFreeHeap() ) ;                       // Normally about 199 kB
+  maintask = xTaskGetCurrentTaskHandle() ;               // My taskhandle
+  SPIsem = xSemaphoreCreateMutex(); ;                    // Semaphore for SPI bus
+  ////if ( SPIsem )                                          // Created okay?
+  ////{
+  ////  // Semaphore exists.  We have to "take" it once to make it usable.  Strange, but true...
+  ////  xSemaphoreTake ( SPIsem, 10 ) ;                      // Is now empty
+  ////}
   memset ( &ini_block, 0, sizeof(ini_block) ) ;          // Init ini_block
   ini_block.mqttport = 1883 ;                            // Default port for MQTT
   ini_block.mqttprefix = "" ;                            // No prefix for MQTT topics seen yet
@@ -2765,48 +2734,46 @@ void setup()
     tft = new TFT_ILI9163C ( ini_block.tft_cs_pin,
                              ini_block.tft_dc_pin ) ;    // Create an instant for TFT
     tft->begin() ;                                       // Init TFT interface
+    tft->setBitrate ( 16000000 ) ;                       // High speed
     tft->fillRect ( 0, 0, 160, 128, BLACK ) ;            // Clear screen does not work when rotated
     tft->setRotation ( 3 ) ;                             // Use landscape format (1 for upside down)
     tft->clearScreen() ;                                 // Clear screen
     tft->setTextSize ( 1 ) ;                             // Small character font
     tft->setTextColor ( WHITE ) ;                        // Info in white
-    tft->println ( "Starting..." ) ;
-    tft->print ( "Version:" ) ;
+    tft->print ( "\n" "Starting..." "\n" "Version:" ) ;
     strncpy ( tmpstr, VERSION, 16 ) ;                    // Limit version length
     tft->println ( tmpstr ) ;
     tft->println ( "By Ed Smallenburg" ) ;
   }
-  if ( ini_block.sd_cs_pin >= 0 )
+  if ( ini_block.sd_cs_pin >= 0 )                        // SD configured?
   {
-    pinMode ( ini_block.sd_cs_pin, OUTPUT ) ;            // Deselect SDCARD
-    digitalWrite ( ini_block.sd_cs_pin, HIGH ) ;
-  }
-  if ( !SD.begin ( ini_block.sd_cs_pin ) )               // Try to init SD card driver
-  {
-    p = dbgprint ( "SD Card Mount Failed!" ) ;           // No success, check formatting (FAT)
-    if ( tft )
+    if ( !SD.begin ( ini_block.sd_cs_pin, SPI,           // Yes,
+                     500000 ) )                          // try to init SD card driver
     {
-      tft->println ( p ) ;                               // Show error on TFT as well
-    }
-  }
-  else
-  {
-    SD_okay = ( SD.cardType() != CARD_NONE ) ;           // See if known card
-    if ( !SD_okay )
-    {
-      p = dbgprint ( "No SD card attached" ) ;           // Card not readable
-      tftlog ( p ) ;                                     // Show error on TFT as well
+      p = dbgprint ( "SD Card Mount Failed!" ) ;         // No success, check formatting (FAT)
+      if ( tft )
+      {
+        tftlog ( p ) ;                                   // Show error on TFT as well
+      }
     }
     else
     {
-      dbgprint ( "Locate mp3 files on SD, may take a while..." ) ;
-      tftlog ( "Read SD card" ) ;
-      SD_nodecount = listsdtracks ( "/", 0, false ) ;    // Build nodelist
-      p = dbgprint ( "%d tracks on SD", SD_nodecount ) ;
-      tftlog ( p ) ;                                     // Show number of tracks on TFT
+      SD_okay = ( SD.cardType() != CARD_NONE ) ;         // See if known card
+      if ( !SD_okay )
+      {
+        p = dbgprint ( "No SD card attached" ) ;         // Card not readable
+        tftlog ( p ) ;                                   // Show error on TFT as well
+      }
+      else
+      {
+        dbgprint ( "Locate mp3 files on SD, may take a while..." ) ;
+        tftlog ( "Read SD card" ) ;
+        SD_nodecount = listsdtracks ( "/", 0, false ) ;  // Build nodelist
+        p = dbgprint ( "%d tracks on SD", SD_nodecount ) ;
+        tftlog ( p ) ;                                   // Show number of tracks on TFT
+      }
     }
   }
-  ringbuf = (uint8_t*) malloc ( RINGBFSIZ ) ;            // Create ring buffer
   mk_lsan() ;                                            // Make al list of acceptable networks in preferences.
   WiFi.mode ( WIFI_STA ) ;                               // This ESP is a station
   //WiFi.persistent ( false ) ;                          // Do not save SSID and password
@@ -2824,6 +2791,7 @@ void setup()
   cmdserver.begin() ;
   if ( NetworkFound )                                    // OTA and MQTT only if Wifi network found
   {
+    dbgprint ( "Network found. Starting mqtt and OTA" ) ;
     mqtt_on = ( ini_block.mqttbroker.length() > 0 ) &&   // Use MQTT if broker specified
               ( ini_block.mqttbroker != "none" ) ;
     ArduinoOTA.setHostname ( NAME ) ;                    // Set the hostname
@@ -2871,9 +2839,10 @@ void setup()
   // Init settings for rotary switch (if existing).
   if ( ( ini_block.enc_clk_pin + ini_block.enc_dt_pin + ini_block.enc_sw_pin ) > 2 )
   {
+    attachInterrupt ( ini_block.enc_clk_pin, isr_enc_turn,   CHANGE ) ;
+    attachInterrupt ( ini_block.enc_dt_pin,  isr_enc_turn,   CHANGE ) ;
+    attachInterrupt ( ini_block.enc_sw_pin,  isr_enc_switch, CHANGE ) ;
     dbgprint ( "Rotary encoder is enabled" ) ;
-    attachInterrupt ( ini_block.enc_clk_pin, isr_enc, CHANGE ) ;
-    attachInterrupt ( ini_block.enc_sw_pin,  isr_enc, CHANGE ) ;
   }
   else
   {
@@ -2882,6 +2851,18 @@ void setup()
                ini_block.enc_dt_pin,
                ini_block.enc_sw_pin) ;
   }
+  gettime() ;                                             // Sync time
+  outchunk.datatyp = QDATA ;                              // This chunk dedicated to QDATA
+  dataqueue = xQueueCreate ( QSIZ,                        // Create queue for communication
+                             sizeof ( qdata_struct ) ) ;
+  xTaskCreatePinnedToCore (
+    playtask,           // Task function.
+    "Playtask",         // name of task.
+    10000,              // Stack size of task
+    NULL,               // parameter of the task
+    1,                  // priority of the task
+    &xplaytask,         // Task handle to keep track of created task
+    0);                 // pin task to core 0
 }
 
 
@@ -3030,6 +3011,10 @@ void handlehttpreply()
           }
           else if ( http_getcmd.startsWith ( "mp3list" ) )  // Is is a "Get SD MP3 tracklist"?
           {
+            if ( datamode != STOPPED )                      // Still playing?
+            {
+              datamode = STOPREQD ;                         // Stop playing
+            }
             cmdclient.print ( sndstr ) ;                    // Yes, send header
             n = listsdtracks ( "/" ) ;                      // Handle it
             dbgprint ( "%d tracks found on SD card", n ) ;
@@ -3239,10 +3224,10 @@ String xmlgethost  ( String mount )
       xmlparse ( sreply, "mount",       stationMount ) ;
       if ( statuscode != "200" )                      // Good result sofar?
       {
-         dbgprint ( "Bad xml status-code %s",         // No, show and stop interpreting
-                     statuscode.c_str() ) ;
-         tmpstr[0] = '\0' ;                           // Clear result
-         break ;
+        dbgprint ( "Bad xml status-code %s",         // No, show and stop interpreting
+                   statuscode.c_str() ) ;
+        tmpstr[0] = '\0' ;                           // Clear result
+        break ;
       }
     }
     if ( ( stationServer != "" ) &&                   // Check if all station values are stored
@@ -3250,9 +3235,9 @@ String xmlgethost  ( String mount )
          ( stationMount != "" ) )
     {
       sprintf ( tmpstr, "%s:%s/%s_SC",                // Build URL for ESP-Radio to stream.
-                        stationServer.c_str(),
-                        stationPort.c_str(),
-                        stationMount.c_str() ) ;
+                stationServer.c_str(),
+                stationPort.c_str(),
+                stationMount.c_str() ) ;
       dbgprint ( "Found: %s", tmpstr ) ;
     }
   }
@@ -3315,13 +3300,23 @@ void handleIpPub()
 //**************************************************************************************************
 void chk_enc()
 {
-  int16_t        delta ;                                      // -1 for left, +1 for rigth rotation
+  static int16_t waittime = 0 ;                               // Reduce speed for selections
   static int8_t  enc_preset ;                                 // Selected preset
   static String  enc_nodeID ;                                 // Node of selected track
   static String  enc_filename ;                               // Filename of selected track
   String         tmp ;                                        // Temporary string
   int16_t        inx ;                                        // Position in string
+  int16_t        lrc ;                                        // Local rotationcount
 
+  if ( enc_menu_mode != VOLUME )                              // In default mode?
+  {
+    if ( enc_inactivity > 40 )                                // No, more than 4 seconds inactive
+    {
+      enc_inactivity = 0 ;
+      enc_menu_mode = VOLUME ;                                // Return to VOLUME mode
+      tftset ( 2, (char*)NULL ) ;                             // Restore original text at bottom
+    }
+  }
   if ( tripleclick )                                          // First handle triple click
   {
     tripleclick = false ;
@@ -3329,12 +3324,15 @@ void chk_enc()
     {
       enc_menu_mode = TRACK ;                                 // Swich to TRACK mode
       dbgprint ( "Encoder mode set to TRACK" ) ;
+      tftset ( 3, "Turn to select track\n"                    // Show current option
+                  "Press to confirm" ) ;
       enc_nodeID = selectnextSDnode ( SD_currentnode, +1 ) ;  // Start with next file on SD
       if ( enc_nodeID == "" )                                 // Current track available?
       {
         inx = SD_nodelist.indexOf ( "\n" ) ;                  // No, find first
         enc_nodeID = SD_nodelist.substring ( 0, inx ) ;
       }
+      // Stop playing as reading filenames saturates SD I/O.
       if ( datamode != STOPPED )
       {
         datamode = STOPREQD ;                                 // Request STOP
@@ -3346,25 +3344,40 @@ void chk_enc()
     doubleclick = false ;
     enc_menu_mode = PRESET ;                                  // Swich to PRESET mode
     dbgprint ( "Encoder mode set to PRESET" ) ;
+    tftset ( 3, "Turn to select station\n"                    // Show current option
+                "Press to confirm" ) ;
     enc_preset = ini_block.newpreset + 1 ;                    // Start with current preset + 1
   }
   if ( singleclick )
   {
     singleclick = false ;
-    switch ( enc_menu_mode )                                  // Which mode (VOLUME, PRESET, TRACK)?
+    switch ( enc_menu_mode )                                  // Which mode (VOLUME, SWMUTE, PRESET, TRACK)?
     {
       case VOLUME :
-        break ;                                               // No special action if in volume mode
+        if ( muteflag )
+        {
+          tftset ( 3, "Unmute" ) ;                            // Show change
+        }
+        else
+        {
+          tftset ( 3, "Mute" ) ; 
+        }
+        muteflag = !muteflag ;                                // Mute/unmute
+        enc_menu_mode = SWMUTE ;                              // Will go back to VOLUME after timeout
+        break ;
+      case SWMUTE :
+        break ;
       case PRESET :
         currentpreset = -1 ;                                  // Make sure current is different
         ini_block.newpreset = enc_preset ;                    // Make a definite choice
+        enc_menu_mode = VOLUME ;                              // Back to default mode
         break ;
       case TRACK :
         host = getSDfilename ( enc_nodeID ) ;                 // Select track as new host
         hostreq = true ;                                      // Request this host
+        enc_menu_mode = VOLUME ;                              // Back to default mode
         break ;
     }
-    enc_menu_mode = VOLUME ;                                  // Back to default mode
   }
   if ( longclick )                                            // Check for long click
   {
@@ -3375,30 +3388,53 @@ void chk_enc()
       if ( datamode != STOPPED )
       {
         datamode = STOPREQD ;                                 // Request STOP
+        mp3loop() ;                                           // Handle stop request
       }
       host = getSDfilename ( "0" ) ;                          // Get random track
       hostreq = true ;                                        // Request this host
     }
+    muteflag = false ;                                        // Be sure muteing is off
   }
   if ( rotationcount == 0 )                                   // Any rotation?
   {
     return ;                                                  // No, return
   }
+  if ( rotationcount > 0 )                                    // Make local
+  {
+    lrc = 1 ;                                                 // One step at the time
+  }
+  else
+  {
+    lrc = -1 ;
+  }
+  if ( --waittime <= 0 )                                      // Reduce speed?
+  {
+    waittime = 0 ;                                            // No: end of wait time
+  }
+  else
+  {
+    return ;                                                  // Yes, wait
+  }
   switch ( enc_menu_mode )                                    // Which mode (VOLUME, PRESET, TRACK)?
   {
     case VOLUME :
-      ini_block.reqvol += rotationcount ;
-      if ( ini_block.reqvol > 100 )
+      ini_block.reqvol += lrc ;
+      if ( ini_block.reqvol > 127 )                           // Wrapped around?
+      {
+        ini_block.reqvol = 0 ;                                // Limit to normal values
+      }
+      else if ( ini_block.reqvol > 100 )
       {
         ini_block.reqvol = 100 ;                              // Limit to normal values
       }
       muteflag = false ;                                      // Mute off
       break ;
     case PRESET :
-      enc_preset += rotationcount ;                           // Change preset
-      if ( enc_preset < 0 )                                   // Check limits
+      waittime = 10 ;                                         // Wait some time after this
+      enc_preset += lrc ;                                     // Next preset
+      if ( enc_preset < 0 )                                   // Negative not allowed
       {
-        enc_preset = 0 ;                                      // Not lower than 0
+        enc_preset = 0 ;                                      // Stay at 0
       }
       tmp = readhostfrompref ( enc_preset ) ;                 // Get host spec and possible comment
       if ( tmp == "" )                                        // End of presets?
@@ -3406,6 +3442,7 @@ void chk_enc()
         enc_preset = 0 ;                                      // Yes, wrap
         tmp = readhostfrompref ( enc_preset ) ;               // Get host spec and possible comment
       }
+      dbgprint ( "Preset is %d", enc_preset ) ;
       // Show just comment if available.  Otherwise the preset itself.
       inx = tmp.indexOf ( "#" ) ;                             // Get position of "#"
       if ( inx > 0 )                                          // Hash sign present?
@@ -3413,24 +3450,21 @@ void chk_enc()
         tmp.remove ( 0, inx + 1 ) ;                           // Yes, remove non-comment part
       }
       chomp ( tmp ) ;                                         // Remove garbage from description
-      displayinfo ( tmp.c_str(),90, 36, YELLOW ) ;            // Show Source at position 90-126
+      tftset ( 3, tmp ) ;                                     // Set screen segment bottom part
       break ;
     case TRACK :
-      while ( rotationcount )                                 // Rotary encoder change?
-      {
-        delta = rotationcount < 0 ? -1 : +1 ;
-        rotationcount -= delta ;
-        enc_nodeID = selectnextSDnode ( enc_nodeID, delta ) ; // Select the next file on SD
-      }
+      waittime = 5 ;                                          // Wait some time after this
+      enc_nodeID = selectnextSDnode ( enc_nodeID, lrc ) ;     // Select the next file on SD
       enc_filename = getSDfilename ( enc_nodeID ) ;           // Set new filename
+      dbgprint ( "Select %s", enc_filename.c_str() ) ;
       while ( ( inx = enc_filename.indexOf ( "/" ) ) >= 0 )   // Search for last slash
       {
         enc_filename.remove ( 0, inx + 1 ) ;                  // Remove before the slash
       }
-      displayinfo ( enc_filename.c_str(),
-                    90, 36, YELLOW ) ;                        // Show Source at position 90-126
+      dbgprint ( "Simplified %s", enc_filename.c_str() ) ;
+      tftset ( 3, enc_filename ) ;                            // Set screen segment bottom part
   }
-  rotationcount = 0 ;                                         // Reset count in all cases
+  rotationcount = 0 ;                                         // Reset
 }
 
 
@@ -3439,96 +3473,86 @@ void chk_enc()
 //**************************************************************************************************
 // Called from the mail loop() for the mp3 functions.                                              *
 // A connection to an MP3 server is active and we are ready to receive data.                       *
-// Normally there is about 2 to 4 kB available in the data stream.  This depends on the            *
-// sender.                                                                                         *
+// Normally there is about 2 to 4 kB available in the data stream.  This depends on the sender.    *
 //**************************************************************************************************
 void mp3loop()
 {
-  static uint8_t  tmpbuff[RINGBFSIZ/20] ;                // Input buffer for mp3 stream
+  static uint8_t  tmpbuff[6000] ;                        // Input buffer for mp3 stream
   uint32_t        maxchunk ;                             // Max number of bytes to read
   int             res = 0 ;                              // Result reading from mp3 stream
-  uint32_t        rs ;                                   // Free space in ringbuffer
   uint32_t        av ;                                   // Available in stream
   String          nodeID ;                               // Next nodeID of track on SD
 
-  // Try to keep the ringbuffer filled up by adding as much bytes as possible
+  // Try to keep the Queue to playtask filled up by adding as much bytes as possible
   if ( datamode & ( INIT | HEADER | DATA |               // Test op playing
                     METADATA | PLAYLISTINIT |
                     PLAYLISTHEADER |
                     PLAYLISTDATA ) )
   {
-    rs = ringspace() ;                                   // Get free ringbuffer space
-    if ( rs >= sizeof(tmpbuff) )                         // Need to fill the ringbuffer?
+    maxchunk = sizeof(tmpbuff) ;                         // Reduce byte count for this mp3loop()
+    if ( localfile )                                     // Playing file from SD card?
     {
-      maxchunk = sizeof(tmpbuff) ;                       // Reduce byte count for this mp3loop()
-      if ( localfile )                                   // Playing file from SD card?
+      claimSPI ( "available" ) ;                         // Claim SPI bus
+      av = mp3file.available() ;                         // Bytes left in file
+      releaseSPI() ;                                     // Release SPI bus
+      if ( av < maxchunk )                               // Reduce byte count for this mp3loop()
       {
-        av = mp3file.available() ;                       // Bytes left in file
-        if ( av < maxchunk )                             // Reduce byte count for this mp3loop()
-        {
-          maxchunk = av ;
-        }
-        if ( maxchunk )                                  // Anything to read?
-        {
-          res = mp3file.read ( tmpbuff, maxchunk ) ;     // Read a block of data
-        }
+        maxchunk = av ;
       }
-      else
+      if ( maxchunk )                                    // Anything to read?
       {
-        av = mp3client.available() ;                     // Available from stream
-        if ( av < maxchunk )                             // Limit read size
-        {
-          maxchunk = av ;
-        }
-        if ( maxchunk )                                  // Anything to read?
-        {
-          res = mp3client.read ( tmpbuff, maxchunk ) ;   // Read a number of bytes from the stream
-        }
+        claimSPI ( "sdread" ) ;                          // Claim SPI bus
+        res = mp3file.read ( tmpbuff, maxchunk ) ;       // Read a block of data
+        releaseSPI() ;                                   // Release SPI bus
       }
-      putring ( tmpbuff, res ) ;                         // Transfer to ringbuffer
     }
-  }
-  while ( vs1053player.data_request() && ringavail() )   // Try to keep VS1053 filled
-  {
-    handlebyte_ch ( getring() ) ;                        // Yes, handle it
+    else
+    {
+      av = mp3client.available() ;                       // Available from stream
+      if ( av < maxchunk )                               // Limit read size
+      {
+        maxchunk = av ;
+      }
+      if ( maxchunk )                                    // Anything to read?
+      {
+        res = mp3client.read ( tmpbuff, maxchunk ) ;     // Read a number of bytes from the stream
+      }
+    }
+    for ( int i = 0 ; i < res ; i++ )
+    {
+      handlebyte_ch ( tmpbuff[i] ) ;
+    }
   }
   if ( datamode == STOPREQD )                            // STOP requested?
   {
     dbgprint ( "STOP requested" ) ;
     if ( localfile )
     {
+      claimSPI ( "close" ) ;                             // Claim SPI bus
       mp3file.close() ;
+      releaseSPI() ;                                     // Release SPI bus
     }
     else
     {
       stop_mp3client() ;                                 // Disconnect if still connected
     }
     handlebyte_ch ( 0, true ) ;                          // Force flush of buffer
-    vs1053player.setVolume ( 0 ) ;                       // Mute
-    vs1053player.stopSong() ;                            // Stop playing
-    emptyring() ;                                        // Empty the ringbuffer
+    queuefunc ( QSTOPSONG ) ;                            // Queue a request to stop the song
     metaint = 0 ;                                        // No metaint known now
     datamode = STOPPED ;                                 // Yes, state becomes STOPPED
-    if ( tft )
-    {
-      tft->fillRect ( 0, 8, 160, 118, BLACK ) ;          // Clear most of the screen
-    }
-    delay ( 500 ) ;
+    queuefunc ( QCLEARTFT ) ;                            // Queue a request to clear TFT
+    return ;
   }
-  if ( localfile )                                       // Playin from SD?
+  if ( localfile )                                       // Playing from SD?
   {
-    if ( datamode & ( INIT | HEADER | DATA |             // Test op playing
-                      METADATA | PLAYLISTINIT |
-                      PLAYLISTHEADER |
-                      PLAYLISTDATA ) )
+    if ( datamode & DATA )                               // Test op playing
     {
-      av = mp3file.available() ;                           // Bytes left in file
-      if ( ( av == 0 ) && ( ringavail() == 0 ) )           // End of mp3 data?
+      if ( av == 0 )                                     // End of mp3 data?
       {
-        datamode = STOPREQD ;                              // End of local mp3-file detected
+        datamode = STOPREQD ;                            // End of local mp3-file detected
         nodeID = selectnextSDnode ( SD_currentnode, +1 ) ; // Select the next file on SD
         host = getSDfilename ( nodeID ) ;
-        hostreq = true ;                                   // Request this host
+        hostreq = true ;                                 // Request this host
       }
     }
   }
@@ -3569,7 +3593,7 @@ void mp3loop()
   {
     hostreq = false ;
     currentpreset = ini_block.newpreset ;                 // Remember current preset
-    // Find out if this URL is on localhost.  Not yet implemented.
+    // Find out if this URL is on localhost (SD).
     localfile = ( host.indexOf ( "localhost/" ) >= 0 ) ;
     if ( localfile )                                      // Play file from localhost?
     {
@@ -3599,23 +3623,10 @@ void mp3loop()
 void loop()
 {
   mp3loop() ;                                               // Do mp3 related actions
-  if ( reqtone )                                            // Request to change tone?
-  {
-    reqtone = false ;
-    vs1053player.setTone ( ini_block.rtone ) ;              // Set SCI_BASS to requested value
-  }
   if ( resetreq )                                           // Reset requested?
   {
     delay ( 1000 ) ;                                        // Yes, wait some time
     ESP.restart() ;                                         // Reboot
-  }
-  if ( muteflag )
-  {
-    vs1053player.setVolume ( 0 ) ;                          // Mute
-  }
-  else
-  {
-    vs1053player.setVolume ( ini_block.reqvol ) ;           // Unmute
   }
   scanserial() ;                                            // Handle serial input
   scandigital() ;                                           // Scan digital inputs
@@ -3643,13 +3654,13 @@ void loop()
   }
   handleSaveReq() ;                                         // See if time to save settings
   handleIpPub() ;                                           // See if time to publish IP
-  if ( time_req )                                           // Time has changed?
-  {
-    gettime() ;                                             // Show time on TFT (if any)
-    time_req = false ;
-    displayvolume() ;                                       // Show volume on display
-  }
   chk_enc() ;                                               // Check rotary encoder functions
+  if ( time_req )                                           // Time to refresh timetxt
+  {
+    time_req = false ;                                      // Clear request
+    gettime() ;                                             // Get the curret time
+    queuefunc ( QTIME ) ;                                   // Queue a request to show the time
+  }
 }
 
 
@@ -3703,34 +3714,32 @@ void handlebyte_ch ( uint8_t b, bool force )
   {
     if ( chunkcount == 0 )                            // Expecting a new chunkcount?
     {
-      if ( b == '\r' )                               // Skip CR
+      if ( b == '\r' )                                // Skip CR
       {
         return ;
       }
-      else if ( b == '\n' )                          // LF ?
+      else if ( b == '\n' )                           // LF ?
       {
-        chunkcount = chunksize ;                     // Yes, set new count
-        chunksize = 0 ;                              // For next decode
+        chunkcount = chunksize ;                      // Yes, set new count
+        chunksize = 0 ;                               // For next decode
         return ;
       }
       // We have received a hexadecimal character.  Decode it and add to the result.
-      b = toupper ( b ) - '0' ;                      // Be sure we have uppercase
+      b = toupper ( b ) - '0' ;                       // Be sure we have uppercase
       if ( b > 9 )
       {
-        b = b - 7 ;                                  // Translate A..F to 10..15
+        b = b - 7 ;                                   // Translate A..F to 10..15
       }
       chunksize = ( chunksize << 4 ) + b ;
+      return  ;
     }
-    else
-    {
-      handlebyte ( b, force ) ;                       // Normal data byte
-      chunkcount-- ;                                  // Update count to next chunksize block
-    }
+    chunkcount-- ;                                    // Update count to next chunksize block
   }
-  else
+  if ( force )                                        // Force end?
   {
-    handlebyte ( b, force ) ;                         // Normal handling of this byte
+    chunked = false ;                                 // Not longer chunked
   }
+  handlebyte ( b, force ) ;                           // Normal handling of this byte
 }
 
 
@@ -3745,17 +3754,40 @@ void handlebyte_ch ( uint8_t b, bool force )
 void handlebyte ( uint8_t b, bool force )
 {
   static uint16_t  playlistcnt ;                       // Counter to find right entry in playlist
-  static bool      firstmetabyte ;                     // True if first metabyte (counter)
   static int       LFcount ;                           // Detection of end of header
-  static __attribute__((aligned(4))) uint8_t buf[32] ; // Buffer for chunk
-  static int       bufcnt = 0 ;                        // Data in chunk
-  static bool      firstchunk = true ;                 // First chunk as input
+  String           metaline ;                          // Readable line in metadata/playlist
   String           lcml ;                              // Lower case metaline
   String           ct ;                                // Contents type
   static bool      ctseen = false ;                    // First line of header seen or not
   int              inx ;                               // Pointer in metaline
-  int              i ;                                 // Loop control
 
+  if ( force )
+  {
+    datacount = 0 ;                                    // Reset datacount
+    outqinx = 0 ;
+    return ;                                           // No need to send new chunk.
+  }
+  if ( datamode == DATA )                              // Handle next byte of MP3/Ogg data
+  {
+    outchunk.buf[outqinx++] = b ;
+    if ( outqinx == sizeof(outchunk.buf) )             // Buffer full?
+    {
+      // Send data to playtask queue.  If the buffer cannot be placed within 200 ticks,
+      // the queue is full, while the sender tries to send more.  The chunk will be dis-
+      // carded it that case.
+      xQueueSend ( dataqueue, &outchunk, 200 ) ;       // Send to queue
+      outqinx = 0 ;                                    // Item empty now
+    }
+    if ( metaint != 0 )                                // No METADATA on Ogg streams or mp3 files
+    {
+      if ( --datacount == 0 )                          // End of datablock?
+      {
+        datamode = METADATA ;
+        metalinebfx = -1 ;                             // Expecting first metabyte (counter)
+      }
+    }
+    return ;
+  }
   if ( datamode == INIT )                              // Initialize for header receive
   {
     ctseen = false ;                                   // Contents type not seen yet
@@ -3765,44 +3797,8 @@ void handlebyte ( uint8_t b, bool force )
     dbgprint ( "Switch to HEADER" ) ;
     datamode = HEADER ;                                // Handle header
     totalcount = 0 ;                                   // Reset totalcount
-    metaline = "" ;                                    // No metadata yet
-    firstchunk = true ;                                // First chunk expected
-  }
-  if ( datamode == DATA )                              // Handle next byte of MP3/Ogg data
-  {
-    buf[bufcnt++] = b ;                                // Save byte in chunkbuffer
-    if ( bufcnt == sizeof(buf) || force )              // Buffer full?
-    {
-      if ( firstchunk )
-      {
-        firstchunk = false ;
-        dbgprint ( "First chunk:" ) ;                  // Header for printout of first chunk
-        for ( i = 0 ; i < 32 ; i += 8 )                // Print 4 lines
-        {
-          dbgprint ( "%02X %02X %02X %02X %02X %02X %02X %02X",
-                     buf[i],   buf[i + 1], buf[i + 2], buf[i + 3],
-                     buf[i + 4], buf[i + 5], buf[i + 6], buf[i + 7] ) ;
-        }
-      }
-      totalcount += bufcnt ;                           // Count number of bytes, ignore overflow
-      vs1053player.playChunk ( buf, bufcnt ) ;         // Yes, send to player
-      bufcnt = 0 ;                                     // Reset count
-    }
-    if ( metaint != 0 )                                // No METADATA on Ogg streams or mp3 files
-    {
-      if ( --datacount == 0 )                          // End of datablock?
-      {
-        if ( bufcnt )                                  // Yes, still data in buffer?
-        {
-          totalcount += bufcnt ;                       // Count number of bytes, ignore overflow
-          vs1053player.playChunk ( buf, bufcnt ) ;     // Yes, send to player
-          bufcnt = 0 ;                                 // Reset count
-        }
-        datamode = METADATA ;
-        firstmetabyte = true ;                         // Expecting first metabyte (counter)
-      }
-    }
-    return ;
+    metalinebfx = 0 ;                                  // No metadata yet
+    metalinebf[0] = '\0' ;
   }
   if ( datamode == HEADER )                            // Handle next byte of MP3 header
   {
@@ -3815,12 +3811,14 @@ void handlebyte ( uint8_t b, bool force )
     else if ( b == '\n' )                              // Linefeed ?
     {
       LFcount++ ;                                      // Count linefeeds
-      if ( chkhdrline ( metaline.c_str() ) )           // Reasonable input?
+      metalinebf[metalinebfx] = '\0' ;                 // Take care of delimiter
+      if ( chkhdrline ( metalinebf ) )                 // Reasonable input?
       {
+        dbgprint ( "Headerline: %s",                   // Show headerline
+                   metalinebf ) ;
+        metaline = String ( metalinebf ) ;             // Convert to string
         lcml = metaline ;                              // Use lower case for compare
         lcml.toLowerCase() ;
-        dbgprint ( "Headerline: %s",
-                   metaline.c_str() ) ;                // Yes, Show it
         if ( lcml.startsWith ( "location: http://" ) ) // Redirection?
         {
           host = metaline.substring ( 17 ) ;           // Yes, get new URL
@@ -3841,7 +3839,7 @@ void handlebyte ( uint8_t b, bool force )
             bitrate = 87 ;                             // Dummy bitrate
           }
         }
-        else if ( metaline.startsWith ("icy-metaint:" ) )
+        else if ( lcml.startsWith ("icy-metaint:" ) )
         {
           metaint = metaline.substring(12).toInt() ;   // Found metaint tag, read the value
         }
@@ -3849,76 +3847,73 @@ void handlebyte ( uint8_t b, bool force )
         {
           icyname = metaline.substring(9) ;            // Get station name
           icyname.trim() ;                             // Remove leading and trailing spaces
-          displayinfo ( icyname.c_str(), 90, 36,
-                        YELLOW ) ;                     // Show station name at position 90-126
+          tftset ( 2, icyname ) ;                      // Set screen segment bottom part
           mqttpub.trigger ( MQTT_ICYNAME ) ;           // Request publishing to MQTT
         }
         else if ( lcml.startsWith ( "transfer-encoding:" ) )
         {
           // Station provides chunked transfer
-          if ( metaline.endsWith ( "chunked" ) )
+          if ( lcml.endsWith ( "chunked" ) )
           {
             chunked = true ;                           // Remember chunked transfer mode
             chunkcount = 0 ;                           // Expect chunkcount in DATA
           }
         }
       }
-      metaline = "" ;                                  // Reset this line
-      if ( ( LFcount == 2 ) && ctseen )                // Some data seen and a double LF?
+      metalinebfx = 0 ;                                // Reset this line
+      if ( ( LFcount == 2 ) && ctseen )                // Content type seen and a double LF?
       {
         dbgprint ( "Switch to DATA, bitrate is %d"     // Show bitrate
                    ", metaint is %d",                  // and metaint
                    bitrate, metaint ) ;
         datamode = DATA ;                              // Expecting data now
         datacount = metaint ;                          // Number of bytes before first metadata
-        bufcnt = 0 ;                                   // Reset buffer count
-        vs1053player.startSong() ;                     // Start a new song
+        queuefunc ( QSTARTSONG ) ;                     // Queue a request to start song
       }
     }
     else
     {
-      metaline += (char)b ;                            // Normal character, put new char in metaline
+      metalinebf[metalinebfx++] = (char)b ;            // Normal character, put new char in metaline
       LFcount = 0 ;                                    // Reset double CRLF detection
     }
     return ;
   }
   if ( datamode == METADATA )                          // Handle next byte of metadata
   {
-    if ( firstmetabyte )                               // First byte of metadata?
+    if ( metalinebfx < 0 )                             // First byte of metadata?
     {
-      firstmetabyte = false ;                          // Not the first anymore
+      metalinebfx = 0 ;                                // Prepare to store first character
       metacount = b * 16 + 1 ;                         // New count for metadata including length byte
       if ( metacount > 1 )
       {
         dbgprint ( "Metadata block %d bytes",
                    metacount - 1 ) ;                   // Most of the time there are zero bytes of metadata
       }
-      metaline = "" ;                                  // Set to empty
     }
     else
     {
-      metaline += (char)b ;                            // Normal character, put new char in metaline
+      metalinebf[metalinebfx++] = (char)b ;            // Normal character, put new char in metaline
     }
     if ( --metacount == 0 )
     {
-      if ( metaline.length() )                         // Any info present?
+      metalinebf[metalinebfx] = '\0' ;                 // Make sure line is limited
+      if ( strlen ( metalinebf ) )                     // Any info present?
       {
         // metaline contains artist and song name.  For example:
         // "StreamTitle='Don McLean - American Pie';StreamUrl='';"
         // Sometimes it is just other info like:
         // "StreamTitle='60s 03 05 Magic60s';StreamUrl='';"
         // Isolate the StreamTitle, remove leading and trailing quotes if present.
-        showstreamtitle ( metaline.c_str() ) ;         // Show artist and title if present in metadata
+        showstreamtitle ( metalinebf ) ;               // Show artist and title if present in metadata
         mqttpub.trigger ( MQTT_STREAMTITLE ) ;         // Request publishing to MQTT
       }
-      if ( metaline.length() > 1500 )                  // Unlikely metaline length?
+      if ( strlen ( metalinebf ) > 1500 )              // Unlikely metaline length?
       {
         dbgprint ( "Metadata block too long! Skipping all Metadata from now on." ) ;
         metaint = 0 ;                                  // Probably no metadata
-        metaline = "" ;                                // Do not waste memory on this
       }
       datacount = metaint ;                            // Reset data count
-      bufcnt = 0 ;                                     // Reset buffer count
+      //bufcnt = 0 ;                                     // Reset buffer count
       datamode = DATA ;                                // Expecting data
     }
   }
@@ -3926,7 +3921,7 @@ void handlebyte ( uint8_t b, bool force )
   {
     // We are going to use metadata to read the lines from the .m3u file
     // Sometimes this will only contain a single line
-    metaline = "" ;                                    // Prepare for new line
+    metalinebfx = 0 ;                                  // Prepare for new line
     LFcount = 0 ;                                      // For detection end of header
     datamode = PLAYLISTHEADER ;                        // Handle playlist data
     playlistcnt = 1 ;                                  // Reset for compare
@@ -3944,9 +3939,10 @@ void handlebyte ( uint8_t b, bool force )
     else if ( b == '\n' )                              // Linefeed ?
     {
       LFcount++ ;                                      // Count linefeeds
+      metalinebf[metalinebfx] = '\0' ;                 // Take care of delimeter
       dbgprint ( "Playlistheader: %s",                 // Show playlistheader
-                 metaline.c_str() ) ;
-      metaline = "" ;                                  // Ready for next line
+                 metalinebf ) ;
+      metalinebfx = 0 ;                                // Ready for next line
       if ( LFcount == 2 )
       {
         dbgprint ( "Switch to PLAYLISTDATA" ) ;
@@ -3956,7 +3952,7 @@ void handlebyte ( uint8_t b, bool force )
     }
     else
     {
-      metaline += (char)b ;                            // Normal character, put new char in metaline
+      metalinebf[metalinebfx++] = (char)b ;            // Normal character, put new char in metaline
       LFcount = 0 ;                                    // Reset double CRLF detection
     }
   }
@@ -3970,13 +3966,16 @@ void handlebyte ( uint8_t b, bool force )
     }
     else if ( b == '\n' )                              // Linefeed ?
     {
+      metalinebf[metalinebfx] = '\0' ;                 // Take care of delimeter
       dbgprint ( "Playlistdata: %s",                   // Show playlistheader
-                 metaline.c_str() ) ;
-      if ( metaline.length() < 5 )                     // Skip short lines
+                 metalinebf ) ;
+      if ( strlen ( metalinebf ) < 5 )                 // Skip short lines
       {
-        metaline = "" ;                                // Flush line
+        metalinebfx = 0 ;                              // Flush line
+        metalinebf[0] = '\0' ;
         return ;
       }
+      metaline = String ( metalinebf ) ;               // Convert to string
       if ( metaline.indexOf ( "#EXTINF:" ) >= 0 )      // Info?
       {
         if ( playlist_num == playlistcnt )             // Info for this entry?
@@ -3992,11 +3991,11 @@ void handlebyte ( uint8_t b, bool force )
       }
       if ( metaline.startsWith ( "#" ) )               // Commentline?
       {
-        metaline = "" ;
+        metalinebfx = 0 ;                              // Yes, ignore
         return ;                                       // Ignore commentlines
       }
       // Now we have an URL for a .mp3 file or stream.  Is it the rigth one?
-      dbgprint ( "Entry %d in playlist found: %s", playlistcnt, metaline.c_str() ) ;
+      dbgprint ( "Entry %d in playlist found: %s", playlistcnt, metalinebf ) ;
       if ( playlist_num == playlistcnt  )
       {
         inx = metaline.indexOf ( "http://" ) ;         // Search for "http://"
@@ -4010,15 +4009,14 @@ void handlebyte ( uint8_t b, bool force )
         }
         connecttohost() ;                              // Connect to it
       }
-      metaline = "" ;
+      metalinebfx = 0 ;                                // Prepare for next line
       host = playlist ;                                // Back to the .m3u host
       playlistcnt++ ;                                  // Next entry in playlist
     }
     else
     {
-      metaline += (char)b ;                            // Normal character, add it to metaline
+      metalinebf[metalinebfx] = (char)b ;              // Normal character, add it to metaline
     }
-    return ;
   }
 }
 
@@ -4328,16 +4326,21 @@ const char* analyzeCmd ( const char* par, const char* val )
       hostreq = true ;                                // Yes, request restart
     }
   }
-  else if ( ( argument == "mp3track" ) ||             // Select a track from SD card?
-            ( argument == "station" ) )               // Station in the form address:port
+  else if ( ( value.length() > 0 ) &&
+            ( ( argument == "mp3track" ) ||           // Select a track from SD card?
+              ( argument == "station" ) ) )           // Station in the form address:port
   {
     if ( argument.startsWith ( "mp3" ) )              // MP3 track to search for
     {
+      if ( !SD_okay )                                 // SD card present?
+      {
+        strcpy ( reply, "Command not accepted!" ) ;   // Error reply
+        return reply ;
+      }
       value = getSDfilename ( value ) ;               // like "localhost/........"
     }
     if ( datamode & ( HEADER | DATA | METADATA | PLAYLISTINIT |
                       PLAYLISTHEADER | PLAYLISTDATA ) )
-
     {
       datamode = STOPREQD ;                           // Request STOP
     }
@@ -4366,8 +4369,11 @@ const char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
-    sprintf ( reply, "Free memory is %d, ringbuf %d, stream %d, bitrate %d kbps",
-              ESP.getFreeHeap(), rcount, mp3client.available(), mbitrate ) ;
+    sprintf ( reply, "Free memory is %d, chunks in queue %d, stream %d, bitrate %d kbps",
+              ESP.getFreeHeap(),
+              uxQueueMessagesWaiting ( dataqueue ),
+              mp3client.available(),
+              mbitrate ) ;
   }
   // Commands for bass/treble control
   else if ( argument.startsWith ( "tone" ) )          // Tone command
@@ -4461,5 +4467,275 @@ String httpheader ( String contentstype )
                   "Server: " NAME "\n"
                   "Cache-Control: " "max-age=3600\n"
                   "Last-Modified: " VERSION "\n\n" ) ;
+}
+
+
+//**************************************************************************************************
+//* Function that are called from playtask.                                                        *
+//**************************************************************************************************
+
+//**************************************************************************************************
+//                                      D I S P L A Y V O L U M E                                  *
+//**************************************************************************************************
+// Show the current volume as an indicator on the screen.                                          *
+//**************************************************************************************************
+void displayvolume()
+{
+  if ( tft )
+  {
+    static uint8_t oldvol = 0 ;                         // Previous volume
+    uint8_t        newvol ;                             // Current setting
+    uint8_t pos ;                                       // Positon of volume indicator
+
+    newvol = vs1053player.getVolume() ;                 // Get current volume setting
+    if ( newvol != oldvol )                             // Volume changed?
+    {
+      oldvol = newvol ;                                 // Remember for next compare
+      pos = map ( newvol, 0, 100, 0, 160 ) ;            // Compute position on TFT
+      tft->fillRect ( 0, 126, pos, 2, RED ) ;           // Paint red part
+      tft->fillRect ( pos, 126, 160 - pos, 2, GREEN ) ; // Paint green part
+    }
+  }
+}
+
+
+//**************************************************************************************************
+//                                      D I S P L A Y T I M E                                      *
+//**************************************************************************************************
+// Show the time on the LCD at a fixed position in a specified color                               *
+// To prevent flickering, only the changed part of the timestring is displayed.                    *
+// An empty string will force a refresh on next call.                                              *
+// A character on the screen is 8 pixels high and 6 pixels wide.                                   *
+//**************************************************************************************************
+void displaytime ( const char* str, uint16_t color )
+{
+  static char oldstr[9] = "........" ;             // For compare
+  uint8_t     i ;                                  // Index in strings
+  uint8_t     pos = TIMEPOS ;                      // X-position of character
+
+  if ( str[0] == '\0' )                            // Empty string?
+  {
+    for ( i = 0 ; i < 8 ; i++ )                    // Set oldstr to dots
+    {
+      oldstr[i] = '.' ;
+    }
+    return ;                                       // No actual display yet
+  }
+  if ( tft )                                       // TFT active?
+  {
+    tft->setTextColor ( color ) ;                  // Set the requested color
+    for ( i = 0 ; i < 8 ; i++ )                    // Compare old and new
+    {
+      if ( str[i] != oldstr[i] )                   // Difference?
+      {
+        tft->fillRect ( pos, 0, 6, 8, BLACK ) ;    // Clear the space for new character
+        tft->setCursor ( pos, 0 ) ;                // Prepare to show the info
+        tft->print ( str[i] ) ;                    // Show the character
+        oldstr[i] = str[i] ;                       // Remember for next compare
+      }
+      pos += 6 ;                                   // Next position
+    }
+  }
+}
+
+
+//**************************************************************************************************
+//                                      D I S P L A Y I N F O                                      *
+//**************************************************************************************************
+// Show a string on the LCD at a specified y-position (0..2) in a specified color.                 *
+// The parametr is the index in tftdata[].                                                         *
+//**************************************************************************************************
+void displayinfo ( uint16_t inx )
+{
+  uint16_t       width = 160 ;                           // Normal number of colums
+  scrseg_struct* p = &tftdata[inx] ;
+
+  if ( inx == 0 )                                        // Topline is shorter
+  {
+    width = TIMEPOS ;                                    // Leave space for time
+  }
+  if ( tft )                                             // TFT active?
+  {
+    uint16_t len = p->str.length() + 1 ;                 // Required length of buffer
+    char     buf [ len ] ;                               // Need some buffer space
+    
+    p->str.toCharArray ( buf, len ) ;                    // Make a local copy of the string
+    utf8ascii ( buf ) ;                                  // Convert possible UTF8
+    tft->fillRect ( 0, p->y, width, p->height, BLACK ) ; // Clear the space for new info
+    tft->setTextColor ( p->color ) ;                     // Set the requested color
+    tft->setCursor ( 0, p->y ) ;                         // Prepare to show the info
+    tft->println ( buf ) ;                               // Show the string
+  }
+}
+
+
+//**************************************************************************************************
+//                                         G E T T I M E                                           *
+//**************************************************************************************************
+// Retrieve the local time from NTP server and convert to string.                                  *
+// Will be called every second.                                                                    *
+//**************************************************************************************************
+void gettime()
+{
+  static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
+  static int16_t retrycount = 100 ;
+
+  if ( tft )                                                // TFT used?
+  {
+    if ( timeinfo.tm_year )                                 // Legal time found?
+    {
+      sprintf ( timetxt, "%02d:%02d:%02d",                  // Yes, format to a string
+                timeinfo.tm_hour,
+                timeinfo.tm_min,
+                timeinfo.tm_sec ) ;
+    }
+    if ( --delaycount <= 0 )                                // Sync every few hours
+    {
+      delaycount = 7200 ;                                   // Reset counter
+      if ( timeinfo.tm_year )                               // Legal time found?
+      {
+        dbgprint ( "Sync TOD, old value is %s", timetxt ) ;
+      }
+      dbgprint ( "Sync TOD" ) ;
+      if ( !getLocalTime ( &timeinfo ) )                    // Read from NTP server
+      {
+        dbgprint ( "Failed to obtain time!" ) ;             // Error
+        timeinfo.tm_year = 0 ;                              // Set current time to illegal
+        if ( retrycount )                                   // Give up syncing?
+        {
+          retrycount-- ;                                    // No try again
+          delaycount = 5 ;                                  // Retry after 5 seconds
+        }
+      }
+      else
+      {
+        sprintf ( timetxt, "%02d:%02d:%02d",                // Format new time to a string
+                  timeinfo.tm_hour,
+                  timeinfo.tm_min,
+                  timeinfo.tm_sec ) ;
+        dbgprint ( "Sync TOD, new value is %s", timetxt ) ;
+      }
+    }
+  }
+}
+
+
+//**************************************************************************************************
+//                                H A N D L E _ T F T _ T X T                                      *
+//**************************************************************************************************
+// Check if tft refresh is requested.                                                              *
+//**************************************************************************************************
+bool handle_tft_txt()
+{
+  for ( uint16_t i = 0 ; i < TFTSECS ; i++ )              // Handle all sections
+  {
+    if ( tftdata[i].update_req )                          // Refresh requested?
+    {
+      displayinfo ( i ) ;                                 // Yes, do the refresh
+      tftdata[i].update_req = false ;                     // Reset request
+      return true ;                                       // Just handle 1 request
+    }
+  }
+  return false ;                                          // Not a single request
+}
+
+
+//**************************************************************************************************
+//                                   H A N D L E _ S P E C                                         *
+//**************************************************************************************************
+// Handle non-queue functions for playtask.                                                        *
+//**************************************************************************************************
+void handle_spec()
+{
+  // Do some special function if necessary
+  claimSPI ( "hspec" ) ;                                      // Claim SPI bus
+  if ( ( tft != NULL ) && tft_update_req )                    // Need to update TFT?
+  {
+    tft_update_req = handle_tft_txt() ;                       // Yes, TFT refresh necessary
+  }
+  if ( muteflag )                                             // Mute or not?
+  {
+    vs1053player.setVolume ( 0 ) ;                            // Mute
+  }
+  else
+  {
+    vs1053player.setVolume ( ini_block.reqvol ) ;             // Unmute
+  }
+  if ( reqtone )                                              // Request to change tone?
+  {
+    reqtone = false ;
+    vs1053player.setTone ( ini_block.rtone ) ;                // Set SCI_BASS to requested value
+  }
+  releaseSPI() ;                                              // Release SPI bus
+}
+
+
+//**************************************************************************************************
+//                                     P L A Y T A S K                                             *
+//**************************************************************************************************
+// Play stream data from input queue.                                                              *
+// Handle all I/O to VS1053B during normal playing.                                                *
+// Handles display of text, time and volume on TFT as well.                                        *
+//**************************************************************************************************
+void playtask ( void * parameter )
+{
+  while ( true )
+  {
+    if ( xQueueReceive ( dataqueue, &inchunk, 1 ) )
+    {
+      while ( !vs1053player.data_request() )                        // If FIFO is full..
+      {
+        handle_spec() ;                                             // Maybe some special funcs?
+        if ( !vs1053player.data_request() )                         // Still idle?
+        {
+          vTaskDelay ( 1 ) ;                                        // Yes, take a break
+        }
+      }
+      switch ( inchunk.datatyp )                                    // What kind of chunk?
+      {
+        case QDATA:
+          claimSPI ( "chunk" ) ;                                    // Claim SPI bus
+          vs1053player.playChunk ( inchunk.buf,                     // DATA, send to player
+                                   sizeof(inchunk.buf) ) ;
+          releaseSPI() ;                                            // Release SPI bus
+          totalcount += sizeof(inchunk.buf) ;                       // Count the bytes
+          break ;
+        case QSTARTSONG:
+          claimSPI ( "startsong" ) ;                                // Claim SPI bus
+          vs1053player.startSong() ;                                // START, start player
+          releaseSPI() ;                                            // Release SPI bus
+          break ;
+        case QSTOPSONG:
+          claimSPI ( "stopsong" ) ;                                 // Claim SPI bus
+          vs1053player.setVolume ( 0 ) ;                            // Mute
+          vs1053player.stopSong() ;                                 // STOP, stop player
+          releaseSPI() ;                                            // Release SPI bus
+          vTaskDelay ( 500 / portTICK_PERIOD_MS ) ;                 // Pause for a short time
+          break ;
+        case QCLEARTFT:
+          claimSPI ( "cleartft" ) ;                                 // Claim SPI bus
+          if ( tft )
+          {
+            tft->fillRect ( 0, 8, 160, 118, BLACK ) ;               // Clear most of the screen
+          }
+          releaseSPI() ;                                            // Release SPI bus
+          break ;
+        case QTIME:
+          claimSPI ( "time" ) ;                                     // Claim SPI bus
+          displaytime ( timetxt ) ;                                 // Write to TFT screen
+          displayvolume() ;                                         // Show volume on display
+          releaseSPI() ;                                            // Release SPI bus
+          break ;
+        default:
+          break ;
+      }
+    }
+    else
+    {
+      // No queued requests
+      handle_spec() ;                                               // Maybe some special funcs?
+    }
+  }
+  vTaskDelete ( NULL ) ;                                            // Will never arrive here
 }
 

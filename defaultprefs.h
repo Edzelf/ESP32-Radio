@@ -31,7 +31,7 @@ preset = 6
 # Some preset examples
 preset_00 = 109.206.96.34:8100                       #  0 - NAXI LOVE RADIO, Belgrade, Serbia
 preset_01 = airspectrum.cdnstream1.com:8114/1648_128 #  1 - Easy Hits Florida 128k
-preset_02 = us2.internet-radio.com:8050              #  2 - CLASSIC ROCK MIA WWW.SHERADIO.COM
+preset_02 = us2.internet-radio.com:8050              #  2 - CLASSIC ROCK MIAMI 256k
 preset_03 = airspectrum.cdnstream1.com:8000/1261_192 #  3 - Magic Oldies Florida
 preset_04 = airspectrum.cdnstream1.com:8008/1604_128 #  4 - Magic 60s Florida 60s Classic Rock
 preset_05 = us1.internet-radio.com:8105              #  5 - Classic Rock Florida - SHE Radio
