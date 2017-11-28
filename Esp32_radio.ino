@@ -98,10 +98,10 @@
 // 16-11-2017, ES: Replaced ringbuffer by FreeRTOS queue, play function on second CPU,
 //                 Included improved rotary switch routines supplied by fenyvesi,
 //                 Better IR sensitivity.
-//
+// 28-11-2017, ES: Minor corrections.
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 27 Nov 2017 10:56:00 GMT"
+#define VERSION "Tue, 28 Nov 2017 08:26:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -3631,7 +3631,10 @@ void loop()
   scanserial() ;                                            // Handle serial input
   scandigital() ;                                           // Scan digital inputs
   scanIR() ;                                                // See if IR input
-  ArduinoOTA.handle() ;                                     // Check for OTA
+  if ( NetworkFound )
+  {
+    ArduinoOTA.handle() ;                                   // Check for OTA
+  }
   handlehttpreply() ;
   cmdclient = cmdserver.available() ;                       // Check Input from client?
   if ( cmdclient )                                          // Client connected?
@@ -4580,7 +4583,7 @@ void gettime()
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
 
-  if ( tft )                                                // TFT used?
+  if ( NetworkFound && ( tft != NULL ) )                    // Network on and TFT used?
   {
     if ( timeinfo.tm_year )                                 // Legal time found?
     {
