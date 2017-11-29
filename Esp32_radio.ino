@@ -98,10 +98,10 @@
 // 16-11-2017, ES: Replaced ringbuffer by FreeRTOS queue, play function on second CPU,
 //                 Included improved rotary switch routines supplied by fenyvesi,
 //                 Better IR sensitivity.
-// 28-11-2017, ES: Minor corrections.
+//
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 28 Nov 2017 08:26:00 GMT"
+#define VERSION "Thu, 29 Nov 2017 16:30:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -152,6 +152,8 @@
 #define NVSBUFSIZE 150
 // Position (column) of time in topline
 #define TIMEPOS 108
+// SPI speed for SD card
+#define SDSPEED 1000000
 //
 // Subscription topics for MQTT.  The topic will be pefixed by "PREFIX/", where PREFIX is replaced
 // by the the mqttprefix in the preferences.  The next definition will yield the topic "ESP32Radio/command"
@@ -163,8 +165,8 @@
 //**************************************************************************************************
 void        displaytime ( const char* str, uint16_t color = WHITE ) ;
 void        showstreamtitle ( const char* ml, bool full = false ) ;
-void        handlebyte ( uint8_t b, bool force = false ) ;
-void        handlebyte_ch ( uint8_t b, bool force = false ) ;
+//inline void handlebyte ( uint8_t b, bool force = false ) ;
+void        handlebyte_ch ( uint8_t b ) ;
 void        handleFSf ( const String& pagename ) ;
 void        handleCmd()  ;
 char*       dbgprint( const char* format, ... ) ;
@@ -262,7 +264,7 @@ TFT_ILI9163C*     tft = NULL ;                              // For instance of T
 QueueHandle_t     dataqueue ;
 qdata_struct      outchunk ;                                // Data to queue
 qdata_struct      inchunk ;                                 // Data from queue
-int               outqinx = 0 ;                             // Pointer to buffer in outchunk
+uint8_t*          outqp = outchunk.buf ;                    // Pointer to buffer in outchunk
 uint32_t          totalcount = 0 ;                          // Counter mp3 data
 datamode_t        datamode ;                                // State of datastream
 int               metacount ;                               // Number of bytes in metadata
@@ -290,6 +292,7 @@ uint8_t           num_an ;                                  // Number of accepta
 uint16_t          mqttcount = 0 ;                           // Counter MAXMQTTCONNECTS
 int8_t            playlist_num = 0 ;                        // Nonzero for selection from playlist
 File              mp3file ;                                 // File containing mp3 on SD card
+uint32_t          mp3filelength ;                           // File length
 bool              localfile = false ;                       // Play from local mp3-file or not
 bool              chunked = false ;                         // Station provides chunked transfer
 int               chunkcount = 0 ;                          // Counter for chunked transfer
@@ -1878,6 +1881,7 @@ bool connecttofile()
   //dbgprint ( "Open SD %s", path.c_str() ) ;
   claimSPI ( "sdopen3" ) ;                                // Claim SPI bus
   mp3file = SD.open ( path ) ;                            // Open the file
+  mp3filelength = mp3file.available() ;                   // Get length
   releaseSPI() ;                                          // Release SPI bus
   if ( !mp3file )
   {
@@ -2748,7 +2752,7 @@ void setup()
   if ( ini_block.sd_cs_pin >= 0 )                        // SD configured?
   {
     if ( !SD.begin ( ini_block.sd_cs_pin, SPI,           // Yes,
-                     500000 ) )                          // try to init SD card driver
+                     SDSPEED ) )                         // try to init SD card driver
     {
       p = dbgprint ( "SD Card Mount Failed!" ) ;         // No success, check formatting (FAT)
       if ( tft )
@@ -2832,7 +2836,7 @@ void setup()
   timerAlarmWrite ( timer, 100000, true ) ;              // Alarm every 100 msec
   timerAlarmEnable ( timer ) ;                           // Enable the timer
   delay ( 1000 ) ;                                       // Show IP for a while
-  configTime ( -ini_block.clk_offset * 3600,
+  configTime ( ini_block.clk_offset * 3600,
                ini_block.clk_dst * 3600,
                ini_block.clk_server.c_str() ) ;          // GMT offset, daylight offset in seconds
   timeinfo.tm_year = 0 ;                                 // Set TOD to illegal
@@ -2856,13 +2860,13 @@ void setup()
   dataqueue = xQueueCreate ( QSIZ,                        // Create queue for communication
                              sizeof ( qdata_struct ) ) ;
   xTaskCreatePinnedToCore (
-    playtask,           // Task function.
-    "Playtask",         // name of task.
-    10000,              // Stack size of task
-    NULL,               // parameter of the task
-    1,                  // priority of the task
-    &xplaytask,         // Task handle to keep track of created task
-    0);                 // pin task to core 0
+    playtask,                                             // Task function.
+    "Playtask",                                           // name of task.
+    4000,                                                 // Stack size of task
+    NULL,                                                 // parameter of the task
+    1,                                                    // priority of the task
+    &xplaytask,                                           // Task handle to keep track of created task
+    0 ) ;                                                 // Pin task to core 0
 }
 
 
@@ -3381,19 +3385,21 @@ void chk_enc()
   }
   if ( longclick )                                            // Check for long click
   {
-    longclick = false ;                                       // Reset condition
-    dbgprint ( "Long click detected" ) ;
-    if ( SD_nodecount )                                       // Tracks on SD?
+    if ( datamode != STOPPED )
     {
-      if ( datamode != STOPPED )
-      {
-        datamode = STOPREQD ;                                 // Request STOP
-        mp3loop() ;                                           // Handle stop request
-      }
-      host = getSDfilename ( "0" ) ;                          // Get random track
-      hostreq = true ;                                        // Request this host
+      datamode = STOPREQD ;                                   // Request STOP
     }
-    muteflag = false ;                                        // Be sure muteing is off
+    else
+    {
+      longclick = false ;                                     // Reset condition
+      dbgprint ( "Long click detected" ) ;
+      if ( SD_nodecount )                                     // Tracks on SD?
+      {
+        host = getSDfilename ( "0" ) ;                        // Get random track
+        hostreq = true ;                                      // Request this host
+      }
+      muteflag = false ;                                      // Be sure muteing is off
+    }
   }
   if ( rotationcount == 0 )                                   // Any rotation?
   {
@@ -3492,9 +3498,7 @@ void mp3loop()
     maxchunk = sizeof(tmpbuff) ;                         // Reduce byte count for this mp3loop()
     if ( localfile )                                     // Playing file from SD card?
     {
-      claimSPI ( "available" ) ;                         // Claim SPI bus
-      av = mp3file.available() ;                         // Bytes left in file
-      releaseSPI() ;                                     // Release SPI bus
+      av = mp3filelength ;                               // Bytes left in file
       if ( av < maxchunk )                               // Reduce byte count for this mp3loop()
       {
         maxchunk = av ;
@@ -3504,6 +3508,7 @@ void mp3loop()
         claimSPI ( "sdread" ) ;                          // Claim SPI bus
         res = mp3file.read ( tmpbuff, maxchunk ) ;       // Read a block of data
         releaseSPI() ;                                   // Release SPI bus
+        mp3filelength -= res ;                           // Number of bytes left
       }
     }
     else
@@ -3520,7 +3525,7 @@ void mp3loop()
     }
     for ( int i = 0 ; i < res ; i++ )
     {
-      handlebyte_ch ( tmpbuff[i] ) ;
+      handlebyte_ch ( tmpbuff[i] ) ;                     // Handle one byte
     }
   }
   if ( datamode == STOPREQD )                            // STOP requested?
@@ -3536,7 +3541,9 @@ void mp3loop()
     {
       stop_mp3client() ;                                 // Disconnect if still connected
     }
-    handlebyte_ch ( 0, true ) ;                          // Force flush of buffer
+    chunked = false ;                                    // Not longer chunked
+    datacount = 0 ;                                      // Reset datacount
+    outqp = outchunk.buf ;                               // and pointer
     queuefunc ( QSTOPSONG ) ;                            // Queue a request to stop the song
     metaint = 0 ;                                        // No metaint known now
     datamode = STOPPED ;                                 // Yes, state becomes STOPPED
@@ -3631,10 +3638,8 @@ void loop()
   scanserial() ;                                            // Handle serial input
   scandigital() ;                                           // Scan digital inputs
   scanIR() ;                                                // See if IR input
-  if ( NetworkFound )
-  {
-    ArduinoOTA.handle() ;                                   // Check for OTA
-  }
+  ArduinoOTA.handle() ;                                     // Check for OTA
+  mp3loop() ;                                               // Do more mp3 related actions
   handlehttpreply() ;
   cmdclient = cmdserver.available() ;                       // Check Input from client?
   if ( cmdclient )                                          // Client connected?
@@ -3706,82 +3711,53 @@ bool chkhdrline ( const char* str )
 // Handle the next byte of data from server.                                                       *
 // Chunked transfer encoding aware. Chunk extensions are not supported.                            *
 //**************************************************************************************************
-void handlebyte_ch ( uint8_t b, bool force )
+void handlebyte_ch ( uint8_t b )
 {
-  static int  chunksize = 0 ;                         // Chunkcount read from stream
+  static int       chunksize = 0 ;                      // Chunkcount read from stream
+  static uint16_t  playlistcnt ;                        // Counter to find right entry in playlist
+  static int       LFcount ;                            // Detection of end of header
+  static bool      ctseen = false ;                     // First line of header seen or not
 
-  if ( chunked && !force &&
-       ( datamode & ( DATA |                          // Test op DATA handling
+  if ( chunked &&
+       ( datamode & ( DATA |                           // Test op DATA handling
                       METADATA |
                       PLAYLISTDATA ) ) )
   {
-    if ( chunkcount == 0 )                            // Expecting a new chunkcount?
+    if ( chunkcount == 0 )                             // Expecting a new chunkcount?
     {
-      if ( b == '\r' )                                // Skip CR
+      if ( b == '\r' )                                 // Skip CR
       {
         return ;
       }
-      else if ( b == '\n' )                           // LF ?
+      else if ( b == '\n' )                            // LF ?
       {
-        chunkcount = chunksize ;                      // Yes, set new count
-        chunksize = 0 ;                               // For next decode
+        chunkcount = chunksize ;                       // Yes, set new count
+        chunksize = 0 ;                                // For next decode
         return ;
       }
       // We have received a hexadecimal character.  Decode it and add to the result.
-      b = toupper ( b ) - '0' ;                       // Be sure we have uppercase
+      b = toupper ( b ) - '0' ;                        // Be sure we have uppercase
       if ( b > 9 )
       {
-        b = b - 7 ;                                   // Translate A..F to 10..15
+        b = b - 7 ;                                    // Translate A..F to 10..15
       }
       chunksize = ( chunksize << 4 ) + b ;
       return  ;
     }
-    chunkcount-- ;                                    // Update count to next chunksize block
-  }
-  if ( force )                                        // Force end?
-  {
-    chunked = false ;                                 // Not longer chunked
-  }
-  handlebyte ( b, force ) ;                           // Normal handling of this byte
-}
-
-
-//**************************************************************************************************
-//                                   H A N D L E B Y T E                                           *
-//**************************************************************************************************
-// Handle the next byte of data from server.                                                       *
-// This byte will be send to the VS1053 most of the time.                                          *
-// Note that the buffer the data chunk must start at an address that is a muttiple of 4.           *
-// Set force to true if chunkbuffer must be flushed.                                               *
-//**************************************************************************************************
-void handlebyte ( uint8_t b, bool force )
-{
-  static uint16_t  playlistcnt ;                       // Counter to find right entry in playlist
-  static int       LFcount ;                           // Detection of end of header
-  String           metaline ;                          // Readable line in metadata/playlist
-  String           lcml ;                              // Lower case metaline
-  String           ct ;                                // Contents type
-  static bool      ctseen = false ;                    // First line of header seen or not
-  int              inx ;                               // Pointer in metaline
-
-  if ( force )
-  {
-    datacount = 0 ;                                    // Reset datacount
-    outqinx = 0 ;
-    return ;                                           // No need to send new chunk.
+    chunkcount-- ;                                     // Update count to next chunksize block
   }
   if ( datamode == DATA )                              // Handle next byte of MP3/Ogg data
   {
-    outchunk.buf[outqinx++] = b ;
-    if ( outqinx == sizeof(outchunk.buf) )             // Buffer full?
+    *outqp++ = b ;
+    if ( outqp == ( outchunk.buf + sizeof(outchunk.buf) ) ) // Buffer full?
     {
       // Send data to playtask queue.  If the buffer cannot be placed within 200 ticks,
       // the queue is full, while the sender tries to send more.  The chunk will be dis-
       // carded it that case.
       xQueueSend ( dataqueue, &outchunk, 200 ) ;       // Send to queue
-      outqinx = 0 ;                                    // Item empty now
+      outqp = outchunk.buf ;                           // Item empty now
     }
-    if ( metaint != 0 )                                // No METADATA on Ogg streams or mp3 files
+    if ( metaint )                                     // No METADATA on Ogg streams or mp3 files
     {
       if ( --datacount == 0 )                          // End of datablock?
       {
@@ -3819,8 +3795,8 @@ void handlebyte ( uint8_t b, bool force )
       {
         dbgprint ( "Headerline: %s",                   // Show headerline
                    metalinebf ) ;
-        metaline = String ( metalinebf ) ;             // Convert to string
-        lcml = metaline ;                              // Use lower case for compare
+        String metaline = String ( metalinebf ) ;      // Convert to string
+        String lcml = metaline ;                       // Use lower case for compare
         lcml.toLowerCase() ;
         if ( lcml.startsWith ( "location: http://" ) ) // Redirection?
         {
@@ -3830,7 +3806,7 @@ void handlebyte ( uint8_t b, bool force )
         if ( lcml.indexOf ( "content-type" ) >= 0)     // Line with "Content-Type: xxxx/yyy"
         {
           ctseen = true ;                              // Yes, remember seeing this
-          ct = metaline.substring ( 13 ) ;             // Set contentstype. Not used yet
+          String ct = metaline.substring ( 13 ) ;      // Set contentstype. Not used yet
           ct.trim() ;
           dbgprint ( "%s seen.", ct.c_str() ) ;
         }
@@ -3969,6 +3945,7 @@ void handlebyte ( uint8_t b, bool force )
     }
     else if ( b == '\n' )                              // Linefeed ?
     {
+      int inx ;                                        // Pointer in metaline
       metalinebf[metalinebfx] = '\0' ;                 // Take care of delimeter
       dbgprint ( "Playlistdata: %s",                   // Show playlistheader
                  metalinebf ) ;
@@ -3978,7 +3955,7 @@ void handlebyte ( uint8_t b, bool force )
         metalinebf[0] = '\0' ;
         return ;
       }
-      metaline = String ( metalinebf ) ;               // Convert to string
+      String metaline = String ( metalinebf ) ;        // Convert to string
       if ( metaline.indexOf ( "#EXTINF:" ) >= 0 )      // Info?
       {
         if ( playlist_num == playlistcnt )             // Info for this entry?
@@ -4233,6 +4210,7 @@ const char* analyzeCmd ( const char* par, const char* val )
   uint8_t            oldvol ;                         // Current volume
   bool               relative ;                       // Relative argument (+ or -)
   String             tmpstr ;                         // Temporary for value
+  uint32_t           av ;                             // Available in stream/file
 
   strcpy ( reply, "Command accepted" ) ;              // Default reply
   argument = String ( par ) ;                         // Get the argument
@@ -4372,11 +4350,21 @@ const char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument == "test" )                      // Test command
   {
+    if ( localfile )
+    {
+      av = mp3filelength ;                            // Available bytes in file
+    }
+    else
+    {
+      av = mp3client.available() ;                    // Available in stream
+    }
     sprintf ( reply, "Free memory is %d, chunks in queue %d, stream %d, bitrate %d kbps",
               ESP.getFreeHeap(),
               uxQueueMessagesWaiting ( dataqueue ),
-              mp3client.available(),
+              av,
               mbitrate ) ;
+    dbgprint ( "Stack CPU0 is %d", uxTaskGetStackHighWaterMark ( xplaytask ) ) ;
+    dbgprint ( "Stack CPU1 is %d", uxTaskGetStackHighWaterMark ( maintask ) ) ;
   }
   // Commands for bass/treble control
   else if ( argument.startsWith ( "tone" ) )          // Tone command
@@ -4583,7 +4571,7 @@ void gettime()
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
 
-  if ( NetworkFound && ( tft != NULL ) )                    // Network on and TFT used?
+  if ( tft )                                                // TFT used?
   {
     if ( timeinfo.tm_year )                                 // Legal time found?
     {
@@ -4684,7 +4672,7 @@ void playtask ( void * parameter )
 {
   while ( true )
   {
-    if ( xQueueReceive ( dataqueue, &inchunk, 1 ) )
+    if ( xQueueReceive ( dataqueue, &inchunk, 5 ) )
     {
       while ( !vs1053player.data_request() )                        // If FIFO is full..
       {
