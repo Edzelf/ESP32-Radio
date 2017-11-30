@@ -98,10 +98,11 @@
 // 16-11-2017, ES: Replaced ringbuffer by FreeRTOS queue, play function on second CPU,
 //                 Included improved rotary switch routines supplied by fenyvesi,
 //                 Better IR sensitivity.
+// 30-11-2017, ES: Hide passwords in config page.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Thu, 29 Nov 2017 16:30:00 GMT"
+#define VERSION "Thu, 30 Nov 2017 12:18:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -154,6 +155,8 @@
 #define TIMEPOS 108
 // SPI speed for SD card
 #define SDSPEED 1000000
+// Size of metaline buffer
+#define METASIZ 1024
 //
 // Subscription topics for MQTT.  The topic will be pefixed by "PREFIX/", where PREFIX is replaced
 // by the the mqttprefix in the preferences.  The next definition will yield the topic "ESP32Radio/command"
@@ -231,6 +234,13 @@ struct ini_struct
   int8_t         spi_mosi_pin ;                       // GPIO connected to SPI MOSI pin
 } ;
 
+typedef struct                                        // For list with WiFi info
+{
+    uint8_t inx ;                                     // Index as in "wifi_00"
+    char * ssid ;                                     // SSID for an entry
+    char * passphrase ;                               // Passphrase for an entry
+} WifiInfo_t ;
+
 //**************************************************************************************************
 // Global data section.                                                                            *
 //**************************************************************************************************
@@ -269,7 +279,7 @@ uint32_t          totalcount = 0 ;                          // Counter mp3 data
 datamode_t        datamode ;                                // State of datastream
 int               metacount ;                               // Number of bytes in metadata
 int               datacount ;                               // Counter databytes before metadata
-char              metalinebf[4096 + 1] ;                    // Buffer for metaline
+char              metalinebf[METASIZ + 1] ;                 // Buffer for metaline
 int16_t           metalinebfx ;                             // Index for metalinebf
 String            icystreamtitle ;                          // Streamtitle from metadata
 String            icyname ;                                 // Icecast station name
@@ -286,9 +296,7 @@ bool              muteflag = false ;                        // Mute output
 bool              resetreq = false ;                        // Request to reset the ESP32
 bool              NetworkFound = false ;                    // True if WiFi network connected
 bool              mqtt_on = false ;                         // MQTT in use
-String            networks ;                                // Found networks
-String            anetworks ;                               // Aceptable networks (present in preferences)
-uint8_t           num_an ;                                  // Number of acceptable networks in preferences
+String            networks ;                                // Found networks in the surrounding
 uint16_t          mqttcount = 0 ;                           // Counter MAXMQTTCONNECTS
 int8_t            playlist_num = 0 ;                        // Nonzero for selection from playlist
 File              mp3file ;                                 // File containing mp3 on SD card
@@ -299,7 +307,6 @@ int               chunkcount = 0 ;                          // Counter for chunk
 String            http_getcmd ;                             // Contents of last GET command
 String            http_rqfile ;                             // Requested file
 bool              http_reponse_flag = false ;               // Response required
-String            lssid, lpw ;                              // Last read SSID and password from wifi_xx
 uint16_t          ir_value = 0 ;                            // IR code
 struct tm         timeinfo ;                                // Will be filled by NTP server
 bool              time_req = false ;                        // Set time requested
@@ -307,6 +314,8 @@ bool              SD_okay = false ;                         // True if SD card i
 String            SD_nodelist ;                             // Nodes of mp3-files on SD
 int               SD_nodecount = 0 ;                        // Number of nodes in SD_nodelist
 String            SD_currentnode = "" ;                     // Node ID of song currently playing ("0" if random)
+//WiFi stuff
+std::vector<WifiInfo_t> wifilist ;                          // List with wifi_xx info
 // nvs stuff
 esp_err_t         nvserr ;                                  // Error code from nvs functions
 uint32_t          nvshandle = 0 ;                           // Handle for nvs access
@@ -1420,16 +1429,16 @@ const char* getEncryptionType ( wifi_auth_mode_t thisType )
 //**************************************************************************************************
 //                                        L I S T N E T W O R K S                                  *
 //**************************************************************************************************
-// List the available networks and select the strongest.                                           *
-// Acceptable networks are those who have a "SSID.pw" file in the SPIFFS.                          *
+// List the available networks.                                                                    *
+// Acceptable networks are those who have an entry in the preferences.                             *
 // SSIDs of available networks will be saved for use in webinterface.                              *
 //**************************************************************************************************
 void listNetworks()
 {
+  WifiInfo_t       winfo ;            // Entry from wifilist
   wifi_auth_mode_t encryption ;       // TKIP(WPA), WEP, etc.
   const char*      acceptable ;       // Netwerk is acceptable for connection
-  int              i ;                // Loop control
-  String           sassid ;           // Search string in anetworks
+  int              i, j ;             // Loop control
 
   dbgprint ( "Scan Networks" ) ;      // Scan for nearby networks
   int numSsid = WiFi.scanNetworks() ;
@@ -1446,18 +1455,22 @@ void listNetworks()
   for ( i = 0 ; i < numSsid ; i++ )
   {
     acceptable = "" ;                                    // Assume not acceptable
-    sassid = WiFi.SSID ( i ) + String ( "|" ) ;          // For search string
-    if ( anetworks.indexOf ( sassid ) >= 0 )             // Is this SSID acceptable?
+    for ( j = 0 ; j < wifilist.size() ; j++ )            // Search in wifilist
     {
-      acceptable = "Acceptable" ;
+      winfo = wifilist[j] ;                              // Get one entry
+      if ( WiFi.SSID(i).indexOf ( winfo.ssid ) == 0 )    // Is this SSID acceptable?
+      {
+        acceptable = "Acceptable" ;
+        break ;
+      }
     }
     encryption = WiFi.encryptionType ( i ) ;
     dbgprint ( "%2d - %-25s Signal: %3d dBm, Encryption %4s, %s",
-               i + 1, WiFi.SSID ( i ).c_str(), WiFi.RSSI ( i ),
+               i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i),
                getEncryptionType ( encryption ),
                acceptable ) ;
     // Remember this network for later use
-    networks += WiFi.SSID ( i ) + String ( "|" ) ;
+    networks += WiFi.SSID(i) + String ( "|" ) ;
   }
   dbgprint ( "End of list" ) ;
 }
@@ -1910,19 +1923,21 @@ bool connecttofile()
 //**************************************************************************************************
 bool connectwifi()
 {
-  char*  pfs ;                                          // Pointer to formatted string
-  char*  pfs2 ;                                         // Pointer to formatted string
-  bool   localAP = false ;                              // True if only local AP is left
+  char*      pfs ;                                      // Pointer to formatted string
+  char*      pfs2 ;                                     // Pointer to formatted string
+  bool       localAP = false ;                          // True if only local AP is left
+
+  WifiInfo_t winfo ;                                    // Entry from wifilist
 
   WiFi.disconnect() ;                                   // After restart the router could
   WiFi.softAPdisconnect(true) ;                         // still keep the old connection
-  if ( num_an )                                         // Any AP defined?
+  if ( wifilist.size()  )                               // Any AP defined?
   {
-    if ( num_an == 1 )                                  // Just one AP defined in preferences?
+    if ( wifilist.size() == 1 )                         // Just one AP defined in preferences?
     {
-      WiFi.begin ( lssid.c_str(),
-                   lpw.c_str() ) ;                      // Connect to single SSID found in wifi_xx
-      dbgprint ( "Try WiFi %s", lssid.c_str() ) ;       // Message to show during WiFi connect
+      winfo = wifilist[0] ;                             // Get this entry
+      WiFi.begin ( winfo.ssid, winfo.passphrase ) ;     // Connect to single SSID found in wifi_xx
+      dbgprint ( "Try WiFi %s", winfo.ssid ) ;          // Message to show during WiFi connect
     }
     else                                                // More AP to try
     {
@@ -2250,7 +2265,7 @@ String readprefs ( bool output )
       {
         if ( nvssearch ( "ir_pin" ) )                       // Necessary if IR in use
         {
-          jmax = 0x10000 ;                                 // > 64000 possibilities
+          jmax = 0x10000 ;                                  // > 64000 possibilities
         }
         else
         {
@@ -2272,9 +2287,14 @@ String readprefs ( bool output )
               outstr += "#\n" ;                             // Yes, add one
               sep = false ;                                 // Clear flag
             }
+            if ( strstr ( mykey, "wifi_"  ) )               // Is it a wifi ssid/password?
+            {
+              val = String ( wifilist[j].ssid ) +           // Yes, hide password
+                    String ( "/*******" ) ;
+            }
             outstr += String ( mykey ) +                    // Yes, form outputstring
                       " = " +
-                      String ( val ) +
+                      val +
                       "\n" ;
           }
         }
@@ -2294,8 +2314,8 @@ String readprefs ( bool output )
           count++ ;                                         // Yes, count number of filled keys
         }
         cmd = String ( keys[i] ) +                          // Yes, form command
-              " = " +
-              String ( val ) ;
+              String ( " = " ) +
+              val ;
         if ( output )
         {
           if ( sep )                                       // Need for a separator
@@ -2303,8 +2323,14 @@ String readprefs ( bool output )
             outstr += "#\n" ;                              // Yes, add one
             sep = false ;                                  // Clear flag
           }
-          outstr += cmd.c_str() ;                          // Add to outstr
-          outstr += String ( "\n" ) ;                      // Add newline
+          if ( strstr ( keys[i], "mqttpasswd"  ) )         // Is it a MQTT password?
+          {
+            val = String ( "*******" ) ;                   // Yes, hide it
+          }
+          outstr += String ( keys[i] ) +                   // Add to outstr
+                    String ( " = " ) +
+                    val + 
+                    String ( "\n" ) ;                      // Add newline
         }
         else
         {
@@ -2555,21 +2581,20 @@ void scanIR()
 //                                           M K _ L S A N                                         *
 //**************************************************************************************************
 // Make al list of acceptable networks in preferences.                                             *
-// The result will be stored in anetworks like "|SSID1|SSID2|......|SSIDn|".                       *
-// The number of acceptable networks will be stored in num_an.                                     *
-// Not that the last pound SSID and password are kept in common data.  If only one SSID is         *
+// Will be called only once by setup().                                                            *
+// The result will be stored in wifilist.                                                          *
+// Not that the last found SSID and password are kept in common data.  If only one SSID is         *
 // defined, the connect is made without using wifiMulti.  In this case a connection will           *
 // be made even if de SSID is hidden.                                                              *
 //**************************************************************************************************
 void  mk_lsan()
 {
-  int         i ;                                        // Loop control
+  uint8_t     i ;                                        // Loop control
   char        key[10] ;                                  // For example: "wifi_03"
   String      buf ;                                      // "SSID/password"
+  String      lssid, lpw ;                               // Last read SSID and password from nvs
   int         inx ;                                      // Place of "/"
-
-  num_an = 0 ;                                           // Count acceptable networks
-  anetworks = "|" ;                                      // Initial value
+  WifiInfo_t  winfo ;                                    // Element to store in list
 
   for ( i = 0 ; i < 100 ; i++ )                          // Examine wifi_00 .. wifi_99
   {
@@ -2584,10 +2609,12 @@ void  mk_lsan()
         lssid = buf.substring ( 0, inx ) ;               // Holds SSID now
         dbgprint ( "Added %s to list of networks",
                    lssid.c_str() ) ;
-        anetworks += lssid ;                             // Add to list
-        anetworks += "|" ;                               // Separator
-        num_an++ ;                                       // Count number of acceptable networks
-        wifiMulti.addAP ( lssid.c_str(), lpw.c_str() ) ; // Add to wifi acceptable network list
+        winfo.inx = i ;                                  // Create new element for wifilist ;
+        winfo.ssid = strdup ( lssid.c_str() ) ;          // Set ssid of element
+        winfo.passphrase = strdup ( lpw.c_str() ) ;
+        wifilist.push_back ( winfo ) ;                   // Add to list
+        wifiMulti.addAP ( winfo.ssid,                    // Add to wifi acceptable network list
+                          winfo.passphrase ) ;
       }
     }
   }
@@ -2855,7 +2882,10 @@ void setup()
                ini_block.enc_dt_pin,
                ini_block.enc_sw_pin) ;
   }
-  gettime() ;                                             // Sync time
+  if ( NetworkFound )
+  {
+    gettime() ;                                           // Sync time
+  }
   outchunk.datatyp = QDATA ;                              // This chunk dedicated to QDATA
   dataqueue = xQueueCreate ( QSIZ,                        // Create queue for communication
                              sizeof ( qdata_struct ) ) ;
@@ -2919,48 +2949,65 @@ uint8_t rinbyt ( bool forcestart )
 //**************************************************************************************************
 void writeprefs()
 {
-  int     inx ;                                           // Position in inputstr
-  char    c ;                                             // Input character
-  String  inputstr = "" ;                                 // Input regel
-  String  key, contents ;                                 // Pair for Preferences entry
-
-  nvsclear() ;                                            // Remove all preferences
+  int     inx, inx2 ;                                         // Position in inputstr
+  uint8_t winx ;                                              // Index in wifilist
+  char    c ;                                                 // Input character
+  String  inputstr = "" ;                                     // Input regel
+  String  key, contents ;                                     // Pair for Preferences entry
+  String  dstr ;                                              // Contents for debug
+  
+  nvsclear() ;                                                // Remove all preferences
   while ( true )
   {
-    c = rinbyt ( false ) ;                                // Get next inputcharacter
-    if ( c == '\n' )                                      // Newline?
+    c = rinbyt ( false ) ;                                    // Get next inputcharacter
+    if ( c == '\n' )                                          // Newline?
     {
       if ( inputstr.length() == 0 )
       {
         dbgprint ( "End of writing preferences" ) ;
-        break ;                                           // End of contents
+        break ;                                               // End of contents
       }
-      if ( !inputstr.startsWith ( "#" ) )                 // Skip pure comment lines
+      if ( !inputstr.startsWith ( "#" ) )                     // Skip pure comment lines
       {
         inx = inputstr.indexOf ( "=" ) ;
-        if ( inx >= 0 )                                   // Line with "="?
+        if ( inx >= 0 )                                       // Line with "="?
         {
-          key = inputstr.substring ( 0, inx ) ;           // Yes, isolate the key
+          key = inputstr.substring ( 0, inx ) ;               // Yes, isolate the key
           key.trim() ;
-          contents = inputstr.substring ( inx + 1 ) ;     // and contents
+          contents = inputstr.substring ( inx + 1 ) ;         // and contents
           contents.trim() ;
-          nvssetstr ( key.c_str(), contents ) ;           // Save new pair
-          if ( ( contents.indexOf ( "passw" ) >= 0 ) ||   // Do not reveal passwords
-               ( contents.indexOf ( "wifi_" ) >= 0 ) )
+          dstr = contents ;                                   // Copy for debug
+          if ( ( key.indexOf ( "wifi_" ) >= 0 ) )             // Sensitive info?
           {
-            contents = "*******" ;                        // Show asterisks instead
+            winx = key.substring(5).toInt() ;                 // Get index in wifilist
+            if ( ( winx < wifilist.size() ) &&                // Existing wifi spec in wifilist?
+                 ( contents.indexOf ( "/****" ) > 0 ) )       // Hidden password?
+            {
+              contents = String ( wifilist[winx].ssid ) +     // Retrieve ssid and password
+                         String ( wifilist[winx].passphrase ) ;
+            }
+            dstr = String ( "*******/*******" ) ;             // Hide in debug line
           }
+          if ( ( key.indexOf ( "mqttpasswd" ) == 0 ) )        // Sensitive info?
+          {
+            if ( contents.indexOf ( "****" ) == 0 )           // Hidden password?
+            {
+              contents = ini_block.mqttpasswd ;               // Retrieve mqtt password
+            }
+            dstr = String ( "*******" ) ;                     // Hide in debug line
+          }
+          nvssetstr ( key.c_str(), contents ) ;               // Save new pair
           dbgprint ( "writeprefs %s = %s",
-                     key.c_str(), contents.c_str() ) ;
+                     key.c_str(), dstr.c_str() ) ;
         }
       }
       inputstr = "" ;
     }
     else
     {
-      if ( c != '\r' )                                    // Not newline.  Is is a CR?
+      if ( c != '\r' )                                        // Not newline.  Is is a CR?
       {
-        inputstr += String ( c ) ;                        // No, normal char, add to string
+        inputstr += String ( c ) ;                            // No, normal char, add to string
       }
     }
   }
@@ -3663,7 +3710,7 @@ void loop()
   handleSaveReq() ;                                         // See if time to save settings
   handleIpPub() ;                                           // See if time to publish IP
   chk_enc() ;                                               // Check rotary encoder functions
-  if ( time_req )                                           // Time to refresh timetxt
+  if ( NetworkFound && time_req )                           // Time to refresh timetxt?
   {
     time_req = false ;                                      // Clear request
     gettime() ;                                             // Get the curret time
@@ -3853,6 +3900,10 @@ void handlebyte_ch ( uint8_t b )
     else
     {
       metalinebf[metalinebfx++] = (char)b ;            // Normal character, put new char in metaline
+      if ( metalinebfx >= METASIZ )                    // Prevent overflow
+      {
+        metalinebfx-- ;
+      }
       LFcount = 0 ;                                    // Reset double CRLF detection
     }
     return ;
@@ -3872,6 +3923,10 @@ void handlebyte_ch ( uint8_t b )
     else
     {
       metalinebf[metalinebfx++] = (char)b ;            // Normal character, put new char in metaline
+      if ( metalinebfx >= METASIZ )                    // Prevent overflow
+      {
+        metalinebfx-- ;
+      }
     }
     if ( --metacount == 0 )
     {
@@ -3886,7 +3941,7 @@ void handlebyte_ch ( uint8_t b )
         showstreamtitle ( metalinebf ) ;               // Show artist and title if present in metadata
         mqttpub.trigger ( MQTT_STREAMTITLE ) ;         // Request publishing to MQTT
       }
-      if ( strlen ( metalinebf ) > 1500 )              // Unlikely metaline length?
+      if ( metalinebfx  > ( METASIZ - 10 ) )           // Unlikely metaline length?
       {
         dbgprint ( "Metadata block too long! Skipping all Metadata from now on." ) ;
         metaint = 0 ;                                  // Probably no metadata
@@ -3932,6 +3987,10 @@ void handlebyte_ch ( uint8_t b )
     else
     {
       metalinebf[metalinebfx++] = (char)b ;            // Normal character, put new char in metaline
+      if ( metalinebfx >= METASIZ )                    // Prevent overflow
+      {
+        metalinebfx-- ;
+      }
       LFcount = 0 ;                                    // Reset double CRLF detection
     }
   }
@@ -4239,7 +4298,7 @@ const char* analyzeCmd ( const char* par, const char* val )
     tmpstr = value ;                                  // Make local copy of value
     if ( argument.indexOf ( "passw" ) >= 0 )          // Password in value?
     {
-      tmpstr = String ( "******" ) ;                  // Yes, hide it
+      tmpstr = String ( "*******" ) ;                 // Yes, hide it
     }
     dbgprint ( "Command: %s with parameter %s",
                argument.c_str(), tmpstr.c_str() ) ;
