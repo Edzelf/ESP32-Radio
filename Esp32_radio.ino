@@ -3000,8 +3000,6 @@ void writeprefs()
           nvssetstr ( key.c_str(), contents ) ;               // Save new pair
           dbgprint ( "writeprefs %s = %s",
                      key.c_str(), dstr.c_str() ) ;
-          dbgprint ( "writeprefs %s = %s",
-                     key.c_str(), contents.c_str() ) ;
         }
       }
       inputstr = "" ;
