@@ -33,6 +33,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 30-nov-2017, Hide passwords in config screen.
 - 27-nov-2017, Replaced ringbuffer by FreeRTOS queue, play function on second CPU,
                Included improved rotary switch routines supplied by fenyvesi,
                Better IR sensitivity.
