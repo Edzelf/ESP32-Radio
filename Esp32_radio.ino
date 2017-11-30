@@ -102,7 +102,7 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Thu, 30 Nov 2017 12:18:00 GMT"
+#define VERSION "Thu, 30 Nov 2017 13:20:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -2892,7 +2892,7 @@ void setup()
   xTaskCreatePinnedToCore (
     playtask,                                             // Task function.
     "Playtask",                                           // name of task.
-    4000,                                                 // Stack size of task
+    3200,                                                 // Stack size of task
     NULL,                                                 // parameter of the task
     1,                                                    // priority of the task
     &xplaytask,                                           // Task handle to keep track of created task
@@ -2984,6 +2984,7 @@ void writeprefs()
                  ( contents.indexOf ( "/****" ) > 0 ) )       // Hidden password?
             {
               contents = String ( wifilist[winx].ssid ) +     // Retrieve ssid and password
+                         String ( "/" ) ;
                          String ( wifilist[winx].passphrase ) ;
             }
             dstr = String ( "*******/*******" ) ;             // Hide in debug line
@@ -2999,6 +3000,8 @@ void writeprefs()
           nvssetstr ( key.c_str(), contents ) ;               // Save new pair
           dbgprint ( "writeprefs %s = %s",
                      key.c_str(), dstr.c_str() ) ;
+          dbgprint ( "writeprefs %s = %s",
+                     key.c_str(), contents.c_str() ) ;
         }
       }
       inputstr = "" ;
@@ -4054,7 +4057,11 @@ void handlebyte_ch ( uint8_t b )
     }
     else
     {
-      metalinebf[metalinebfx] = (char)b ;              // Normal character, add it to metaline
+      metalinebf[metalinebfx++] = (char)b ;            // Normal character, add it to metaline
+      if ( metalinebfx >= METASIZ )                    // Prevent overflow
+      {
+        metalinebfx-- ;
+      }
     }
   }
 }
@@ -4341,10 +4348,10 @@ const char* analyzeCmd ( const char* par, const char* val )
     else
     {
       ini_block.newpreset = ivalue ;                  // Otherwise set station
+      playlist_num = 0 ;                              // Absolute, reset playlist
     }
     sprintf ( reply, "Preset is now %d",              // Reply new preset
               ini_block.newpreset ) ;
-    playlist_num = 0 ;
   }
   else if ( argument == "stop" )                      // Stop requested?
   {
