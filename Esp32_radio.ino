@@ -99,10 +99,11 @@
 //                 Included improved rotary switch routines supplied by fenyvesi,
 //                 Better IR sensitivity.
 // 30-11-2017, ES: Hide passwords in config page.
+// 01-12-2017, ES: Better handling of playlist.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Thu, 30 Nov 2017 13:20:00 GMT"
+#define VERSION "Fri, 01 Dec 2017 10:00:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -842,7 +843,7 @@ void VS1053::stopSong()
     if ( ( modereg & _BV ( SM_CANCEL ) ) == 0 )
     {
       sdi_send_fillers ( 2052 ) ;
-      dbgprint ( "Song stopped correctly after %d msec", i * 10 ) ;
+      //dbgprint ( "Song stopped correctly after %d msec", i * 10 ) ;
       return ;
     }
     delay ( 10 ) ;
@@ -3570,6 +3571,16 @@ void mp3loop()
       {
         res = mp3client.read ( tmpbuff, maxchunk ) ;     // Read a number of bytes from the stream
       }
+      else
+      {
+        if ( datamode == PLAYLISTDATA )                  // End of playlist
+        {
+          playlist_num = 0 ;                             // Yes, reset
+          dbgprint ( "End of playlist seen" ) ;
+          datamode = STOPPED ;
+          ini_block.newpreset++ ;                        // Go to next preset
+        }
+      }
     }
     for ( int i = 0 ; i < res ; i++ )
     {
@@ -3980,7 +3991,9 @@ void handlebyte_ch ( uint8_t b )
       metalinebfx = 0 ;                                // Ready for next line
       if ( LFcount == 2 )
       {
-        dbgprint ( "Switch to PLAYLISTDATA" ) ;
+        dbgprint ( "Switch to PLAYLISTDATA, "          // For debug 
+                   "search for entry %d",
+                   playlist_num ) ;
         datamode = PLAYLISTDATA ;                      // Expecting data now
         return ;
       }
