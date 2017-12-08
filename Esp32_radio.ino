@@ -100,10 +100,12 @@
 //                 Better IR sensitivity.
 // 30-11-2017, ES: Hide passwords in config page.
 // 01-12-2017, ES: Better handling of playlist.
+// 07-12-2017, ES: Faster handling of config screen.
+// 08-12-2017, ES: More MQTT items to publish, added pin_shutdown.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Fri, 01 Dec 2017 10:00:00 GMT"
+#define VERSION "Fri, 08 Dec 2017 10:30:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -119,6 +121,7 @@
 #include <time.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
+#include <esp_partition.h>
 
 // Color definitions for the TFT screen (if used)
 // TFT has bits 6 bits (0..5) for RED, 6 bits (6..11) for GREEN and 4 bits (12..15) for BLUE.
@@ -130,7 +133,7 @@
 #define MAGENTA RED | BLUE
 #define YELLOW  RED | GREEN
 // Digital I/O used
-// Pins for VS1053 module
+// Default pins for VS1053 module.  Better specefy these in the preferences
 #if defined ( ARDUINO_FEATHER_ESP32 )
 #define VS1053_CS     32
 #define VS1053_DCS    33
@@ -141,7 +144,7 @@
 #define VS1053_DREQ   4
 #endif
 // Number of entries in the queue
-#define QSIZ 300
+#define QSIZ 400
 // Debug buffer size
 #define DEBUG_BUFFER_SIZE 130
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
@@ -158,6 +161,8 @@
 #define SDSPEED 1000000
 // Size of metaline buffer
 #define METASIZ 1024
+// Max. number of NVS keys in table
+#define MAXKEYS 200
 //
 // Subscription topics for MQTT.  The topic will be pefixed by "PREFIX/", where PREFIX is replaced
 // by the the mqttprefix in the preferences.  The next definition will yield the topic "ESP32Radio/command"
@@ -228,19 +233,47 @@ struct ini_struct
   int8_t         tft_dc_pin ;                         // GPIO connected to D/C of TFT screen
   int8_t         sd_cs_pin ;                          // GPIO connected to CS of SD card
   int8_t         vs_cs_pin ;                          // GPIO connected to CS of VS1053
-  int8_t         vs_dcs_pin ;                         // GPIO connected to CS of VS1053
-  int8_t         vs_dreq_pin ;                        // GPIO connected to CS of VS1053
+  int8_t         vs_dcs_pin ;                         // GPIO connected to DCS of VS1053
+  int8_t         vs_dreq_pin ;                        // GPIO connected to DREQ of VS1053
+  int8_t         vs_shutdown_pin ;                    // GPIO to shut down the amplifier
   int8_t         spi_sck_pin ;                        // GPIO connected to SPI SCK pin
   int8_t         spi_miso_pin ;                       // GPIO connected to SPI MISO pin
   int8_t         spi_mosi_pin ;                       // GPIO connected to SPI MOSI pin
 } ;
 
-typedef struct                                        // For list with WiFi info
+struct WifiInfo_t                                     // For list with WiFi info
 {
     uint8_t inx ;                                     // Index as in "wifi_00"
     char * ssid ;                                     // SSID for an entry
     char * passphrase ;                               // Passphrase for an entry
-} WifiInfo_t ;
+} ;
+
+struct nvs_entry
+{
+  uint8_t  Ns ;                                       // Namespace ID
+  uint8_t  Type ;                                     // Type of value
+  uint8_t  Span ;                                     // Number of entries used for this item
+  uint8_t  Rvs ;                                      // Reserved, should be 0xFF
+  uint32_t CRC ;                                      // CRC
+  char     Key[16] ;                                  // Key in Ascii
+  uint64_t Data ;                                     // Data in entry 
+} ;
+
+struct nvs_page                                       // For nvs entries
+{                                                     // 1 page is 4096 bytes
+  uint32_t  State ;
+  uint32_t  Seqnr ;
+  
+  uint32_t  Unused[5] ;
+  uint32_t  CRC ;
+  uint8_t   Bitmap[32] ;
+  nvs_entry Entry[126] ;
+} ;
+
+struct keyname_t                                      // For keys in NVS
+{
+  char      Key[16] ;                                 // Mac length is 15 plus delimeter
+} ;
 
 //**************************************************************************************************
 // Global data section.                                                                            *
@@ -299,6 +332,7 @@ bool              NetworkFound = false ;                    // True if WiFi netw
 bool              mqtt_on = false ;                         // MQTT in use
 String            networks ;                                // Found networks in the surrounding
 uint16_t          mqttcount = 0 ;                           // Counter MAXMQTTCONNECTS
+int8_t            playingstat = 0 ;                         // 1 if radio is playing (for MQTT)
 int8_t            playlist_num = 0 ;                        // Nonzero for selection from playlist
 File              mp3file ;                                 // File containing mp3 on SD card
 uint32_t          mp3filelength ;                           // File length
@@ -315,11 +349,15 @@ bool              SD_okay = false ;                         // True if SD card i
 String            SD_nodelist ;                             // Nodes of mp3-files on SD
 int               SD_nodecount = 0 ;                        // Number of nodes in SD_nodelist
 String            SD_currentnode = "" ;                     // Node ID of song currently playing ("0" if random)
-//WiFi stuff
 std::vector<WifiInfo_t> wifilist ;                          // List with wifi_xx info
 // nvs stuff
-esp_err_t         nvserr ;                                  // Error code from nvs functions
-uint32_t          nvshandle = 0 ;                           // Handle for nvs access
+nvs_page                nvsbuf ;                            // Space for 1 page of NVS info
+const esp_partition_t*  nvs ;                               // Pointer to partition struct
+esp_err_t               nvserr ;                            // Error code from nvs functions
+uint32_t                nvshandle = 0 ;                     // Handle for nvs access
+uint8_t                 namespace_ID ;                      // Namespace ID found
+char                    nvskeys[MAXKEYS][16] ;              // Space for NVS keys
+std::vector<keyname_t> keynames ;                           // Keynames in NVS
 // Rotary encoder stuff
 uint16_t          clickcount = 0 ;                          // Incremented per encoder click, reset by timer
 int16_t           rotationcount = 0 ;                       // Current position of rotary switch
@@ -342,80 +380,80 @@ scrseg_struct     tftdata[TFTSECS] =                        // Screen divided in
   { false, GREEN,  90, 32, "" }                             // 4 lines at the bottom for rotary encoder
 } ;
 //
-struct progpin_struct                                      // For programmable input pins
+struct progpin_struct                                       // For programmable input pins
 {
-  int8_t         gpio ;                                    // Pin number
-  bool           reserved ;                                // Reserved for connected devices
-  bool           avail ;                                   // Pin is available for a command
-  String         command ;                                 // Command to execute when activated
+  int8_t         gpio ;                                     // Pin number
+  bool           reserved ;                                 // Reserved for connected devices
+  bool           avail ;                                    // Pin is available for a command
+  String         command ;                                  // Command to execute when activated
   // Example: "uppreset=1"
-  bool           cur ;                                     // Current state, true = HIGH, false = LOW
+  bool           cur ;                                      // Current state, true = HIGH, false = LOW
 } ;
 
-progpin_struct   progpin[] =                               // Input pins and programmed function
+progpin_struct   progpin[] =                                // Input pins and programmed function
 {
     {  0, false, false,  "", false },
-  //{  1, true,  false,  "", false },                      // Reserved for TX Serial output
+  //{  1, true,  false,  "", false },                       // Reserved for TX Serial output
     {  2, false, false,  "", false },
-  //{  3, true,  false,  "", false },                      // Reserved for RX Serial input
+  //{  3, true,  false,  "", false },                       // Reserved for RX Serial input
     {  4, false, false,  "", false },
     {  5, false, false,  "", false },
-  //{  6, true,  false,  "", false },                      // Reserved for FLASH SCK
-  //{  7, true,  false,  "", false },                      // Reserved for FLASH D0
-  //{  8, true,  false,  "", false },                      // Reserved for FLASH D1
-  //{  9, true,  false,  "", false },                      // Reserved for FLASH D2
-  //{ 10, true,  false,  "", false },                      // Reserved for FLASH D3
-  //{ 11, true,  false,  "", false },                      // Reserved for FLASH CMD
+  //{  6, true,  false,  "", false },                       // Reserved for FLASH SCK
+  //{  7, true,  false,  "", false },                       // Reserved for FLASH D0
+  //{  8, true,  false,  "", false },                       // Reserved for FLASH D1
+  //{  9, true,  false,  "", false },                       // Reserved for FLASH D2
+  //{ 10, true,  false,  "", false },                       // Reserved for FLASH D3
+  //{ 11, true,  false,  "", false },                       // Reserved for FLASH CMD
     { 12, false, false,  "", false },
     { 13, false, false,  "", false },
     { 14, false, false,  "", false },
     { 15, false, false,  "", false },
     { 16, false, false,  "", false },
     { 17, false, false,  "", false },
-    { 18, false, false,  "", false },                      // Default for SPI CLK
-    { 19, false, false,  "", false },                      // Default for SPI MISO
-  //{ 20, true,  false,  "", false },                      // Not exposed on DEV board
-    { 21, false, false,  "", false },                      // Also Wire SDA
-    { 22, false, false,  "", false },                      // Also Wire SCL
-    { 23, false, false,  "", false },                      // Default for SPI MOSI
-  //{ 24, true,  false,  "", false },                      // Not exposed on DEV board
+    { 18, false, false,  "", false },                       // Default for SPI CLK
+    { 19, false, false,  "", false },                       // Default for SPI MISO
+  //{ 20, true,  false,  "", false },                       // Not exposed on DEV board
+    { 21, false, false,  "", false },                       // Also Wire SDA
+    { 22, false, false,  "", false },                       // Also Wire SCL
+    { 23, false, false,  "", false },                       // Default for SPI MOSI
+  //{ 24, true,  false,  "", false },                       // Not exposed on DEV board
     { 25, false, false,  "", false },
     { 26, false, false,  "", false },
     { 27, false, false,  "", false },
-  //{ 28, true,  false,  "", false },                      // Not exposed on DEV board
-  //{ 29, true,  false,  "", false },                      // Not exposed on DEV board
-  //{ 30, true,  false,  "", false },                      // Not exposed on DEV board
-  //{ 31, true,  false,  "", false },                      // Not exposed on DEV board
+  //{ 28, true,  false,  "", false },                       // Not exposed on DEV board
+  //{ 29, true,  false,  "", false },                       // Not exposed on DEV board
+  //{ 30, true,  false,  "", false },                       // Not exposed on DEV board
+  //{ 31, true,  false,  "", false },                       // Not exposed on DEV board
     { 32, false, false,  "", false },
     { 33, false, false,  "", false },
-    { 34, false, false,  "", false },                      // Note, no internal pull-up
-    { 35, false, false,  "", false },                      // Note, no internal pull-up
-    { -1, false, false,  "", false }                       // End of list
+    { 34, false, false,  "", false },                       // Note, no internal pull-up
+    { 35, false, false,  "", false },                       // Note, no internal pull-up
+    { -1, false, false,  "", false }                        // End of list
 } ;
 
-struct touchpin_struct                                     // For programmable input pins
+struct touchpin_struct                                      // For programmable input pins
 {
-  int8_t         gpio ;                                    // Pin number GPIO
-  bool           reserved ;                                // Reserved for connected devices
-  bool           avail ;                                   // Pin is available for a command
-  String         command ;                                 // Command to execute when activated
+  int8_t         gpio ;                                     // Pin number GPIO
+  bool           reserved ;                                 // Reserved for connected devices
+  bool           avail ;                                    // Pin is available for a command
+  String         command ;                                  // Command to execute when activated
   // Example: "uppreset=1"
-  bool           cur ;                                     // Current state, true = HIGH, false = LOW
-  int16_t        count ;                                   // Counter number of times low level
+  bool           cur ;                                      // Current state, true = HIGH, false = LOW
+  int16_t        count ;                                    // Counter number of times low level
 } ;
-touchpin_struct   touchpin[] =                             // Touch pins and programmed function
+touchpin_struct   touchpin[] =                              // Touch pins and programmed function
 {
-  {   4, false, false, "", false, 0 },                     // TOUCH0
-  //{   0, true,  false, "", false, 0 },                     // TOUCH1, reserved for BOOT button
-  {   2, false, false, "", false, 0 },                     // TOUCH2
-  {  15, false, false, "", false, 0 },                     // TOUCH3
-  {  13, false, false, "", false, 0 },                     // TOUCH4
-  {  12, false, false, "", false, 0 },                     // TOUCH5
-  {  14, false, false, "", false, 0 },                     // TOUCH6
-  {  27, false, false, "", false, 0 },                     // TOUCH7
-  {  33, false, false, "", false, 0 },                     // TOUCH8
-  {  32, false, false, "", false, 0 },                     // TOUCH9
-  {  -1, false, false, "", false, 0 }                      // End of table
+  {   4, false, false, "", false, 0 },                      // TOUCH0
+//{   0, true,  false, "", false, 0 },                      // TOUCH1, reserved for BOOT button
+  {   2, false, false, "", false, 0 },                      // TOUCH2
+  {  15, false, false, "", false, 0 },                      // TOUCH3
+  {  13, false, false, "", false, 0 },                      // TOUCH4
+  {  12, false, false, "", false, 0 },                      // TOUCH5
+  {  14, false, false, "", false, 0 },                      // TOUCH6
+  {  27, false, false, "", false, 0 },                      // TOUCH7
+  {  33, false, false, "", false, 0 },                      // TOUCH8
+  {  32, false, false, "", false, 0 },                      // TOUCH9
+  {  -1, false, false, "", false, 0 }                       // End of table
 } ;
 
 
@@ -438,30 +476,36 @@ touchpin_struct   touchpin[] =                             // Touch pins and pro
 //                                     M Q T T P U B _ C L A S S                                   *
 //**************************************************************************************************
 // ID's for the items to publish to MQTT.  Is index in amqttpub[]
-enum { MQTT_IP, MQTT_ICYNAME, MQTT_STREAMTITLE, MQTT_NOWPLAYING } ;
+enum { MQTT_IP,     MQTT_ICYNAME, MQTT_STREAMTITLE, MQTT_NOWPLAYING,
+       MQTT_PRESET, MQTT_VOLUME, MQTT_PLAYING } ;
+enum { MQSTRING, MQINT8 } ;                                      // Type of variable to publish
 
-class mqttpubc                                             // For MQTT publishing
+class mqttpubc                                                   // For MQTT publishing
 {
     struct mqttpub_struct
     {
-      const char*    topic ;                               // Topic as partial string (without prefix)
-      String*        payload ;                             // Payload for this topic
-      bool           topictrigger ;
+      const char*    topic ;                                     // Topic as partial string (without prefix)
+      uint8_t        type ;                                      // Type of payload
+      void*          payload ;                                   // Payload for this topic
+      bool           topictrigger ;                              // Set to true to trigger MQTT publish
     } ;
     // Publication topics for MQTT.  The topic will be pefixed by "PREFIX/", where PREFIX is replaced
     // by the the mqttprefix in the preferences.
   protected:
-    mqttpub_struct amqttpub[5] =                           // Definitions of various MQTT topic to publish
+    mqttpub_struct amqttpub[8] =                                 // Definitions of various MQTT topic to publish
     { // Index is equal to enum above
-      { "ip",              &ipaddress,      false },       // Definition for MQTT_IP
-      { "icy/name",        &icyname,        false },       // Definition for MQTT_ICYNAME
-      { "icy/streamtitle", &icystreamtitle, false },       // Definition for MQTT_STREAMTITLE
-      { "nowplaying",      &ipaddress,      false },       // Definition for MQTT_NOWPLAYING (not active)
-      { NULL,              NULL,            false }        // End of definitions
+      { "ip",              MQSTRING, &ipaddress,        false }, // Definition for MQTT_IP
+      { "icy/name",        MQSTRING, &icyname,          false }, // Definition for MQTT_ICYNAME
+      { "icy/streamtitle", MQSTRING, &icystreamtitle,   false }, // Definition for MQTT_STREAMTITLE
+      { "nowplaying",      MQSTRING, &ipaddress,        false }, // Definition for MQTT_NOWPLAYING (not active)
+      { "preset" ,         MQINT8,   &currentpreset,    false }, // Definition for MQTT_PRESET
+      { "volume" ,         MQINT8,   &ini_block.reqvol, false }, // Definition for MQTT_VOLUME
+      { "playing",         MQINT8,   &playingstat,      false }, // Definition for MQTT_PLAYING
+      { NULL,              0,        NULL,              false }  // End of definitions
     } ;
   public:
-    void          trigger ( uint8_t item ) ;               // Trigger publishig for one item
-    void          publishtopic() ;                         // Publish triggerer items
+    void          trigger ( uint8_t item ) ;                      // Trigger publishig for one item
+    void          publishtopic() ;                                // Publish triggerer items
 } ;
 
 
@@ -474,9 +518,9 @@ class mqttpubc                                             // For MQTT publishin
 //**************************************************************************************************
 // Set request for an item to publish to MQTT.                                                     *
 //**************************************************************************************************
-void mqttpubc::trigger ( uint8_t item )                // Trigger publishig for one item
+void mqttpubc::trigger ( uint8_t item )                    // Trigger publishig for one item
 {
-  amqttpub[item].topictrigger = true ;                 // Request re-publish for an item
+  amqttpub[item].topictrigger = true ;                     // Request re-publish for an item
 }
 
 //**************************************************************************************************
@@ -489,7 +533,7 @@ void mqttpubc::publishtopic()
   int         i = 0 ;                                         // Loop control
   char        topic[40] ;                                     // Topic to send
   const char* payload ;                                       // Points to payload
-
+  char        intvar[10] ;                                    // Space for integer parameter 
   while ( amqttpub[i].topic )
   {
     if ( amqttpub[i].topictrigger )                           // Topic ready to send?
@@ -497,7 +541,20 @@ void mqttpubc::publishtopic()
       amqttpub[i].topictrigger = false ;                      // Success or not: clear trigger
       sprintf ( topic, "%s/%s", ini_block.mqttprefix.c_str(),
                 amqttpub[i].topic ) ;                         // Add prefix to topic
-      payload = (*amqttpub[i].payload).c_str() ;              // Get payload
+      switch ( amqttpub[i].type )                             // Select conversion method
+      {
+        case MQSTRING :
+          payload = ((String*)amqttpub[i].payload)->c_str() ;
+          //payload = pstr->c_str() ;                           // Get pointer to payload
+          break ;
+        case MQINT8 :
+          sprintf ( intvar, "%d",
+                    *(int8_t*)amqttpub[i].payload ) ;         // Convert to array of char
+          payload = intvar ;                                  // Point to this array
+          break ;
+        default :
+          continue ;                                          // Unknown data type
+      }
       dbgprint ( "Publish to topic %s : %s",                  // Show for debug
                  topic, payload ) ;
       if ( !mqttclient.publish ( topic, payload ) )           // Publish!
@@ -525,6 +582,7 @@ class VS1053
     uint8_t       cs_pin ;                        // Pin where CS line is connected
     uint8_t       dcs_pin ;                       // Pin where DCS line is connected
     uint8_t       dreq_pin ;                      // Pin where DREQ line is connected
+    uint8_t       shutdown_pin ;                  // Pin where the shutdown line is connected
     uint8_t       curvol ;                        // Current volume setting 0..100%
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
@@ -571,7 +629,7 @@ class VS1053
     inline void data_mode_on() const
     {
       SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
-      //digitalWrite ( cs_pin, HIGH ) ;             // Bring slave in data mode
+    //digitalWrite ( cs_pin, HIGH ) ;             // Bring slave in data mode
       digitalWrite ( dcs_pin, LOW ) ;
     }
 
@@ -590,7 +648,7 @@ class VS1053
 
   public:
     // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
-    VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) ;
+    VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t _shutdown_pin ) ;
     void     begin() ;                                   // Begin operation.  Sets pins correctly,
     // and prepares SPI bus.
     void     startSong() ;                               // Prepare to start playing. Call this each
@@ -619,8 +677,8 @@ class VS1053
 // VS1053 class implementation.                                                                    *
 //**************************************************************************************************
 
-VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin ) :
-  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin)
+VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t _shutdown_pin ) :
+  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin), shutdown_pin(_shutdown_pin)
 {
 }
 
@@ -752,6 +810,11 @@ void VS1053::begin()
   pinMode      ( dcs_pin,   OUTPUT ) ;
   digitalWrite ( dcs_pin,   HIGH ) ;                    // Start HIGH for SCI en SDI
   digitalWrite ( cs_pin,    HIGH ) ;
+  if ( shutdown_pin >= 0 )                              // Shutdown in use?
+  {
+     pinMode ( shutdown_pin,   OUTPUT ) ;
+     digitalWrite ( shutdown_pin, HIGH ) ;              // Shut down audio output
+  }
   delay ( 100 ) ;
   // Init SPI in slow mode ( 0.2 MHz )
   VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
@@ -821,6 +884,11 @@ uint8_t VS1053::getVolume()                             // Get the currenet volu
 void VS1053::startSong()
 {
   sdi_send_fillers ( 10 ) ;
+  if ( shutdown_pin >= 0 )                              // Shutdown in use?
+  {
+     digitalWrite ( shutdown_pin, LOW ) ;               // Enable audio output
+  }
+  
 }
 
 bool VS1053::playChunk ( uint8_t* data, size_t len )
@@ -830,10 +898,14 @@ bool VS1053::playChunk ( uint8_t* data, size_t len )
 
 void VS1053::stopSong()
 {
-  uint16_t modereg ;                     // Read from mode register
-  int      i ;                           // Loop control
+  uint16_t modereg ;                                    // Read from mode register
+  int      i ;                                          // Loop control
 
   sdi_send_fillers ( 2052 ) ;
+  if ( shutdown_pin >= 0 )                              // Shutdown in use?
+  {
+     digitalWrite ( shutdown_pin, HIGH ) ;              // Disable audio output
+  }
   delay ( 10 ) ;
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
   for ( i = 0 ; i < 200 ; i++ )
@@ -878,7 +950,7 @@ void VS1053::printDetails ( const char *header )
 }
 
 // The object for the MP3 player
-VS1053 vs1053player (  VS1053_CS, VS1053_DCS, VS1053_DREQ ) ;
+VS1053* vs1053player ;
 
 //**************************************************************************************************
 // End VS1053 stuff.                                                                               *
@@ -972,6 +1044,24 @@ esp_err_t nvssetstr ( const char* key, String val )
     }
   }
   return nvserr ;
+}
+
+
+//**************************************************************************************************
+//                                      N V S C H K E Y                                            *
+//**************************************************************************************************
+// Change a keyname in in nvs.                                                                     *
+//**************************************************************************************************
+void nvschkey ( const char* oldk, const char* newk )
+{
+  String curcont ;                                         // Current contents
+
+  if ( nvssearch ( oldk ) )                                // Old key in nvs?
+  {
+    curcont = nvsgetstr ( oldk ) ;                         // Read current value
+    nvs_erase_key ( nvshandle, oldk ) ;                    // Remove key
+    nvssetstr ( newk, curcont ) ;                          // Insert new
+  }
 }
 
 
@@ -1726,8 +1816,6 @@ void IRAM_ATTR isr_enc_turn()
                                        -1,                    // 11 -> 10
                                         0                     // 11 -> 11
                                       } ;
-  static int8_t num ;
-
   // Read current state of CLK, DT pin. Result is a 2 bit binairy number: 00, 01, 10 or 11.
   act_state = ( digitalRead ( ini_block.enc_clk_pin ) << 1 ) +
               digitalRead ( ini_block.enc_dt_pin ) ;            
@@ -2144,19 +2232,20 @@ void readIOprefs()
     int8_t*     gnr ;                                     // GPIO pin number
   };
   struct iosetting klist[] = {                            // List of I/O related keys
-    { "ir_pin",   &ini_block.ir_pin       },
-    { "enc_clk",  &ini_block.enc_clk_pin  },
-    { "enc_dt",   &ini_block.enc_dt_pin   },
-    { "enc_sw",   &ini_block.enc_sw_pin   },
-    { "tft_cs",   &ini_block.tft_cs_pin   },
-    { "tft_dc",   &ini_block.tft_dc_pin   },
-    { "sd_cs",    &ini_block.sd_cs_pin    },
-    { "vs_cs",    &ini_block.vs_cs_pin    },
-    { "vs_dcs",   &ini_block.vs_dcs_pin   },
-    { "vs_dreq",  &ini_block.vs_dreq_pin  },
-    { "spi_sck",  &ini_block.spi_sck_pin  },
-    { "spi_miso", &ini_block.spi_miso_pin },
-    { "spi_mosi", &ini_block.spi_mosi_pin },
+    { "pin_ir",       &ini_block.ir_pin          },
+    { "pin_enc_clk",  &ini_block.enc_clk_pin     },
+    { "pin_enc_dt",   &ini_block.enc_dt_pin      },
+    { "pin_enc_sw",   &ini_block.enc_sw_pin      },
+    { "pin_tft_cs",   &ini_block.tft_cs_pin      },
+    { "pin_tft_dc",   &ini_block.tft_dc_pin      },
+    { "pin_sd_cs",    &ini_block.sd_cs_pin       },
+    { "pin_vs_cs",    &ini_block.vs_cs_pin       },
+    { "pin_vs_dcs",   &ini_block.vs_dcs_pin      },
+    { "pin_vs_dreq",  &ini_block.vs_dreq_pin     },
+    { "pin_shutdown", &ini_block.vs_shutdown_pin },
+    { "pin_spi_sck",  &ini_block.spi_sck_pin     },
+    { "pin_spi_miso", &ini_block.spi_miso_pin    },
+    { "pin_spi_mosi", &ini_block.spi_mosi_pin    },
     { NULL,      NULL                   }    // End of list
   } ;
   int         i ;                                         // Loop control
@@ -2190,160 +2279,55 @@ void readIOprefs()
 //**************************************************************************************************
 // Read the preferences and interpret the commands.                                                *
 // If output == true, the key / value pairs are returned to the caller as a String.                *
-// preset_xx and wifi_xx are included.                                                             *
 //**************************************************************************************************
 String readprefs ( bool output )
 {
-  const char* keys[] = {
-    "mqttbroker", "mqttport", "mqttprefix",  // List of all defined keys
-    "mqttuser",   "mqttpasswd",
-    "#",                                     // Spacing in output
-    "wifi_xx",
-    "#",
-    "volume",
-    "toneha", "tonehf",
-    "tonela", "tonelf",
-    "#",
-    "preset",
-    "#",
-    "preset_xx",
-    "#",
-    "gpio_xx",
-    "#",
-    "touch_xx",
-    "#",
-    "clk_server",
-    "clk_offset",
-    "clk_dst",
-    "#",
-    "spi_sck",
-    "spi_miso",
-    "spi_mosi",
-    "#",
-    "ir_pin",
-    "ir_xx",
-    "#",
-    "vs_cs",
-    "vs_dcs",
-    "vs_dreq",
-    "#",
-    "tft_cs",
-    "tft_dc",
-    "#",
-    "enc_clk",
-    "enc_dt",
-    "enc_sw",
-    "#",
-    "sd_cs",
-    NULL                                     // Einde keys
-  } ;
-  char        mykey[20] ;                                   // For numerated keys
-  char*       p ;                                           // Points to sequencenumber of numerated key
-  int         i, j ;                                        // Loop control
-  int         jmax ;                                        // Max numerated key
-  const char* numformat ;                                   // "_%02d" or "_%04X"
+  uint16_t    i ;                                           // Loop control
   String      val ;                                         // Contents of preference entry
   String      cmd ;                                         // Command for analyzCmd
   String      outstr = "" ;                                 // Outputstring
-  int         count = 0 ;                                   // Number of keys found
-  bool        sep = false ;                                 // Print separator
+  char*       key ;                                         // Point to nvskeys[i]
+  uint8_t     winx ;                                        // Index in wifilist
+  uint16_t    last2char = 0 ;                               // To detect paragraphs
 
-  for ( i = 0 ; keys[i] ; i++ )                             // Loop trough all possible keys
+  i = 0 ;
+  while ( *( key = nvskeys[i] ) )                           // Loop trough all available keys
   {
-    if ( strcmp ( keys[i], "#" ) == 0 )                     // Key equals "#"?
+    val = nvsgetstr ( key ) ;                               // Read value of this key
+    cmd = String ( key ) +                                  // Yes, form command
+          String ( " = " ) +
+          val ;
+    if ( strstr ( key, "wifi_"  ) )                         // Is it a wifi ssid/password?
     {
-      sep = true ;                                          // Yes, add comment before next line
-      continue ;                                            // Skip further key handling
+      winx = atoi ( key + 5 ) ;                             // Get index in wifilist
+      val = String ( wifilist[winx].ssid ) +                // Yes, hide password
+            String ( "/*******" ) ;
+      cmd = String ( "" ) ;                                 // Do not analyze this
     }
-    p = strstr ( keys[i], "_xx"  ) ;                        // See if numerated key
-    if ( ( p != NULL ) && output )                          // Numerated key and output requested ?
+    else if ( strstr ( key, "mqttpasswd"  ) )               // Is it a MQTT password?
     {
-      strcpy ( mykey, keys[i] ) ;                           // Copy key
-      p = strstr ( mykey, "_xx"  ) ;                        // Get position of "_" in numerated key
-      jmax = 100 ;                                          // Assume max number of presets
-      numformat = "_%02d" ;                                 // Format for numerated keys
-      if ( strstr ( mykey, "ir_xx" ) )                      // Longer range for ir_xx
-      {
-        if ( nvssearch ( "ir_pin" ) )                       // Necessary if IR in use
-        {
-          jmax = 0x10000 ;                                  // > 64000 possibilities
-        }
-        else
-        {
-          jmax = 0 ;                                        // Save some time
-        }
-        numformat = "_%04X" ;                               // Different numeration
-      }
-      for ( j = 0 ; j < jmax ; j++ )                        // Try for 00 to jmax
-      {
-        sprintf ( p, numformat, j ) ;                       // Form key in preferences
-        if ( nvssearch ( mykey ) )                          // Does it exist?
-        {
-          val = nvsgetstr ( mykey ) ;                       // Get the contents
-          if ( val.length() )                               // Does it exists?
-          {
-            count++ ;                                       // Count number of keys
-            if ( sep )                                      // Need for a separator
-            {
-              outstr += "#\n" ;                             // Yes, add one
-              sep = false ;                                 // Clear flag
-            }
-            if ( strstr ( mykey, "wifi_"  ) )               // Is it a wifi ssid/password?
-            {
-              val = String ( wifilist[j].ssid ) +           // Yes, hide password
-                    String ( "/*******" ) ;
-            }
-            outstr += String ( mykey ) +                    // Yes, form outputstring
-                      " = " +
-                      val +
-                      "\n" ;
-          }
-        }
-        if ( ( j % 200 ) == 0 )                             // Long time spend in loop?
-        {
-          mp3loop() ;                                       // Yes, keep playing
-        }
-      }
+      val = String ( "*******" ) ;                          // Yes, hide it
     }
-    else                                                    // Key exists?
+    if ( output )
     {
-      if ( nvssearch ( keys[i] ) )                          // Does it exist?
+      if ( ( i > 0 ) &&
+           ( *(uint16_t*)key != last2char ) )               // New paragraph?
       {
-        val = nvsgetstr ( keys[i] ) ;                       // Read value of next key
-        if ( val.length() )                                 // parameter in preference?
-        {
-          count++ ;                                         // Yes, count number of filled keys
-        }
-        cmd = String ( keys[i] ) +                          // Yes, form command
-              String ( " = " ) +
-              val ;
-        if ( output )
-        {
-          if ( sep )                                       // Need for a separator
-          {
-            outstr += "#\n" ;                              // Yes, add one
-            sep = false ;                                  // Clear flag
-          }
-          if ( strstr ( keys[i], "mqttpasswd"  ) )         // Is it a MQTT password?
-          {
-            val = String ( "*******" ) ;                   // Yes, hide it
-          }
-          outstr += String ( keys[i] ) +                   // Add to outstr
-                    String ( " = " ) +
-                    val + 
-                    String ( "\n" ) ;                      // Add newline
-        }
-        else
-        {
-          if ( val.length() )                               // Parameter in preference?
-          {
-            analyzeCmd ( cmd.c_str() ) ;                    // Analyze it
-          }
-        }
+        last2char = *(uint16_t*)key ;                       // Yes, save 2 chars for next compare
+        outstr += String ( "#\n" ) ;                        // Add separator
       }
+      outstr += String ( key ) +                            // Add to outstr
+                String ( " = " ) +
+                val + 
+                String ( "\n" ) ;                           // Add newline
     }
+    else
+    {
+      analyzeCmd ( cmd.c_str() ) ;                          // Analyze it
+    }
+    i++ ;                                                   // Next key
   }
-  if ( count == 0 )
+  if ( i == 0 )
   {
     outstr = String ( "No preferences found.\n"
                       "Use defaults or run Esp32_radio_init first.\n" ) ;
@@ -2374,7 +2358,7 @@ bool mqttreconnect()
     mqtt_on = false ;                                     // Yes, switch off forever
     return res ;                                          // and quit
   }
-  mqttcount++ ;                                          // Count the retries
+  mqttcount++ ;                                           // Count the retries
   dbgprint ( "(Re)connecting number %d to MQTT %s",       // Show some debug info
              mqttcount,
              ini_block.mqttbroker.c_str() ) ;
@@ -2623,6 +2607,32 @@ void  mk_lsan()
 
 
 //**************************************************************************************************
+//                                     G E T R A D I O S T A T U S                                 *
+//**************************************************************************************************
+// Return preset-, tone- and volume status.                                                        *
+// Included are the presets, the current station, the volume and the tone settings.                *
+//**************************************************************************************************
+String getradiostatus()
+{
+  char                pnr[3] ;                           // Preset as 2 character, i.e. "03"
+
+  sprintf ( pnr, "%02d", ini_block.newpreset ) ;         // Current preset
+  return String ( "preset=" ) +                          // Add preset setting
+         String ( pnr ) +
+         String ( "\nvolume=" ) +                        // Add volume setting
+         String ( String ( ini_block.reqvol ) ) +
+         String ( "\ntoneha=" ) +                        // Add tone setting HA
+         String ( ini_block.rtone[0] ) +
+         String ( "\ntonehf=" ) +                        // Add tone setting HF
+         String ( ini_block.rtone[1] ) +
+         String ( "\ntonela=" ) +                        // Add tone setting LA
+         String ( ini_block.rtone[2] ) +
+         String ( "\ntonelf=" ) +                        // Add tone setting LF
+         String ( ini_block.rtone[3] ) ;
+}
+
+
+//**************************************************************************************************
 //                                     G E T S E T T I N G S                                       *
 //**************************************************************************************************
 // Send some settings to the webserver.                                                            *
@@ -2635,7 +2645,6 @@ void getsettings()
   int                 inx ;                              // Position of search char in line
   int                 i ;                                // Loop control, preset number
   char                tkey[12] ;                         // Key for preset preference
-  char                pnr[3] ;                           // Preset as 2 character, i.e. "03"
 
   for ( i = 0 ; i < 100 ; i++ )                          // Max 99 presets
   {
@@ -2662,19 +2671,7 @@ void getsettings()
       }
     }
   }
-  sprintf ( pnr, "%02d", ini_block.newpreset ) ;         // Current preset
-  val += String ( "preset=" ) +                          // Add preset setting
-         String ( pnr ) +
-         String ( "\nvolume=" ) +                        // Add volume setting
-         String ( String ( ini_block.reqvol ) ) +
-         String ( "\ntoneha=" ) +                        // Add tone setting HA
-         String ( ini_block.rtone[0] ) +
-         String ( "\ntonehf=" ) +                        // Add tone setting HF
-         String ( ini_block.rtone[1] ) +
-         String ( "\ntonela=" ) +                        // Add tone setting LA
-         String ( ini_block.rtone[2] ) +
-         String ( "\ntonelf=" ) +                        // Add tone setting LF
-         String ( ini_block.rtone[3] ) +
+  val += getradiostatus() +                              // Add radio setting
          String ( "\n\n" ) ;                             // End of reply
   cmdclient.print ( val ) ;                              // And send
 }
@@ -2695,24 +2692,197 @@ void tftlog ( const char *str )
 
 
 //**************************************************************************************************
+//                                           T R P I N S                                           *
+//**************************************************************************************************
+// Change keynames of pin definitions.  Only necessary if old names are being used in NVS.         *
+// This function will be removed in future versions.                                               *
+//**************************************************************************************************
+void trpins()
+{
+  uint8_t     i = 0 ;                                     // Loop control
+  const char* tr[][2] = {                                 // Translation table old->new key name
+    { "ir_pin",   "pin_ir"       },
+    { "enc_clk",  "pin_enc_clk"  },
+    { "enc_dt",   "pin_enc_dt"   },
+    { "enc_sw",   "pin_enc_sw"   },
+    { "tft_cs",   "pin_tft_cs"   },
+    { "tft_dc",   "pin_tft_dc"   },
+    { "sd_cs",    "pin_sd_cs"    },
+    { "vs_cs",    "pin_vs_cs"    },
+    { "vs_dcs",   "pin_vs_dcs"   },
+    { "vs_dreq",  "pin_vs_dreq"  },
+    { "spi_sck",  "pin_spi_sck"  },
+    { "spi_miso", "pin_spi_miso" },
+    { "spi_mosi", "pin_spi_mosi" },
+    { NULL,      NULL            }                        // End of list
+  } ;
+
+  while ( tr[i][0] )                                      // Loop trough keys to be translated
+  {
+    nvschkey ( tr[i][0], tr[i][1] ) ;                     // Change if existing
+    i++ ;
+  }
+}
+
+
+//**************************************************************************************************
+//                                   F I N D N S I D                                               *
+//**************************************************************************************************
+// Find the namespace ID for the namespace passed as parameter.                                    *
+//**************************************************************************************************
+uint8_t FindNsID ( const char* ns )
+{
+  esp_err_t                 result = ESP_OK ;                 // Result of reading partition
+  uint32_t                  offset = 0 ;                      // Offset in nvs partition
+  uint8_t                   i ;                               // Index in Entry 0..125
+  uint8_t                   bm ;                              // Bitmap for an entry
+  uint8_t                   res = 0xFF ;                      // Function result
+
+  while ( offset < nvs->size )
+  {
+    result = esp_partition_read ( nvs, offset,                // Read 1 page in nvs partition
+                                  &nvsbuf,
+                                  sizeof(nvsbuf) ) ;
+    if ( result != ESP_OK )
+    {
+      dbgprint ( "Error reading NVS!" ) ;
+      break ;
+    }
+    i = 0 ;
+    while ( i < 126 )
+    {
+      
+      bm = ( nvsbuf.Bitmap[i/4] >> ( ( i % 4 ) * 2 ) ) ;      // Get bitmap for this entry,
+      bm &= 0x03 ;                                            // 2 bits for one entry
+      if ( ( bm == 2 ) &&
+           ( nvsbuf.Entry[i].Ns == 0 ) &&  
+           ( strcmp ( ns, nvsbuf.Entry[i].Key ) == 0 ) )
+      {
+        res = nvsbuf.Entry[i].Data & 0xFF ;                   // Return the ID
+        offset = nvs->size ;                                  // Stop outer loop as well
+        break ;
+      }
+      else
+      {
+        if ( bm == 2 )
+        {
+          i += nvsbuf.Entry[i].Span ;                         // Next entry
+        }
+        else
+        {
+          i++ ;
+        }
+      }
+    }
+    offset += sizeof(nvs_page) ;                              // Prepare to read next page in nvs
+  }
+  return res ;
+}
+
+
+//**************************************************************************************************
+//                            B U B B L E S O R T K E Y S                                          *
+//**************************************************************************************************
+// Bubblesort the nvskeys.                                                                         *
+//**************************************************************************************************
+void bubbleSortKeys ( uint16_t n )
+{
+  uint16_t i, j ;                                             // Indexes in nvskeys
+  char     tmpstr[16] ;                                       // Temp. storage for a key
+  
+  for ( i = 0 ; i < n-1 ; i++ )                               // Examine all keys
+  {
+    for ( j = 0 ; j < n-i-1 ; j++ )                           // Compare to following keys
+    {
+      if ( strcmp ( nvskeys[j], nvskeys[j+1] ) > 0 )          // Next key out of order?
+      {
+        strcpy ( tmpstr, nvskeys[j] ) ;                       // Save current key a while
+        strcpy ( nvskeys[j], nvskeys[j+1] ) ;                 // Replace current with next key
+        strcpy ( nvskeys[j+1], tmpstr ) ;                     // Replace next with saved current
+      }
+    }
+  }
+}
+
+
+//**************************************************************************************************
+//                                      F I L L K E Y L I S T                                      *
+//**************************************************************************************************
+// File the list of all relevant keys in NVS.                                                      *
+// The keys will be sorted.                                                                        *
+//**************************************************************************************************
+void fillkeylist()
+{
+  esp_err_t    result = ESP_OK ;                                // Result of reading partition
+  uint32_t     offset = 0 ;                                     // Offset in nvs partition
+  uint16_t     i ;                                              // Index in Entry 0..125.
+  uint8_t      bm ;                                             // Bitmap for an entry
+  uint16_t     nvsinx = 0 ;                                     // Index in nvskey table
+
+  keynames.clear() ;                                            // Clear the list
+  while ( offset < nvs->size )
+  {
+    result = esp_partition_read ( nvs, offset,                  // Read 1 page in nvs partition
+                                  &nvsbuf,
+                                  sizeof(nvsbuf) ) ;
+    if ( result != ESP_OK )
+    {
+      dbgprint ( "Error reading NVS!" ) ;
+      break ;
+    }
+    i = 0 ;
+    while ( i < 126 )
+    {
+
+      
+      bm = ( nvsbuf.Bitmap[i/4] >> ( ( i % 4 ) * 2 ) ) ;        // Get bitmap for this entry, 2 bit for one entry
+      bm &= 0x03 ;
+      if ( bm == 2 )                                            // Entry is active?
+      {
+        if ( nvsbuf.Entry[i].Ns == namespace_ID )               // Namespace right?
+        {
+          strcpy ( nvskeys[nvsinx], nvsbuf.Entry[i].Key ) ;     // Yes, save in table
+          if ( ++nvsinx == MAXKEYS )
+          {
+            nvsinx-- ;                                          // Prevent excessive index
+          }
+        }
+        i += nvsbuf.Entry[i].Span ;                             // Next entry
+      }
+      else
+      {
+        i++ ;
+      }
+    }
+    offset += sizeof(nvs_page) ;                                // Prepare to read next page in nvs
+  }
+  nvskeys[nvsinx][0] = '\0' ;                                   // Empty key at the end
+  dbgprint ( "Read %d keys from NVS", nvsinx ) ;
+  bubbleSortKeys ( nvsinx ) ;                                   // Sort the keys
+}
+
+
+//**************************************************************************************************
 //                                           S E T U P                                             *
 //**************************************************************************************************
 // Setup for the program.                                                                          *
 //**************************************************************************************************
 void setup()
 {
-  int         i ;                                        // Loop control
-  int         pinnr ;                                    // Input pinnumber
-  const char* p ;
-  byte        mac[6] ;                                   // WiFi mac address
-  char        tmpstr[20] ;                               // For version and Mac address
-  const char* wvn = "Include file %s_html has the wrong version number!  Replace header file." ;
+  int                       i ;                          // Loop control
+  int                       pinnr ;                      // Input pinnumber
+  const char*               p ;
+  byte                      mac[6] ;                     // WiFi mac address
+  char                      tmpstr[20] ;                 // For version and Mac address
+  const char*               partname = "nvs" ;           // Partition with NVS info
+  esp_partition_iterator_t  pi ;                         // Iterator for find
+  const char*               wvn = "Include file %s_html has the wrong version number!  Replace header file." ;
 
   Serial.begin ( 115200 ) ;                              // For debug
   Serial.println() ;
   // Version tests for some vital include files
   if ( about_html_version   < 170626 ) dbgprint ( wvn, "about" ) ;
-  if ( config_html_version  < 171120 ) dbgprint ( wvn, "config" ) ;
+  if ( config_html_version  < 171207 ) dbgprint ( wvn, "config" ) ;
   if ( index_html_version   < 170703 ) dbgprint ( wvn, "index" ) ;
   if ( mp3play_html_version < 170626 ) dbgprint ( wvn, "mp3play" ) ;
   if ( defaultprefs_version < 170728 ) dbgprint ( wvn, "defaultprefs" ) ;
@@ -2724,11 +2894,25 @@ void setup()
              ESP.getFreeHeap() ) ;                       // Normally about 199 kB
   maintask = xTaskGetCurrentTaskHandle() ;               // My taskhandle
   SPIsem = xSemaphoreCreateMutex(); ;                    // Semaphore for SPI bus
-  ////if ( SPIsem )                                          // Created okay?
-  ////{
-  ////  // Semaphore exists.  We have to "take" it once to make it usable.  Strange, but true...
-  ////  xSemaphoreTake ( SPIsem, 10 ) ;                      // Is now empty
-  ////}
+  pi = esp_partition_find ( ESP_PARTITION_TYPE_DATA,     // Get partition iterator for
+      ESP_PARTITION_SUBTYPE_ANY,                         // the NVS partition
+      partname ) ;
+  if ( pi )
+  {
+    nvs = esp_partition_get ( pi ) ;                     // Get partition struct
+    esp_partition_iterator_release ( pi ) ;              // Release the iterator
+    dbgprint ( "Partition %s found, %d bytes",
+               partname,
+               nvs->size ) ;
+  }
+  else
+  {
+    dbgprint ( "Partition %s not found!", partname ) ;   // Very unlikely...
+    while ( true ) ;                                     // Impossible to continue
+  }
+  trpins() ;                                             // Translate keys in NVS to new names
+  namespace_ID = FindNsID ( NAME ) ;                     // Find ID of our namespace in NVS
+  fillkeylist() ;                                        // Fill keynames with all keys
   memset ( &ini_block, 0, sizeof(ini_block) ) ;          // Init ini_block
   ini_block.mqttport = 1883 ;                            // Default port for MQTT
   ini_block.mqttprefix = "" ;                            // No prefix for MQTT topics seen yet
@@ -2738,6 +2922,10 @@ void setup()
   ini_block.spi_sck_pin = 18 ;                           // GPIO connected to SPI SCK pin
   ini_block.spi_miso_pin = 19 ;                          // GPIO connected to SPI MISO pin
   ini_block.spi_mosi_pin = 23 ;                          // GPIO connected to SPI MOSI pin
+  ini_block.vs_cs_pin = VS1053_CS ;                      // GPIO connected to CS of VS1053
+  ini_block.vs_dcs_pin = VS1053_DCS ;                    // GPIO connected to DCS of VS1053
+  ini_block.vs_dreq_pin = VS1053_DREQ ;                  // GPIO connected to DREQ of VS1053
+  ini_block.vs_shutdown_pin = -1 ;                       // GPIO connected to audio shutdown pin (if used)
   readIOprefs() ;                                        // Read pins used for SPI, TFT, VS1053, IR, Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
   {
@@ -2758,6 +2946,10 @@ void setup()
   SPI.begin ( ini_block.spi_sck_pin,                     // Init VSPI bus with default or modified pins
               ini_block.spi_miso_pin,
               ini_block.spi_mosi_pin ) ;
+  vs1053player = new VS1053 ( ini_block.vs_cs_pin,       // Make instance of player
+                              ini_block.vs_dcs_pin,
+                              ini_block.vs_dreq_pin,
+                              ini_block.vs_shutdown_pin ) ;
   pinMode ( ini_block.ir_pin, INPUT ) ;                  // Pin for IR receiver VS1838B
   attachInterrupt ( ini_block.ir_pin, isr_IR, CHANGE ) ; // Interrupts will be handle by isr_IR
   if ( ini_block.tft_cs_pin >= 0 )
@@ -2814,13 +3006,13 @@ void setup()
   listNetworks() ;                                       // Search for WiFi networks
   readprefs ( false ) ;                                  // Read preferences
   tcpip_adapter_set_hostname ( TCPIP_ADAPTER_IF_STA, NAME ) ;
-  vs1053player.begin() ;                                 // Initialize VS1053 player
+  vs1053player->begin() ;                                 // Initialize VS1053 player
   delay(10);
   p = dbgprint ( "Connect to WiFi" ) ;                   // Show progress
   tftlog ( p ) ;                                         // On TFT too
   NetworkFound = connectwifi() ;                         // Connect to WiFi network
   dbgprint ( "Start server for commands" ) ;
-  cmdserver.begin() ;
+  cmdserver.begin() ;                                    // Start http server
   if ( NetworkFound )                                    // OTA and MQTT only if Wifi network found
   {
     dbgprint ( "Network found. Starting mqtt and OTA" ) ;
@@ -2893,7 +3085,7 @@ void setup()
   xTaskCreatePinnedToCore (
     playtask,                                             // Task function.
     "Playtask",                                           // name of task.
-    3200,                                                 // Stack size of task
+    2048,                                                 // Stack size of task
     NULL,                                                 // parameter of the task
     1,                                                    // priority of the task
     &xplaytask,                                           // Task handle to keep track of created task
@@ -2950,7 +3142,7 @@ uint8_t rinbyt ( bool forcestart )
 //**************************************************************************************************
 void writeprefs()
 {
-  int     inx, inx2 ;                                         // Position in inputstr
+  int     inx ;                                               // Position in inputstr
   uint8_t winx ;                                              // Index in wifilist
   char    c ;                                                 // Input character
   String  inputstr = "" ;                                     // Input regel
@@ -2978,17 +3170,18 @@ void writeprefs()
           contents = inputstr.substring ( inx + 1 ) ;         // and contents
           contents.trim() ;
           dstr = contents ;                                   // Copy for debug
-          if ( ( key.indexOf ( "wifi_" ) >= 0 ) )             // Sensitive info?
+          if ( ( key.indexOf ( "wifi_" ) == 0 ) )             // Sensitive info?
           {
             winx = key.substring(5).toInt() ;                 // Get index in wifilist
             if ( ( winx < wifilist.size() ) &&                // Existing wifi spec in wifilist?
                  ( contents.indexOf ( "/****" ) > 0 ) )       // Hidden password?
             {
               contents = String ( wifilist[winx].ssid ) +     // Retrieve ssid and password
-                         String ( "/" ) ;
+                         String ( "/" ) +
                          String ( wifilist[winx].passphrase ) ;
             }
-            dstr = String ( "*******/*******" ) ;             // Hide in debug line
+            dstr = String ( wifilist[winx].ssid ) +
+                   String ( "/*******" ) ;                    // Hide in debug line
           }
           if ( ( key.indexOf ( "mqttpasswd" ) == 0 ) )        // Sensitive info?
           {
@@ -2998,9 +3191,9 @@ void writeprefs()
             }
             dstr = String ( "*******" ) ;                     // Hide in debug line
           }
-          nvssetstr ( key.c_str(), contents ) ;               // Save new pair
-          dbgprint ( "writeprefs %s = %s",
+          dbgprint ( "writeprefs setstr %s = %s",
                      key.c_str(), dstr.c_str() ) ;
+          nvssetstr ( key.c_str(), contents ) ;               // Save new pair
         }
       }
       inputstr = "" ;
@@ -3013,6 +3206,7 @@ void writeprefs()
       }
     }
   }
+  fillkeylist() ;                                             // Update list with keys
 }
 
 
@@ -3048,7 +3242,7 @@ void handlehttpreply()
       {
         if ( http_getcmd.length() )                         // Command to analyze?
         {
-          dbgprint ( "Start reply for %s", http_getcmd.c_str() ) ;
+          dbgprint ( "Send reply for %s", http_getcmd.c_str() ) ;
           sndstr = httpheader ( String ( "text/html" ) ) ;  // Set header
           if ( http_getcmd.startsWith ( "getprefs" ) )      // Is it a "Get preferences"?
           {
@@ -3346,6 +3540,31 @@ void handleIpPub()
   mqttpub.trigger ( MQTT_IP ) ;                            // Request re-publish IP
 }
 
+
+//**************************************************************************************************
+//                                      H A N D L E V O L P U B                                    *
+//**************************************************************************************************
+// Handle publish op Volume to MQTT.  This will happen max every 10 seconds.                       *
+//**************************************************************************************************
+void handleVolPub()
+{
+  static uint32_t pubtime = 10000 ;                        // Limit save to once per 10 seconds
+  static uint8_t  oldvol = -1 ;                            // For comparison
+  
+  if ( ( millis() - pubtime ) < 10000 )                    // 10 seconds
+  {
+    return ;
+  }
+  pubtime = millis() ;                                     // Set time of last publish
+  if ( ini_block.reqvol != oldvol )                        // Volume change?
+  {
+    mqttpub.trigger ( MQTT_VOLUME ) ;                      // Request publish VOLUME
+    oldvol = ini_block.reqvol ;                            // Remember publishe volume
+  }
+}
+
+
+
 //**************************************************************************************************
 //                                           C H K _ E N C                                         *
 //**************************************************************************************************
@@ -3473,7 +3692,7 @@ void chk_enc()
   switch ( enc_menu_mode )                                    // Which mode (VOLUME, PRESET, TRACK)?
   {
     case VOLUME :
-      ini_block.reqvol += lrc ;
+      ini_block.reqvol += ( 2 * lrc ) ;
       if ( ini_block.reqvol > 127 )                           // Wrapped around?
       {
         ini_block.reqvol = 0 ;                                // Limit to normal values
@@ -3518,6 +3737,8 @@ void chk_enc()
       }
       dbgprint ( "Simplified %s", enc_filename.c_str() ) ;
       tftset ( 3, enc_filename ) ;                            // Set screen segment bottom part
+    default :
+      break ;
   }
   rotationcount = 0 ;                                         // Reset
 }
@@ -3535,7 +3756,7 @@ void mp3loop()
   static uint8_t  tmpbuff[6000] ;                        // Input buffer for mp3 stream
   uint32_t        maxchunk ;                             // Max number of bytes to read
   int             res = 0 ;                              // Result reading from mp3 stream
-  uint32_t        av ;                                   // Available in stream
+  uint32_t        av = 0 ;                               // Available in stream
   String          nodeID ;                               // Next nodeID of track on SD
 
   // Try to keep the Queue to playtask filled up by adding as much bytes as possible
@@ -3659,6 +3880,7 @@ void mp3loop()
   {
     hostreq = false ;
     currentpreset = ini_block.newpreset ;                 // Remember current preset
+    mqttpub.trigger ( MQTT_PRESET ) ;                     // Request publishing to MQTT
     // Find out if this URL is on localhost (SD).
     localfile = ( host.indexOf ( "localhost/" ) >= 0 ) ;
     if ( localfile )                                      // Play file from localhost?
@@ -3721,6 +3943,7 @@ void loop()
   }
   handleSaveReq() ;                                         // See if time to save settings
   handleIpPub() ;                                           // See if time to publish IP
+  handleVolPub() ;                                          // See if time to publish volume
   chk_enc() ;                                               // Check rotary encoder functions
   if ( NetworkFound && time_req )                           // Time to refresh timetxt?
   {
@@ -4329,7 +4552,7 @@ const char* analyzeCmd ( const char* par, const char* val )
   if ( argument.indexOf ( "volume" ) >= 0 )           // Volume setting?
   {
     // Volume may be of the form "upvolume", "downvolume" or "volume" for relative or absolute setting
-    oldvol = vs1053player.getVolume() ;               // Get current volume
+    oldvol = vs1053player->getVolume() ;              // Get current volume
     if ( relative )                                   // + relative setting?
     {
       ini_block.reqvol = oldvol + ivalue ;            // Up by 0.5 or more dB
@@ -4349,6 +4572,12 @@ const char* analyzeCmd ( const char* par, const char* val )
   else if ( argument == "mute" )                      // Mute/unmute request
   {
     muteflag = !muteflag ;                            // Request volume to zero/normal
+  }
+  else if ( argument.indexOf ( "ir_" ) >= 0 )         // Ir setting?
+  {                                                   // Do not handle here
+  }
+  else if ( argument.indexOf ( "preset_" ) >= 0 )     // Enumerated preset?
+  {                                                   // Do not handle here
   }
   else if ( argument.indexOf ( "preset" ) >= 0 )      // (UP/DOWN)Preset station?
   {
@@ -4555,7 +4784,7 @@ void displayvolume()
     uint8_t        newvol ;                             // Current setting
     uint8_t pos ;                                       // Positon of volume indicator
 
-    newvol = vs1053player.getVolume() ;                 // Get current volume setting
+    newvol = vs1053player->getVolume() ;                // Get current volume setting
     if ( newvol != oldvol )                             // Volume changed?
     {
       oldvol = newvol ;                                 // Remember for next compare
@@ -4630,6 +4859,10 @@ void displayinfo ( uint16_t inx )
     p->str.toCharArray ( buf, len ) ;                    // Make a local copy of the string
     utf8ascii ( buf ) ;                                  // Convert possible UTF8
     tft->fillRect ( 0, p->y, width, p->height, BLACK ) ; // Clear the space for new info
+    if ( p->y > 1 )                                      // Need for divider?
+    {
+      tft->fillRect ( 0, p->y - 4, width, 1, GREEN ) ;   // Yes, show divider
+    }
     tft->setTextColor ( p->color ) ;                     // Set the requested color
     tft->setCursor ( 0, p->y ) ;                         // Prepare to show the info
     tft->println ( buf ) ;                               // Show the string
@@ -4723,16 +4956,16 @@ void handle_spec()
   }
   if ( muteflag )                                             // Mute or not?
   {
-    vs1053player.setVolume ( 0 ) ;                            // Mute
+    vs1053player->setVolume ( 0 ) ;                           // Mute
   }
   else
   {
-    vs1053player.setVolume ( ini_block.reqvol ) ;             // Unmute
+    vs1053player->setVolume ( ini_block.reqvol ) ;            // Unmute
   }
   if ( reqtone )                                              // Request to change tone?
   {
     reqtone = false ;
-    vs1053player.setTone ( ini_block.rtone ) ;                // Set SCI_BASS to requested value
+    vs1053player->setTone ( ini_block.rtone ) ;               // Set SCI_BASS to requested value
   }
   releaseSPI() ;                                              // Release SPI bus
 }
@@ -4751,10 +4984,10 @@ void playtask ( void * parameter )
   {
     if ( xQueueReceive ( dataqueue, &inchunk, 5 ) )
     {
-      while ( !vs1053player.data_request() )                        // If FIFO is full..
+      while ( !vs1053player->data_request() )                       // If FIFO is full..
       {
         handle_spec() ;                                             // Maybe some special funcs?
-        if ( !vs1053player.data_request() )                         // Still idle?
+        if ( !vs1053player->data_request() )                        // Still idle?
         {
           vTaskDelay ( 1 ) ;                                        // Yes, take a break
         }
@@ -4763,20 +4996,24 @@ void playtask ( void * parameter )
       {
         case QDATA:
           claimSPI ( "chunk" ) ;                                    // Claim SPI bus
-          vs1053player.playChunk ( inchunk.buf,                     // DATA, send to player
-                                   sizeof(inchunk.buf) ) ;
+          vs1053player->playChunk ( inchunk.buf,                    // DATA, send to player
+                                    sizeof(inchunk.buf) ) ;
           releaseSPI() ;                                            // Release SPI bus
           totalcount += sizeof(inchunk.buf) ;                       // Count the bytes
           break ;
         case QSTARTSONG:
+          playingstat = 1 ;                                         // Status for MQTT
+          mqttpub.trigger ( MQTT_PLAYING ) ;                        // Request publishing to MQTT
           claimSPI ( "startsong" ) ;                                // Claim SPI bus
-          vs1053player.startSong() ;                                // START, start player
+          vs1053player->startSong() ;                               // START, start player
           releaseSPI() ;                                            // Release SPI bus
           break ;
         case QSTOPSONG:
+          playingstat = 0 ;                                         // Status for MQTT
+          mqttpub.trigger ( MQTT_PLAYING ) ;                        // Request publishing to MQTT
           claimSPI ( "stopsong" ) ;                                 // Claim SPI bus
-          vs1053player.setVolume ( 0 ) ;                            // Mute
-          vs1053player.stopSong() ;                                 // STOP, stop player
+          vs1053player->setVolume ( 0 ) ;                           // Mute
+          vs1053player->stopSong() ;                                // STOP, stop player
           releaseSPI() ;                                            // Release SPI bus
           vTaskDelay ( 500 / portTICK_PERIOD_MS ) ;                 // Pause for a short time
           break ;

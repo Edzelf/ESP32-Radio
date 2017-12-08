@@ -1,6 +1,6 @@
 // config.html file in raw data format for PROGMEM
 //
-#define config_html_version 171120
+#define config_html_version 171207
 const char config_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
@@ -21,8 +21,7 @@ const char config_html[] PROGMEM = R"=====(
   <br><br><br>
   <center>
    <h1>** ESP32 Radio **</h1>
-   <p>You can edit the configuration here. <i>Note that this will be effective on the next restart of the radio.</i><br>
-      Stopping the radio first will result in faster loading of this page.   
+   <p>You can edit the configuration here. <i>Note that this will be effective on the next restart of the radio.</i>
    </p>
    <h3>Available WiFi networks
    <select class="select" onChange="handletone(this)" id="ssid"></select>
