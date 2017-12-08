@@ -33,6 +33,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 08-dec-2017, Faster handling of config page, more items published by MQTT, added pin_shutdown.
 - 01-dec-2017, Better handling of playlists.
 - 30-nov-2017, Hide passwords in config screen.
 - 27-nov-2017, Replaced ringbuffer by FreeRTOS queue, play function on second CPU,
