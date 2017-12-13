@@ -102,7 +102,7 @@
 // 01-12-2017, ES: Better handling of playlist.
 // 07-12-2017, ES: Faster handling of config screen.
 // 08-12-2017, ES: More MQTT items to publish, added pin_shutdown.
-// 13-12-2017, ES: Correction clear LCT.
+// 13-12-2017, ES: Correction clear LCD.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
