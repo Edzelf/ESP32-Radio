@@ -102,10 +102,11 @@
 // 01-12-2017, ES: Better handling of playlist.
 // 07-12-2017, ES: Faster handling of config screen.
 // 08-12-2017, ES: More MQTT items to publish, added pin_shutdown.
+// 13-12-2017, ES: Correction clear LCT.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Fri, 08 Dec 2017 10:30:00 GMT"
+#define VERSION "Fri, 13 Dec 2017 12:10:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -204,7 +205,7 @@ struct scrseg_struct                                  // For screen segments
 } ;
 
 enum qdata_type { QDATA, QSTARTSONG, QSTOPSONG,
-                  QSTREAMTITLE, QTIME, QCLEARTFT
+                  QSTREAMTITLE, QTIME
                 } ;                                   // datatyp in qdata_struct
 struct qdata_struct
 {
@@ -3079,6 +3080,10 @@ void setup()
   {
     gettime() ;                                           // Sync time
   }
+  if ( tft )
+  {
+    tft->fillRect ( 0, 8, 160, 118, BLACK ) ;             // Clear most of the screen
+  }
   outchunk.datatyp = QDATA ;                              // This chunk dedicated to QDATA
   dataqueue = xQueueCreate ( QSIZ,                        // Create queue for communication
                              sizeof ( qdata_struct ) ) ;
@@ -3827,7 +3832,6 @@ void mp3loop()
     queuefunc ( QSTOPSONG ) ;                            // Queue a request to stop the song
     metaint = 0 ;                                        // No metaint known now
     datamode = STOPPED ;                                 // Yes, state becomes STOPPED
-    queuefunc ( QCLEARTFT ) ;                            // Queue a request to clear TFT
     return ;
   }
   if ( localfile )                                       // Playing from SD?
@@ -5016,14 +5020,6 @@ void playtask ( void * parameter )
           vs1053player->stopSong() ;                                // STOP, stop player
           releaseSPI() ;                                            // Release SPI bus
           vTaskDelay ( 500 / portTICK_PERIOD_MS ) ;                 // Pause for a short time
-          break ;
-        case QCLEARTFT:
-          claimSPI ( "cleartft" ) ;                                 // Claim SPI bus
-          if ( tft )
-          {
-            tft->fillRect ( 0, 8, 160, 118, BLACK ) ;               // Clear most of the screen
-          }
-          releaseSPI() ;                                            // Release SPI bus
           break ;
         case QTIME:
           claimSPI ( "time" ) ;                                     // Claim SPI bus
