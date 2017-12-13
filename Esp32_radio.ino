@@ -106,7 +106,7 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Fri, 13 Dec 2017 12:10:00 GMT"
+#define VERSION "Wed, 13 Dec 2017 12:10:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
