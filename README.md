@@ -33,6 +33,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 15-dec-2017, Correction defaultprefs.h.
 - 13-dec-2017, Correction LCD display.
 - 08-dec-2017, Faster handling of config page, more items published by MQTT, added pin_shutdown.
 - 01-dec-2017, Better handling of playlists.
