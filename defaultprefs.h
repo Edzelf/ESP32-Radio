@@ -1,6 +1,6 @@
 // Default preferences in raw data format for PROGMEM
 //
-#define defaultprefs_version 170728
+#define defaultprefs_version 171215
 const char defprefs_txt[] PROGMEM = R"=====(
 # Example configuration
 # Programmable input pins:
@@ -50,17 +50,17 @@ clk_dst = 1                                          # Offset during daylight sa
 ir_40BF = upvolume = 2
 ir_C03F = downvolume = 2
 # GPIO pinnings
-ir_pin = 35                                          # GPIO Pin number for IR receiver VS1838B
-enc_clk = 25                                         # GPIO Pin number for rotary encoder "CLK"
-enc_dt = 26                                          # GPIO Pin number for rotary encoder "DT"
-enc_sw = 27                                          # GPIO Pin number for rotary encoder "SW"
+pin_ir = 35                                          # GPIO Pin number for IR receiver VS1838B
+pin_enc_clk = 25                                     # GPIO Pin number for rotary encoder "CLK"
+pin_enc_dt = 26                                      # GPIO Pin number for rotary encoder "DT"
+pin_enc_sw = 27                                      # GPIO Pin number for rotary encoder "SW"
 #
-tft_cs = 15                                          # GPIO Pin number for TFT "CS"
-tft_dc = 2                                           # GPIO Pin number for TFT "DC"
+pin_tft_cs = 15                                      # GPIO Pin number for TFT "CS"
+pin_tft_dc = 2                                       # GPIO Pin number for TFT "DC"
 #
 sd_cs = 21                                           # GPIO Pin number for SD card "CS"
 #
-vs_cs = 5                                            # GPIO Pin number for VS1053 "CS"
-vs_dcs = 16                                          # GPIO Pin number for VS1053 "DCS"
-vs_dreq = 4                                          # GPIO Pin number for VS1053 "DREQ"
+pin_vs_cs = 5                                        # GPIO Pin number for VS1053 "CS"
+pin_vs_dcs = 16                                      # GPIO Pin number for VS1053 "DCS"
+pin_vs_dreq = 4                                      # GPIO Pin number for VS1053 "DREQ"
 )=====" ;

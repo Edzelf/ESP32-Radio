@@ -103,10 +103,11 @@
 // 07-12-2017, ES: Faster handling of config screen.
 // 08-12-2017, ES: More MQTT items to publish, added pin_shutdown.
 // 13-12-2017, ES: Correction clear LCD.
+// 15-12-2017, ES: Correction defaultprefs.h.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 13 Dec 2017 12:10:00 GMT"
+#define VERSION "Fri, 15 Dec 2017 09:15:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -2886,7 +2887,7 @@ void setup()
   if ( config_html_version  < 171207 ) dbgprint ( wvn, "config" ) ;
   if ( index_html_version   < 170703 ) dbgprint ( wvn, "index" ) ;
   if ( mp3play_html_version < 170626 ) dbgprint ( wvn, "mp3play" ) ;
-  if ( defaultprefs_version < 170728 ) dbgprint ( wvn, "defaultprefs" ) ;
+  if ( defaultprefs_version < 171215 ) dbgprint ( wvn, "defaultprefs" ) ;
   // Print some memory and sketch info
   dbgprint ( "Starting ESP32-radio running on CPU %d at %d MHz.  Version %s.  Free memory %d",
              xPortGetCoreID(),
@@ -2926,7 +2927,6 @@ void setup()
   ini_block.vs_cs_pin = VS1053_CS ;                      // GPIO connected to CS of VS1053
   ini_block.vs_dcs_pin = VS1053_DCS ;                    // GPIO connected to DCS of VS1053
   ini_block.vs_dreq_pin = VS1053_DREQ ;                  // GPIO connected to DREQ of VS1053
-  ini_block.vs_shutdown_pin = -1 ;                       // GPIO connected to audio shutdown pin (if used)
   readIOprefs() ;                                        // Read pins used for SPI, TFT, VS1053, IR, Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
   {
@@ -2960,8 +2960,8 @@ void setup()
                              ini_block.tft_dc_pin ) ;    // Create an instant for TFT
     tft->begin() ;                                       // Init TFT interface
     tft->setBitrate ( 16000000 ) ;                       // High speed
-    tft->fillRect ( 0, 0, 160, 128, BLACK ) ;            // Clear screen does not work when rotated
     tft->setRotation ( 3 ) ;                             // Use landscape format (1 for upside down)
+    tft->fillRect ( 0, 0, 160, 128, BLACK ) ;            // Clear screen does not work when rotated
     tft->clearScreen() ;                                 // Clear screen
     tft->setTextSize ( 1 ) ;                             // Small character font
     tft->setTextColor ( WHITE ) ;                        // Info in white
