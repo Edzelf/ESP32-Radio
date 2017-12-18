@@ -104,10 +104,11 @@
 // 08-12-2017, ES: More MQTT items to publish, added pin_shutdown.
 // 13-12-2017, ES: Correction clear LCD.
 // 15-12-2017, ES: Correction defaultprefs.h.
+// 18-12-2017, ES: Stop playing during config.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Fri, 15 Dec 2017 09:15:00 GMT"
+#define VERSION "Mon, 18 Dec 2017 10:15:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -3251,6 +3252,10 @@ void handlehttpreply()
           sndstr = httpheader ( String ( "text/html" ) ) ;  // Set header
           if ( http_getcmd.startsWith ( "getprefs" ) )      // Is it a "Get preferences"?
           {
+            if ( datamode != STOPPED )                      // Still playing?
+            {
+              datamode = STOPREQD ;                         // Stop playing
+            }
             sndstr += readprefs ( true ) ;                  // Read and send
           }
           else if ( http_getcmd.startsWith ( "getdefs" ) )  // Is it a "Get default preferences"?
