@@ -33,6 +33,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 02-jan-2018, Stop/resume is one command now.
 - 15-dec-2017, Correction defaultprefs.h.
 - 13-dec-2017, Correction LCD display.
 - 08-dec-2017, Faster handling of config page, more items published by MQTT, added pin_shutdown.
