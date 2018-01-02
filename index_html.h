@@ -1,6 +1,6 @@
 // index.html file in raw data format for PROGMEM
 //
-#define index_html_version 170703
+#define index_html_version 180102
 const char index_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
@@ -25,9 +25,8 @@ const char index_html[] PROGMEM = R"=====(
    <button class="button" onclick="httpGet('uppreset=1')">NEXT</button>
    <button class="button" onclick="httpGet('downvolume=2')">VOL-</button>
    <button class="button" onclick="httpGet('upvolume=2')">VOL+</button>
-   <button class="button" onclick="httpGet('mute')">MUTE</button>
-   <button class="button" onclick="httpGet('stop')">STOP</button>
-   <button class="button" onclick="httpGet('resume')">RESUME</button>
+   <button class="button" onclick="httpGet('mute')">(un)MUTE</button>
+   <button class="button" onclick="httpGet('stop')">(un)STOP</button>
    <button class="button" onclick="httpGet('status')">STATUS</button>
    <button class="button" onclick="httpGet('test')">TEST</button>
    <table style="width:500px">

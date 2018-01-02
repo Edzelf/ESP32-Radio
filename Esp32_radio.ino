@@ -105,10 +105,11 @@
 // 13-12-2017, ES: Correction clear LCD.
 // 15-12-2017, ES: Correction defaultprefs.h.
 // 18-12-2017, ES: Stop playing during config.
+// 02-01-2018, ES: Stop/resume is same command.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 18 Dec 2017 10:15:00 GMT"
+#define VERSION "Tue, 02 Jan 2018 08:50:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -177,7 +178,6 @@
 //**************************************************************************************************
 void        displaytime ( const char* str, uint16_t color = WHITE ) ;
 void        showstreamtitle ( const char* ml, bool full = false ) ;
-//inline void handlebyte ( uint8_t b, bool force = false ) ;
 void        handlebyte_ch ( uint8_t b ) ;
 void        handleFSf ( const String& pagename ) ;
 void        handleCmd()  ;
@@ -653,20 +653,22 @@ class VS1053
     // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
     VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t _shutdown_pin ) ;
     void     begin() ;                                   // Begin operation.  Sets pins correctly,
-    // and prepares SPI bus.
+                                                         // and prepares SPI bus.
     void     startSong() ;                               // Prepare to start playing. Call this each
-    // time a new song starts.
+                                                         // time a new song starts.
     inline bool playChunk ( uint8_t* data,               // Play a chunk of data.  Copies the data to
                             size_t len ) ;               // the chip.  Blocks until complete.
-    // Returns true if more data can be added to fifo
+                                                         // Returns true if more data can be added to fifo
     void     stopSong() ;                                // Finish playing a song. Call this after
-    // the last playChunk call.
+                                                         // the last playChunk call.
     void     setVolume ( uint8_t vol ) ;                 // Set the player volume.Level from 0-100,
-    // higher is louder.
+                                                         // higher is louder.
     void     setTone ( uint8_t* rtone ) ;                // Set the player baas/treble, 4 nibbles for
-    // treble gain/freq and bass gain/freq
-    uint8_t  getVolume() ;                               // Get the current volume setting.
-    // higher is louder.
+                                                         // treble gain/freq and bass gain/freq
+    inline uint8_t  getVolume() const                    // Get the current volume setting.
+    {                                                    // higher is louder.
+      return curvol ;
+    }
     void     printDetails ( const char *header ) ;       // Print configuration details to serial output.
     void     softReset() ;                               // Do a soft reset
     bool     testComm ( const char *header ) ;           // Test communication with module
@@ -877,11 +879,6 @@ void VS1053::setTone ( uint8_t *rtone )                 // Set bass/treble (4 ni
     value = ( value << 4 ) | rtone[i] ;                 // Shift next nibble in
   }
   write_register ( SCI_BASS, value ) ;                  // Volume left and right
-}
-
-uint8_t VS1053::getVolume()                             // Get the currenet volume setting.
-{
-  return curvol ;
 }
 
 void VS1053::startSong()
@@ -2886,7 +2883,7 @@ void setup()
   // Version tests for some vital include files
   if ( about_html_version   < 170626 ) dbgprint ( wvn, "about" ) ;
   if ( config_html_version  < 171207 ) dbgprint ( wvn, "config" ) ;
-  if ( index_html_version   < 170703 ) dbgprint ( wvn, "index" ) ;
+  if ( index_html_version   < 180102 ) dbgprint ( wvn, "index" ) ;
   if ( mp3play_html_version < 170626 ) dbgprint ( wvn, "mp3play" ) ;
   if ( defaultprefs_version < 171215 ) dbgprint ( wvn, "defaultprefs" ) ;
   // Print some memory and sketch info
@@ -4564,11 +4561,15 @@ const char* analyzeCmd ( const char* par, const char* val )
     oldvol = vs1053player->getVolume() ;              // Get current volume
     if ( relative )                                   // + relative setting?
     {
-      ini_block.reqvol = oldvol + ivalue ;            // Up by 0.5 or more dB
+      ini_block.reqvol = oldvol + ivalue ;            // Up/down by 0.5 or more dB
     }
     else
     {
       ini_block.reqvol = ivalue ;                     // Absolue setting
+    }
+    if ( ini_block.reqvol > 127 )                     // Wrapped around?
+    {
+      ini_block.reqvol = 0 ;                          // Yes, keep at zero
     }
     if ( ini_block.reqvol > 100 )
     {
@@ -4602,7 +4603,7 @@ const char* analyzeCmd ( const char* par, const char* val )
     sprintf ( reply, "Preset is now %d",              // Reply new preset
               ini_block.newpreset ) ;
   }
-  else if ( argument == "stop" )                      // Stop requested?
+  else if ( argument == "stop" )                      // (un)Stop requested?
   {
     if ( datamode & ( HEADER | DATA | METADATA | PLAYLISTINIT |
                       PLAYLISTHEADER | PLAYLISTDATA ) )
@@ -4612,14 +4613,7 @@ const char* analyzeCmd ( const char* par, const char* val )
     }
     else
     {
-      strcpy ( reply, "Command not accepted!" ) ;     // Error reply
-    }
-  }
-  else if ( argument == "resume" )                    // Request to resume?
-  {
-    if ( datamode == STOPPED )                        // Yes, are we stopped?
-    {
-      hostreq = true ;                                // Yes, request restart
+      hostreq = true ;                                // Request UNSTOP
     }
   }
   else if ( ( value.length() > 0 ) &&
@@ -4791,7 +4785,7 @@ void displayvolume()
   {
     static uint8_t oldvol = 0 ;                         // Previous volume
     uint8_t        newvol ;                             // Current setting
-    uint8_t pos ;                                       // Positon of volume indicator
+    uint8_t        pos ;                                // Positon of volume indicator
 
     newvol = vs1053player->getVolume() ;                // Get current volume setting
     if ( newvol != oldvol )                             // Volume changed?
