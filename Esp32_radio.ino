@@ -106,10 +106,11 @@
 // 15-12-2017, ES: Correction defaultprefs.h.
 // 18-12-2017, ES: Stop playing during config.
 // 02-01-2018, ES: Stop/resume is same command.
+// 22-01-2018, ES: Read ADC (GPIO36) and display as a battery capacity percentage.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 02 Jan 2018 08:50:00 GMT"
+#define VERSION "Mon, 22 Jan 2018 14:40:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -126,6 +127,7 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include <esp_partition.h>
+#include <driver/adc.h>
 
 // Color definitions for the TFT screen (if used)
 // TFT has bits 6 bits (0..5) for RED, 6 bits (6..11) for GREEN and 4 bits (12..15) for BLUE.
@@ -137,7 +139,7 @@
 #define MAGENTA RED | BLUE
 #define YELLOW  RED | GREEN
 // Digital I/O used
-// Default pins for VS1053 module.  Better specefy these in the preferences
+// Default pins for VS1053 module.  Better specify these in the preferences
 #if defined ( ARDUINO_FEATHER_ESP32 )
 #define VS1053_CS     32
 #define VS1053_DCS    33
@@ -242,13 +244,15 @@ struct ini_struct
   int8_t         spi_sck_pin ;                        // GPIO connected to SPI SCK pin
   int8_t         spi_miso_pin ;                       // GPIO connected to SPI MISO pin
   int8_t         spi_mosi_pin ;                       // GPIO connected to SPI MOSI pin
+  uint16_t       bat0 ;                               // ADC value for 0 percent battery charge
+  uint16_t       bat100 ;                             // ADC value for 100 percent battery charge
 } ;
 
 struct WifiInfo_t                                     // For list with WiFi info
 {
-    uint8_t inx ;                                     // Index as in "wifi_00"
-    char * ssid ;                                     // SSID for an entry
-    char * passphrase ;                               // Passphrase for an entry
+  uint8_t inx ;                                       // Index as in "wifi_00"
+  char * ssid ;                                       // SSID for an entry
+  char * passphrase ;                                 // Passphrase for an entry
 } ;
 
 struct nvs_entry
@@ -259,14 +263,14 @@ struct nvs_entry
   uint8_t  Rvs ;                                      // Reserved, should be 0xFF
   uint32_t CRC ;                                      // CRC
   char     Key[16] ;                                  // Key in Ascii
-  uint64_t Data ;                                     // Data in entry 
+  uint64_t Data ;                                     // Data in entry
 } ;
 
 struct nvs_page                                       // For nvs entries
-{                                                     // 1 page is 4096 bytes
+{ // 1 page is 4096 bytes
   uint32_t  State ;
   uint32_t  Seqnr ;
-  
+
   uint32_t  Unused[5] ;
   uint32_t  CRC ;
   uint8_t   Bitmap[32] ;
@@ -352,6 +356,7 @@ bool              SD_okay = false ;                         // True if SD card i
 String            SD_nodelist ;                             // Nodes of mp3-files on SD
 int               SD_nodecount = 0 ;                        // Number of nodes in SD_nodelist
 String            SD_currentnode = "" ;                     // Node ID of song currently playing ("0" if random)
+uint16_t          adcval ;                                  // ADC value (battery voltage)
 std::vector<WifiInfo_t> wifilist ;                          // List with wifi_xx info
 // nvs stuff
 nvs_page                nvsbuf ;                            // Space for 1 page of NVS info
@@ -446,17 +451,17 @@ struct touchpin_struct                                      // For programmable 
 } ;
 touchpin_struct   touchpin[] =                              // Touch pins and programmed function
 {
-  {   4, false, false, "", false, 0 },                      // TOUCH0
-//{   0, true,  false, "", false, 0 },                      // TOUCH1, reserved for BOOT button
-  {   2, false, false, "", false, 0 },                      // TOUCH2
-  {  15, false, false, "", false, 0 },                      // TOUCH3
-  {  13, false, false, "", false, 0 },                      // TOUCH4
-  {  12, false, false, "", false, 0 },                      // TOUCH5
-  {  14, false, false, "", false, 0 },                      // TOUCH6
-  {  27, false, false, "", false, 0 },                      // TOUCH7
-  {  33, false, false, "", false, 0 },                      // TOUCH8
-  {  32, false, false, "", false, 0 },                      // TOUCH9
-  {  -1, false, false, "", false, 0 }                       // End of table
+    {   4, false, false, "", false, 0 },                    // TOUCH0
+  //{   0, true,  false, "", false, 0 },                    // TOUCH1, reserved for BOOT button
+    {   2, false, false, "", false, 0 },                    // TOUCH2
+    {  15, false, false, "", false, 0 },                    // TOUCH3
+    {  13, false, false, "", false, 0 },                    // TOUCH4
+    {  12, false, false, "", false, 0 },                    // TOUCH5
+    {  14, false, false, "", false, 0 },                    // TOUCH6
+    {  27, false, false, "", false, 0 },                    // TOUCH7
+    {  33, false, false, "", false, 0 },                    // TOUCH8
+    {  32, false, false, "", false, 0 },                    // TOUCH9
+    {  -1, false, false, "", false, 0 }                     // End of table
 } ;
 
 
@@ -480,7 +485,8 @@ touchpin_struct   touchpin[] =                              // Touch pins and pr
 //**************************************************************************************************
 // ID's for the items to publish to MQTT.  Is index in amqttpub[]
 enum { MQTT_IP,     MQTT_ICYNAME, MQTT_STREAMTITLE, MQTT_NOWPLAYING,
-       MQTT_PRESET, MQTT_VOLUME, MQTT_PLAYING } ;
+       MQTT_PRESET, MQTT_VOLUME, MQTT_PLAYING
+     } ;
 enum { MQSTRING, MQINT8 } ;                                      // Type of variable to publish
 
 class mqttpubc                                                   // For MQTT publishing
@@ -536,7 +542,7 @@ void mqttpubc::publishtopic()
   int         i = 0 ;                                         // Loop control
   char        topic[40] ;                                     // Topic to send
   const char* payload ;                                       // Points to payload
-  char        intvar[10] ;                                    // Space for integer parameter 
+  char        intvar[10] ;                                    // Space for integer parameter
   while ( amqttpub[i].topic )
   {
     if ( amqttpub[i].topictrigger )                           // Topic ready to send?
@@ -632,7 +638,7 @@ class VS1053
     inline void data_mode_on() const
     {
       SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
-    //digitalWrite ( cs_pin, HIGH ) ;             // Bring slave in data mode
+      //digitalWrite ( cs_pin, HIGH ) ;             // Bring slave in data mode
       digitalWrite ( dcs_pin, LOW ) ;
     }
 
@@ -653,20 +659,20 @@ class VS1053
     // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
     VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t _shutdown_pin ) ;
     void     begin() ;                                   // Begin operation.  Sets pins correctly,
-                                                         // and prepares SPI bus.
+    // and prepares SPI bus.
     void     startSong() ;                               // Prepare to start playing. Call this each
-                                                         // time a new song starts.
+    // time a new song starts.
     inline bool playChunk ( uint8_t* data,               // Play a chunk of data.  Copies the data to
                             size_t len ) ;               // the chip.  Blocks until complete.
-                                                         // Returns true if more data can be added to fifo
+    // Returns true if more data can be added to fifo
     void     stopSong() ;                                // Finish playing a song. Call this after
-                                                         // the last playChunk call.
+    // the last playChunk call.
     void     setVolume ( uint8_t vol ) ;                 // Set the player volume.Level from 0-100,
-                                                         // higher is louder.
+    // higher is louder.
     void     setTone ( uint8_t* rtone ) ;                // Set the player baas/treble, 4 nibbles for
-                                                         // treble gain/freq and bass gain/freq
+    // treble gain/freq and bass gain/freq
     inline uint8_t  getVolume() const                    // Get the current volume setting.
-    {                                                    // higher is louder.
+    { // higher is louder.
       return curvol ;
     }
     void     printDetails ( const char *header ) ;       // Print configuration details to serial output.
@@ -777,6 +783,7 @@ bool VS1053::testComm ( const char *header )
   uint16_t  r1, r2, cnt = 0 ;
   uint16_t  delta = 300 ;                               // 3 for fast SPI
 
+  dbgprint ( header ) ;                                 // Show a header
   if ( !digitalRead ( dreq_pin ) )
   {
     dbgprint ( "VS1053 not properly installed!" ) ;
@@ -792,7 +799,6 @@ bool VS1053::testComm ( const char *header )
   {
     delta = 3 ;                                         // Fast SPI, more loops
   }
-  dbgprint ( header ) ;                                 // Show a header
   for ( i = 0 ; ( i < 0xFFFF ) && ( cnt < 20 ) ; i += delta )
   {
     write_register ( SCI_VOL, i ) ;                     // Write data to SCI_VOL
@@ -817,8 +823,8 @@ void VS1053::begin()
   digitalWrite ( cs_pin,    HIGH ) ;
   if ( shutdown_pin >= 0 )                              // Shutdown in use?
   {
-     pinMode ( shutdown_pin,   OUTPUT ) ;
-     digitalWrite ( shutdown_pin, HIGH ) ;              // Shut down audio output
+    pinMode ( shutdown_pin,   OUTPUT ) ;
+    digitalWrite ( shutdown_pin, HIGH ) ;              // Shut down audio output
   }
   delay ( 100 ) ;
   // Init SPI in slow mode ( 0.2 MHz )
@@ -828,28 +834,30 @@ void VS1053::begin()
   //printDetails ( "Right after reset/startup" ) ;
   delay ( 20 ) ;
   //printDetails ( "20 msec after reset" ) ;
-  testComm ( "Slow SPI, Testing VS1053 read/write registers..." ) ;
-  // Most VS1053 modules will start up in midi mode.  The result is that there is no audio
-  // when playing MP3.  You can modify the board, but there is a more elegant way:
-  wram_write ( 0xC017, 3 ) ;                            // GPIO DDR = 3
-  wram_write ( 0xC019, 0 ) ;                            // GPIO ODATA = 0
-  delay ( 100 ) ;
-  //printDetails ( "After test loop" ) ;
-  softReset() ;                                         // Do a soft reset
-  // Switch on the analog parts
-  write_register ( SCI_AUDATA, 44100 + 1 ) ;            // 44.1kHz + stereo
-  // The next clocksetting allows SPI clocking at 5 MHz, 4 MHz is safe then.
-  write_register ( SCI_CLOCKF, 6 << 12 ) ;              // Normal clock settings multiplyer 3.0 = 12.2 MHz
-  //SPI Clock to 4 MHz. Now you can set high speed SPI clock.
-  VS1053_SPI = SPISettings ( 5000000, MSBFIRST, SPI_MODE0 ) ;
-  write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_LINE1 ) ) ;
-  testComm ( "Fast SPI, Testing VS1053 read/write registers again..." ) ;
-  delay ( 10 ) ;
-  await_data_request() ;
-  endFillByte = wram_read ( 0x1E06 ) & 0xFF ;
-  dbgprint ( "endFillByte is %X", endFillByte ) ;
-  //printDetails ( "After last clocksetting" ) ;
-  delay ( 100 ) ;
+  if ( testComm ( "Slow SPI, Testing VS1053 read/write registers..." ) )
+  {
+    // Most VS1053 modules will start up in midi mode.  The result is that there is no audio
+    // when playing MP3.  You can modify the board, but there is a more elegant way:
+    wram_write ( 0xC017, 3 ) ;                            // GPIO DDR = 3
+    wram_write ( 0xC019, 0 ) ;                            // GPIO ODATA = 0
+    delay ( 100 ) ;
+    //printDetails ( "After test loop" ) ;
+    softReset() ;                                         // Do a soft reset
+    // Switch on the analog parts
+    write_register ( SCI_AUDATA, 44100 + 1 ) ;            // 44.1kHz + stereo
+    // The next clocksetting allows SPI clocking at 5 MHz, 4 MHz is safe then.
+    write_register ( SCI_CLOCKF, 6 << 12 ) ;              // Normal clock settings multiplyer 3.0 = 12.2 MHz
+    //SPI Clock to 4 MHz. Now you can set high speed SPI clock.
+    VS1053_SPI = SPISettings ( 5000000, MSBFIRST, SPI_MODE0 ) ;
+    write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_LINE1 ) ) ;
+    testComm ( "Fast SPI, Testing VS1053 read/write registers again..." ) ;
+    delay ( 10 ) ;
+    await_data_request() ;
+    endFillByte = wram_read ( 0x1E06 ) & 0xFF ;
+    dbgprint ( "endFillByte is %X", endFillByte ) ;
+    //printDetails ( "After last clocksetting" ) ;
+    delay ( 100 ) ;
+  }
 }
 
 void VS1053::setVolume ( uint8_t vol )
@@ -886,9 +894,9 @@ void VS1053::startSong()
   sdi_send_fillers ( 10 ) ;
   if ( shutdown_pin >= 0 )                              // Shutdown in use?
   {
-     digitalWrite ( shutdown_pin, LOW ) ;               // Enable audio output
+    digitalWrite ( shutdown_pin, LOW ) ;               // Enable audio output
   }
-  
+
 }
 
 bool VS1053::playChunk ( uint8_t* data, size_t len )
@@ -904,7 +912,7 @@ void VS1053::stopSong()
   sdi_send_fillers ( 2052 ) ;
   if ( shutdown_pin >= 0 )                              // Shutdown in use?
   {
-     digitalWrite ( shutdown_pin, HIGH ) ;              // Disable audio output
+    digitalWrite ( shutdown_pin, HIGH ) ;              // Disable audio output
   }
   delay ( 10 ) ;
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
@@ -1095,7 +1103,7 @@ void claimSPI ( const char* p )
 //**************************************************************************************************
 void releaseSPI()
 {
-    xSemaphoreGive ( SPIsem ) ;                             // Release SPI bus
+  xSemaphoreGive ( SPIsem ) ;                             // Release SPI bus
 }
 
 
@@ -1656,7 +1664,7 @@ void IRAM_ATTR timer100()
   if ( ++enc_inactivity == 36000 )                // Count inactivity time
   {
     enc_inactivity = 1000 ;                       // Prevent wrap
-  }                         
+  }
   // Now detection of single/double click of rotary encoder switch
   if ( clickcount )                               // Any click?
   {
@@ -1686,6 +1694,9 @@ void IRAM_ATTR timer100()
       eqcount = 0 ;                               // Not stable, reset count
     }
   }
+  // Read ADC and do some filtering
+  adcval = ( 15 * adcval +
+             adc1_get_raw ( ADC1_CHANNEL_0 ) ) / 16 ;
 }
 
 
@@ -1799,26 +1810,26 @@ void IRAM_ATTR isr_enc_turn()
   uint8_t             act_state ;                             // The current state of the 2 PINs
   uint8_t             inx ;                                   // Index in enc_state
   static const int8_t enc_states [] =
-                                      { 0,                    // 00 -> 00
-                                       -1,                    // 00 -> 01
-                                        1,                    // 00 -> 10
-                                        0,                    // 00 -> 11
-                                        1,                    // 01 -> 00
-                                        0,                    // 01 -> 01
-                                        0,                    // 01 -> 10
-                                       -1,                    // 01 -> 11
-                                       -1,                    // 10 -> 00
-                                        0,                    // 10 -> 01
-                                        0,                    // 10 -> 10
-                                        1,                    // 10 -> 11
-                                        0,                    // 11 -> 00
-                                        1,                    // 11 -> 01
-                                       -1,                    // 11 -> 10
-                                        0                     // 11 -> 11
-                                      } ;
+  { 0,                    // 00 -> 00
+    -1,                    // 00 -> 01
+    1,                    // 00 -> 10
+    0,                    // 00 -> 11
+    1,                    // 01 -> 00
+    0,                    // 01 -> 01
+    0,                    // 01 -> 10
+    -1,                    // 01 -> 11
+    -1,                    // 10 -> 00
+    0,                    // 10 -> 01
+    0,                    // 10 -> 10
+    1,                    // 10 -> 11
+    0,                    // 11 -> 00
+    1,                    // 11 -> 01
+    -1,                    // 11 -> 10
+    0                     // 11 -> 11
+  } ;
   // Read current state of CLK, DT pin. Result is a 2 bit binairy number: 00, 01, 10 or 11.
   act_state = ( digitalRead ( ini_block.enc_clk_pin ) << 1 ) +
-              digitalRead ( ini_block.enc_dt_pin ) ;            
+              digitalRead ( ini_block.enc_dt_pin ) ;
   inx = ( old_state << 2 ) + act_state ;                        // Form index in enc_states
   rotationcount += enc_states[inx] ;                            // Get delta: 0, +1 or -1
   old_state = act_state ;                                       // Remember current status
@@ -1917,7 +1928,7 @@ bool connecttohost()
 
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
-  tftset ( 0,"ESP32-Radio" ) ;                      // Set screen segment text top line
+  tftset ( 0, "ESP32-Radio" ) ;                     // Set screen segment text top line
   displaytime ( "" ) ;                              // Clear time on TFT screen
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
@@ -2230,23 +2241,24 @@ void readIOprefs()
   {
     const char* gname ;                                   // Name in preferences
     int8_t*     gnr ;                                     // GPIO pin number
+    int8_t      pdefault ;                                // Default pin
   };
   struct iosetting klist[] = {                            // List of I/O related keys
-    { "pin_ir",       &ini_block.ir_pin          },
-    { "pin_enc_clk",  &ini_block.enc_clk_pin     },
-    { "pin_enc_dt",   &ini_block.enc_dt_pin      },
-    { "pin_enc_sw",   &ini_block.enc_sw_pin      },
-    { "pin_tft_cs",   &ini_block.tft_cs_pin      },
-    { "pin_tft_dc",   &ini_block.tft_dc_pin      },
-    { "pin_sd_cs",    &ini_block.sd_cs_pin       },
-    { "pin_vs_cs",    &ini_block.vs_cs_pin       },
-    { "pin_vs_dcs",   &ini_block.vs_dcs_pin      },
-    { "pin_vs_dreq",  &ini_block.vs_dreq_pin     },
-    { "pin_shutdown", &ini_block.vs_shutdown_pin },
-    { "pin_spi_sck",  &ini_block.spi_sck_pin     },
-    { "pin_spi_miso", &ini_block.spi_miso_pin    },
-    { "pin_spi_mosi", &ini_block.spi_mosi_pin    },
-    { NULL,      NULL                   }    // End of list
+    { "pin_ir",       &ini_block.ir_pin           -1          },
+    { "pin_enc_clk",  &ini_block.enc_clk_pin,     -1          },
+    { "pin_enc_dt",   &ini_block.enc_dt_pin,      -1          },
+    { "pin_enc_sw",   &ini_block.enc_sw_pin,      -1          },
+    { "pin_tft_cs",   &ini_block.tft_cs_pin,      -1          },
+    { "pin_tft_dc",   &ini_block.tft_dc_pin,      -1          },
+    { "pin_sd_cs",    &ini_block.sd_cs_pin,       -1          },
+    { "pin_vs_cs",    &ini_block.vs_cs_pin,       VS1053_CS   },
+    { "pin_vs_dcs",   &ini_block.vs_dcs_pin,      VS1053_DCS  },
+    { "pin_vs_dreq",  &ini_block.vs_dreq_pin,     VS1053_DREQ },
+    { "pin_shutdown", &ini_block.vs_shutdown_pin, -1          },
+    { "pin_spi_sck",  &ini_block.spi_sck_pin,     18          },
+    { "pin_spi_miso", &ini_block.spi_miso_pin,    19          },
+    { "pin_spi_mosi", &ini_block.spi_mosi_pin,    23          },
+    { NULL,           NULL,                       0           }    // End of list
   } ;
   int         i ;                                         // Loop control
   int         count = 0 ;                                 // Number of keys found
@@ -2255,7 +2267,7 @@ void readIOprefs()
 
   for ( i = 0 ; klist[i].gname ; i++ )                    // Loop trough all I/O related keys
   {
-    ival = -1 ;                                           // Assume pin number to be "unused"
+    ival = klist[i].pdefault ;                            // Assume pin number to be the default
     if ( nvssearch ( klist[i].gname ) )                   // Does it exist?
     {
       val = nvsgetstr ( klist[i].gname ) ;                // Read value of key
@@ -2313,12 +2325,12 @@ String readprefs ( bool output )
       if ( ( i > 0 ) &&
            ( *(uint16_t*)key != last2char ) )               // New paragraph?
       {
-        last2char = *(uint16_t*)key ;                       // Yes, save 2 chars for next compare
-        outstr += String ( "#\n" ) ;                        // Add separator
+        outstr += String ( "#\n" ) ;                        // Yes, add separator
       }
+      last2char = *(uint16_t*)key ;                         // Save 2 chars for next compare
       outstr += String ( key ) +                            // Add to outstr
                 String ( " = " ) +
-                val + 
+                val +
                 String ( "\n" ) ;                           // Add newline
     }
     else
@@ -2751,11 +2763,11 @@ uint8_t FindNsID ( const char* ns )
     i = 0 ;
     while ( i < 126 )
     {
-      
-      bm = ( nvsbuf.Bitmap[i/4] >> ( ( i % 4 ) * 2 ) ) ;      // Get bitmap for this entry,
+
+      bm = ( nvsbuf.Bitmap[i / 4] >> ( ( i % 4 ) * 2 ) ) ;    // Get bitmap for this entry,
       bm &= 0x03 ;                                            // 2 bits for one entry
       if ( ( bm == 2 ) &&
-           ( nvsbuf.Entry[i].Ns == 0 ) &&  
+           ( nvsbuf.Entry[i].Ns == 0 ) &&
            ( strcmp ( ns, nvsbuf.Entry[i].Key ) == 0 ) )
       {
         res = nvsbuf.Entry[i].Data & 0xFF ;                   // Return the ID
@@ -2789,16 +2801,16 @@ void bubbleSortKeys ( uint16_t n )
 {
   uint16_t i, j ;                                             // Indexes in nvskeys
   char     tmpstr[16] ;                                       // Temp. storage for a key
-  
-  for ( i = 0 ; i < n-1 ; i++ )                               // Examine all keys
+
+  for ( i = 0 ; i < n - 1 ; i++ )                             // Examine all keys
   {
-    for ( j = 0 ; j < n-i-1 ; j++ )                           // Compare to following keys
+    for ( j = 0 ; j < n - i - 1 ; j++ )                       // Compare to following keys
     {
-      if ( strcmp ( nvskeys[j], nvskeys[j+1] ) > 0 )          // Next key out of order?
+      if ( strcmp ( nvskeys[j], nvskeys[j + 1] ) > 0 )        // Next key out of order?
       {
         strcpy ( tmpstr, nvskeys[j] ) ;                       // Save current key a while
-        strcpy ( nvskeys[j], nvskeys[j+1] ) ;                 // Replace current with next key
-        strcpy ( nvskeys[j+1], tmpstr ) ;                     // Replace next with saved current
+        strcpy ( nvskeys[j], nvskeys[j + 1] ) ;               // Replace current with next key
+        strcpy ( nvskeys[j + 1], tmpstr ) ;                   // Replace next with saved current
       }
     }
   }
@@ -2834,8 +2846,8 @@ void fillkeylist()
     while ( i < 126 )
     {
 
-      
-      bm = ( nvsbuf.Bitmap[i/4] >> ( ( i % 4 ) * 2 ) ) ;        // Get bitmap for this entry, 2 bit for one entry
+
+      bm = ( nvsbuf.Bitmap[i / 4] >> ( ( i % 4 ) * 2 ) ) ;      // Get bitmap for this entry, 2 bit for one entry
       bm &= 0x03 ;
       if ( bm == 2 )                                            // Entry is active?
       {
@@ -2895,8 +2907,8 @@ void setup()
   maintask = xTaskGetCurrentTaskHandle() ;               // My taskhandle
   SPIsem = xSemaphoreCreateMutex(); ;                    // Semaphore for SPI bus
   pi = esp_partition_find ( ESP_PARTITION_TYPE_DATA,     // Get partition iterator for
-      ESP_PARTITION_SUBTYPE_ANY,                         // the NVS partition
-      partname ) ;
+                            ESP_PARTITION_SUBTYPE_ANY,                         // the NVS partition
+                            partname ) ;
   if ( pi )
   {
     nvs = esp_partition_get ( pi ) ;                     // Get partition struct
@@ -2919,12 +2931,8 @@ void setup()
   ini_block.clk_server = "pool.ntp.org" ;                // Default server for NTP
   ini_block.clk_offset = 1 ;                             // Default Amsterdam time zone
   ini_block.clk_dst = 1 ;                                // DST is +1 hour
-  ini_block.spi_sck_pin = 18 ;                           // GPIO connected to SPI SCK pin
-  ini_block.spi_miso_pin = 19 ;                          // GPIO connected to SPI MISO pin
-  ini_block.spi_mosi_pin = 23 ;                          // GPIO connected to SPI MOSI pin
-  ini_block.vs_cs_pin = VS1053_CS ;                      // GPIO connected to CS of VS1053
-  ini_block.vs_dcs_pin = VS1053_DCS ;                    // GPIO connected to DCS of VS1053
-  ini_block.vs_dreq_pin = VS1053_DREQ ;                  // GPIO connected to DREQ of VS1053
+  ini_block.bat0 = 0 ;                                   // Battery ADC levels not yet defined
+  ini_block.bat100 = 0 ;
   readIOprefs() ;                                        // Read pins used for SPI, TFT, VS1053, IR, Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
   {
@@ -3083,6 +3091,8 @@ void setup()
     tft->fillRect ( 0, 8, 160, 118, BLACK ) ;             // Clear most of the screen
   }
   outchunk.datatyp = QDATA ;                              // This chunk dedicated to QDATA
+  adc1_config_width ( ADC_WIDTH_12Bit ) ;
+  adc1_config_channel_atten ( ADC1_CHANNEL_0, ADC_ATTEN_0db ) ;
   dataqueue = xQueueCreate ( QSIZ,                        // Create queue for communication
                              sizeof ( qdata_struct ) ) ;
   xTaskCreatePinnedToCore (
@@ -3151,7 +3161,7 @@ void writeprefs()
   String  inputstr = "" ;                                     // Input regel
   String  key, contents ;                                     // Pair for Preferences entry
   String  dstr ;                                              // Contents for debug
-  
+
   nvsclear() ;                                                // Remove all preferences
   while ( true )
   {
@@ -3557,7 +3567,7 @@ void handleVolPub()
 {
   static uint32_t pubtime = 10000 ;                        // Limit save to once per 10 seconds
   static uint8_t  oldvol = -1 ;                            // For comparison
-  
+
   if ( ( millis() - pubtime ) < 10000 )                    // 10 seconds
   {
     return ;
@@ -3604,7 +3614,7 @@ void chk_enc()
       enc_menu_mode = TRACK ;                                 // Swich to TRACK mode
       dbgprint ( "Encoder mode set to TRACK" ) ;
       tftset ( 3, "Turn to select track\n"                    // Show current option
-                  "Press to confirm" ) ;
+               "Press to confirm" ) ;
       enc_nodeID = selectnextSDnode ( SD_currentnode, +1 ) ;  // Start with next file on SD
       if ( enc_nodeID == "" )                                 // Current track available?
       {
@@ -3624,7 +3634,7 @@ void chk_enc()
     enc_menu_mode = PRESET ;                                  // Swich to PRESET mode
     dbgprint ( "Encoder mode set to PRESET" ) ;
     tftset ( 3, "Turn to select station\n"                    // Show current option
-                "Press to confirm" ) ;
+             "Press to confirm" ) ;
     enc_preset = ini_block.newpreset + 1 ;                    // Start with current preset + 1
   }
   if ( singleclick )
@@ -3639,7 +3649,7 @@ void chk_enc()
         }
         else
         {
-          tftset ( 3, "Mute" ) ; 
+          tftset ( 3, "Mute" ) ;
         }
         muteflag = !muteflag ;                                // Mute/unmute
         enc_menu_mode = SWMUTE ;                              // Will go back to VOLUME after timeout
@@ -3951,11 +3961,14 @@ void loop()
   handleIpPub() ;                                           // See if time to publish IP
   handleVolPub() ;                                          // See if time to publish volume
   chk_enc() ;                                               // Check rotary encoder functions
-  if ( NetworkFound && time_req )                           // Time to refresh timetxt?
+  if ( time_req )
   {
     time_req = false ;                                      // Clear request
-    gettime() ;                                             // Get the curret time
-    queuefunc ( QTIME ) ;                                   // Queue a request to show the time
+    if ( NetworkFound  )                                    // Time to refresh timetxt?
+    {
+      gettime() ;                                           // Get the curret time
+      queuefunc ( QTIME ) ;                                 // Queue a request to show the time
+    }
   }
 }
 
@@ -4220,7 +4233,7 @@ void handlebyte_ch ( uint8_t b )
       metalinebfx = 0 ;                                // Ready for next line
       if ( LFcount == 2 )
       {
-        dbgprint ( "Switch to PLAYLISTDATA, "          // For debug 
+        dbgprint ( "Switch to PLAYLISTDATA, "          // For debug
                    "search for entry %d",
                    playlist_num ) ;
         datamode = PLAYLISTDATA ;                      // Expecting data now
@@ -4505,6 +4518,8 @@ const char* analyzeCmd ( const char* str )
 //   test                                   // For test purposes                                   *
 //   debug      = 0 or 1                    // Switch debugging on or off                          *
 //   reset                                  // Restart the ESP32                                   *
+//   bat0       = 2318                      // ADC value for an empty battery                      *
+//   bat100     = 2916                      // ADC value for a fully charged battery               *
 //  Commands marked with "*)" are sensible during initialization only                              *
 //**************************************************************************************************
 const char* analyzeCmd ( const char* par, const char* val )
@@ -4584,10 +4599,10 @@ const char* analyzeCmd ( const char* par, const char* val )
     muteflag = !muteflag ;                            // Request volume to zero/normal
   }
   else if ( argument.indexOf ( "ir_" ) >= 0 )         // Ir setting?
-  {                                                   // Do not handle here
+  { // Do not handle here
   }
   else if ( argument.indexOf ( "preset_" ) >= 0 )     // Enumerated preset?
-  {                                                   // Do not handle here
+  { // Do not handle here
   }
   else if ( argument.indexOf ( "preset" ) >= 0 )      // (UP/DOWN)Preset station?
   {
@@ -4674,6 +4689,7 @@ const char* analyzeCmd ( const char* par, const char* val )
               mbitrate ) ;
     dbgprint ( "Stack CPU0 is %d", uxTaskGetStackHighWaterMark ( xplaytask ) ) ;
     dbgprint ( "Stack CPU1 is %d", uxTaskGetStackHighWaterMark ( maintask ) ) ;
+    dbgprint ( "ADC reading is %d", adcval ) ;
   }
   // Commands for bass/treble control
   else if ( argument.startsWith ( "tone" ) )          // Tone command
@@ -4745,6 +4761,17 @@ const char* analyzeCmd ( const char* par, const char* val )
       ini_block.clk_dst = ivalue ;                    // Yes, set DST offset
     }
   }
+  else if ( argument.startsWith ( "bat" ) )           // Battery ADC value?
+  {
+    if ( argument.indexOf ( "100" ) == 3 )            // 100 percent value?
+    {
+      ini_block.bat100 = ivalue ;                     // Yes, set it
+    }
+    else if ( argument.indexOf ( "0" ) == 3 )         // 0 percent value?
+    {
+      ini_block.bat0 = ivalue ;                       // Yes, set it
+    }
+  }
   else
   {
     sprintf ( reply, "%s called with illegal parameter: %s",
@@ -4773,6 +4800,41 @@ String httpheader ( String contentstype )
 //**************************************************************************************************
 //* Function that are called from playtask.                                                        *
 //**************************************************************************************************
+
+//**************************************************************************************************
+//                                      D I S P L A Y B A T T E R Y                                *
+//**************************************************************************************************
+// Show the current battery charge level on the screen.                                            *
+// It will overwrite the top divider.                                                              *
+// No action if bat0/bat100 not defined in the preferences.                                        *
+//**************************************************************************************************
+void displaybattery()
+{
+  if ( tft )
+  {
+    if ( ini_block.bat0 < ini_block.bat100 )              // Levels set in preferences?
+    {
+      static uint16_t oldpos = 0 ;                        // Previous charge level
+      uint16_t        ypos ;                              // Position on screen
+      uint16_t        v ;                                 // Constarinted ADC value
+      uint16_t        newpos ;                            // Current setting
+
+      v = constrain ( adcval, ini_block.bat0,             // Prevent out of scale
+                      ini_block.bat100 ) ;
+      newpos = map ( v, ini_block.bat0,                   // Compute length of green bar
+                     ini_block.bat100, 0, 160 ) ;
+      if ( newpos != oldpos )                             // Value changed?
+      {
+        oldpos = newpos ;                                 // Remember for next compare
+        ypos = tftdata[1].y - 5 ;                         // Just before 1st divider
+        tft->fillRect ( 0, ypos, newpos, 2, GREEN ) ;     // Paint green part
+        tft->fillRect ( newpos, ypos,
+                        160 - newpos, 2, RED ) ;          // Paint red part
+      }
+    }
+  }
+}
+
 
 //**************************************************************************************************
 //                                      D I S P L A Y V O L U M E                                  *
@@ -4858,7 +4920,7 @@ void displayinfo ( uint16_t inx )
   {
     uint16_t len = p->str.length() + 1 ;                 // Required length of buffer
     char     buf [ len ] ;                               // Need some buffer space
-    
+
     p->str.toCharArray ( buf, len ) ;                    // Make a local copy of the string
     utf8ascii ( buf ) ;                                  // Convert possible UTF8
     tft->fillRect ( 0, p->y, width, p->height, BLACK ) ; // Clear the space for new info
@@ -5024,6 +5086,7 @@ void playtask ( void * parameter )
           claimSPI ( "time" ) ;                                     // Claim SPI bus
           displaytime ( timetxt ) ;                                 // Write to TFT screen
           displayvolume() ;                                         // Show volume on display
+          displaybattery() ;                                        // Show battery charge on display
           releaseSPI() ;                                            // Release SPI bus
           break ;
         default:
