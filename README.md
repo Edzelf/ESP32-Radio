@@ -29,10 +29,12 @@ Features:
 - Configuration also possible if no WiFi connection can be established.
 - Can play iHeartRadio stations.
 - Displays time of day on TFT.
+- Optional display remaining battery capacity on screen.
 
 See documentation in doc/pdf-file.
 
 Last changes:
+- 22-jan-2018, Added remaining battery capacity, default I/O pins.
 - 02-jan-2018, Stop/resume is one command now.
 - 15-dec-2017, Correction defaultprefs.h.
 - 13-dec-2017, Correction LCD display.
