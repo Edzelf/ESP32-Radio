@@ -107,10 +107,11 @@
 // 18-12-2017, ES: Stop playing during config.
 // 02-01-2018, ES: Stop/resume is same command.
 // 22-01-2018, ES: Read ADC (GPIO36) and display as a battery capacity percentage.
+// 13-02-2018, ES: Stop timer during NVS write.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 22 Jan 2018 14:40:00 GMT"
+#define VERSION "Tue, 13 Feb 2018 13:25:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -2593,6 +2594,7 @@ void  mk_lsan()
   int         inx ;                                      // Place of "/"
   WifiInfo_t  winfo ;                                    // Element to store in list
 
+  dbgprint ( "Create list with acceptable WiFi networks" ) ;
   for ( i = 0 ; i < 100 ; i++ )                          // Examine wifi_00 .. wifi_99
   {
     sprintf ( key, "wifi_%02d", i ) ;                    // Form key in preferences
@@ -2615,6 +2617,7 @@ void  mk_lsan()
       }
     }
   }
+  dbgprint ( "mk_lsan end" ) ; ////
 }
 
 
@@ -3162,6 +3165,7 @@ void writeprefs()
   String  key, contents ;                                     // Pair for Preferences entry
   String  dstr ;                                              // Contents for debug
 
+  timerAlarmDisable ( timer ) ;                               // Disable the timer
   nvsclear() ;                                                // Remove all preferences
   while ( true )
   {
@@ -3219,6 +3223,7 @@ void writeprefs()
       }
     }
   }
+  timerAlarmEnable ( timer ) ;                                // Enable the timer
   fillkeylist() ;                                             // Update list with keys
 }
 
