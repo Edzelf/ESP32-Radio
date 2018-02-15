@@ -34,6 +34,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 15-feb-2018, Correction writing wifi credentials to NVS.
 - 13-feb-2018, Disable clock during write-back of preferences.
 - 22-jan-2018, Added remaining battery capacity, default I/O pins.
 - 02-jan-2018, Stop/resume is one command now.
