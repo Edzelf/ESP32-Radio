@@ -108,10 +108,11 @@
 // 02-01-2018, ES: Stop/resume is same command.
 // 22-01-2018, ES: Read ADC (GPIO36) and display as a battery capacity percentage.
 // 13-02-2018, ES: Stop timer during NVS write.
+// 15-02-2018, ES: Correction writing wifi credentials in NVS.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 13 Feb 2018 13:25:00 GMT"
+#define VERSION "Thu, 15 Feb 2018 16:04:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -2313,8 +2314,12 @@ String readprefs ( bool output )
     if ( strstr ( key, "wifi_"  ) )                         // Is it a wifi ssid/password?
     {
       winx = atoi ( key + 5 ) ;                             // Get index in wifilist
-      val = String ( wifilist[winx].ssid ) +                // Yes, hide password
-            String ( "/*******" ) ;
+      if ( ( winx < wifilist.size() ) &&                    // Existing wifi spec in wifilist?
+           ( val.indexOf ( wifilist[winx].ssid ) == 0 ) )
+      {     
+        val = String ( wifilist[winx].ssid ) +              // Yes, hide password
+              String ( "/*******" ) ;
+      }
       cmd = String ( "" ) ;                                 // Do not analyze this
     }
     else if ( strstr ( key, "mqttpasswd"  ) )               // Is it a MQTT password?
@@ -2617,7 +2622,7 @@ void  mk_lsan()
       }
     }
   }
-  dbgprint ( "mk_lsan end" ) ; ////
+  dbgprint ( "End adding networks" ) ; ////
 }
 
 
@@ -3158,12 +3163,13 @@ uint8_t rinbyt ( bool forcestart )
 //**************************************************************************************************
 void writeprefs()
 {
-  int     inx ;                                               // Position in inputstr
-  uint8_t winx ;                                              // Index in wifilist
-  char    c ;                                                 // Input character
-  String  inputstr = "" ;                                     // Input regel
-  String  key, contents ;                                     // Pair for Preferences entry
-  String  dstr ;                                              // Contents for debug
+  int        inx ;                                            // Position in inputstr
+  uint8_t    winx ;                                           // Index in wifilist
+  char       c ;                                              // Input character
+  String     inputstr = "" ;                                  // Input regel
+  String     key, contents ;                                  // Pair for Preferences entry
+  String     dstr ;                                           // Contents for debug
+  WifiInfo_t winfo ;                                          // Element to store in list
 
   timerAlarmDisable ( timer ) ;                               // Disable the timer
   nvsclear() ;                                                // Remove all preferences
@@ -3189,16 +3195,19 @@ void writeprefs()
           dstr = contents ;                                   // Copy for debug
           if ( ( key.indexOf ( "wifi_" ) == 0 ) )             // Sensitive info?
           {
+            dbgprint ( "Number of wifi_keys is %d",
+                       wifilist.size() ) ;
             winx = key.substring(5).toInt() ;                 // Get index in wifilist
             if ( ( winx < wifilist.size() ) &&                // Existing wifi spec in wifilist?
+                 ( contents.indexOf ( wifilist[winx].ssid ) == 0 ) &&
                  ( contents.indexOf ( "/****" ) > 0 ) )       // Hidden password?
             {
               contents = String ( wifilist[winx].ssid ) +     // Retrieve ssid and password
                          String ( "/" ) +
                          String ( wifilist[winx].passphrase ) ;
+              dstr = String ( wifilist[winx].ssid ) +
+                     String ( "/*******" ) ;                  // Hide in debug line
             }
-            dstr = String ( wifilist[winx].ssid ) +
-                   String ( "/*******" ) ;                    // Hide in debug line
           }
           if ( ( key.indexOf ( "mqttpasswd" ) == 0 ) )        // Sensitive info?
           {
