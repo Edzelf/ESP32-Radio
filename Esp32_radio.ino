@@ -109,10 +109,11 @@
 // 22-01-2018, ES: Read ADC (GPIO36) and display as a battery capacity percentage.
 // 13-02-2018, ES: Stop timer during NVS write.
 // 15-02-2018, ES: Correction writing wifi credentials in NVS.
+// 03-03-2018, ES: Correction bug IR pinnumber.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Thu, 15 Feb 2018 16:04:00 GMT"
+#define VERSION "Sat, 03 Mar 2018 15:44:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -2246,7 +2247,7 @@ void readIOprefs()
     int8_t      pdefault ;                                // Default pin
   };
   struct iosetting klist[] = {                            // List of I/O related keys
-    { "pin_ir",       &ini_block.ir_pin           -1          },
+    { "pin_ir",       &ini_block.ir_pin,          -1          },
     { "pin_enc_clk",  &ini_block.enc_clk_pin,     -1          },
     { "pin_enc_dt",   &ini_block.enc_dt_pin,      -1          },
     { "pin_enc_sw",   &ini_block.enc_sw_pin,      -1          },
@@ -2266,9 +2267,11 @@ void readIOprefs()
   int         count = 0 ;                                 // Number of keys found
   String      val ;                                       // Contents of preference entry
   int8_t      ival ;                                      // Value converted to integer
+  int8_t*     p ;                                         // Points to variable
 
   for ( i = 0 ; klist[i].gname ; i++ )                    // Loop trough all I/O related keys
   {
+    p = klist[i].gnr ;                                    // Point to target variable
     ival = klist[i].pdefault ;                            // Assume pin number to be the default
     if ( nvssearch ( klist[i].gname ) )                   // Does it exist?
     {
@@ -2280,8 +2283,8 @@ void readIOprefs()
         reservepin ( ival ) ;                             // Set pin to "reserved"
       }
     }
-    *klist[i].gnr = ival ;                                // Set pinnumber in ini_block
-    dbgprint ( "%s pin set to %d",                        // Show result
+    *p = ival ;                                           // Set pinnumber in ini_block
+    dbgprint ( "%s set to %d",                            // Show result
                klist[i].gname,
                ival ) ;
   }
@@ -2965,7 +2968,12 @@ void setup()
                               ini_block.vs_dcs_pin,
                               ini_block.vs_dreq_pin,
                               ini_block.vs_shutdown_pin ) ;
-  pinMode ( ini_block.ir_pin, INPUT ) ;                  // Pin for IR receiver VS1838B
+  if ( ini_block.ir_pin >= 0 )
+  {
+    dbgprint ( "Enable pin %d for IR",
+               ini_block.ir_pin ) ;
+    pinMode ( ini_block.ir_pin, INPUT ) ;                // Pin for IR receiver VS1838B
+  }
   attachInterrupt ( ini_block.ir_pin, isr_IR, CHANGE ) ; // Interrupts will be handle by isr_IR
   if ( ini_block.tft_cs_pin >= 0 )
   {
@@ -3169,7 +3177,6 @@ void writeprefs()
   String     inputstr = "" ;                                  // Input regel
   String     key, contents ;                                  // Pair for Preferences entry
   String     dstr ;                                           // Contents for debug
-  WifiInfo_t winfo ;                                          // Element to store in list
 
   timerAlarmDisable ( timer ) ;                               // Disable the timer
   nvsclear() ;                                                // Remove all preferences
@@ -3195,8 +3202,6 @@ void writeprefs()
           dstr = contents ;                                   // Copy for debug
           if ( ( key.indexOf ( "wifi_" ) == 0 ) )             // Sensitive info?
           {
-            dbgprint ( "Number of wifi_keys is %d",
-                       wifilist.size() ) ;
             winx = key.substring(5).toInt() ;                 // Get index in wifilist
             if ( ( winx < wifilist.size() ) &&                // Existing wifi spec in wifilist?
                  ( contents.indexOf ( wifilist[winx].ssid ) == 0 ) &&
