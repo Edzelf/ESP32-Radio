@@ -110,10 +110,11 @@
 // 13-02-2018, ES: Stop timer during NVS write.
 // 15-02-2018, ES: Correction writing wifi credentials in NVS.
 // 03-03-2018, ES: Correction bug IR pinnumber.
+// 05-03-2018, ES: Improved rotary encoder interface.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Sat, 03 Mar 2018 15:44:00 GMT"
+#define VERSION "Mon, 05 Mar 2018 10:52:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -378,7 +379,7 @@ bool              singleclick = false ;                     // True if single cl
 bool              doubleclick = false ;                     // True if double click detected
 bool              tripleclick = false ;                     // True if triple click detected
 bool              longclick = false ;                       // True if longclick detected
-enum enc_menu_t { VOLUME, PRESET, TRACK, SWMUTE } ;         // State for rotary encoder menu
+enum enc_menu_t { VOLUME, PRESET, TRACK } ;                 // State for rotary encoder menu
 enc_menu_t        enc_menu_mode = VOLUME ;                  // Default is VOLUME mode
 // Data to display.  There are TFTSECS sections
 bool              tft_update_req ;                          // Global update request
@@ -403,43 +404,43 @@ struct progpin_struct                                       // For programmable 
 
 progpin_struct   progpin[] =                                // Input pins and programmed function
 {
-    {  0, false, false,  "", false },
+  {  0, false, false,  "", false },
   //{  1, true,  false,  "", false },                       // Reserved for TX Serial output
-    {  2, false, false,  "", false },
+  {  2, false, false,  "", false },
   //{  3, true,  false,  "", false },                       // Reserved for RX Serial input
-    {  4, false, false,  "", false },
-    {  5, false, false,  "", false },
+  {  4, false, false,  "", false },
+  {  5, false, false,  "", false },
   //{  6, true,  false,  "", false },                       // Reserved for FLASH SCK
   //{  7, true,  false,  "", false },                       // Reserved for FLASH D0
   //{  8, true,  false,  "", false },                       // Reserved for FLASH D1
   //{  9, true,  false,  "", false },                       // Reserved for FLASH D2
   //{ 10, true,  false,  "", false },                       // Reserved for FLASH D3
   //{ 11, true,  false,  "", false },                       // Reserved for FLASH CMD
-    { 12, false, false,  "", false },
-    { 13, false, false,  "", false },
-    { 14, false, false,  "", false },
-    { 15, false, false,  "", false },
-    { 16, false, false,  "", false },
-    { 17, false, false,  "", false },
-    { 18, false, false,  "", false },                       // Default for SPI CLK
-    { 19, false, false,  "", false },                       // Default for SPI MISO
+  { 12, false, false,  "", false },
+  { 13, false, false,  "", false },
+  { 14, false, false,  "", false },
+  { 15, false, false,  "", false },
+  { 16, false, false,  "", false },
+  { 17, false, false,  "", false },
+  { 18, false, false,  "", false },                       // Default for SPI CLK
+  { 19, false, false,  "", false },                       // Default for SPI MISO
   //{ 20, true,  false,  "", false },                       // Not exposed on DEV board
-    { 21, false, false,  "", false },                       // Also Wire SDA
-    { 22, false, false,  "", false },                       // Also Wire SCL
-    { 23, false, false,  "", false },                       // Default for SPI MOSI
+  { 21, false, false,  "", false },                       // Also Wire SDA
+  { 22, false, false,  "", false },                       // Also Wire SCL
+  { 23, false, false,  "", false },                       // Default for SPI MOSI
   //{ 24, true,  false,  "", false },                       // Not exposed on DEV board
-    { 25, false, false,  "", false },
-    { 26, false, false,  "", false },
-    { 27, false, false,  "", false },
+  { 25, false, false,  "", false },
+  { 26, false, false,  "", false },
+  { 27, false, false,  "", false },
   //{ 28, true,  false,  "", false },                       // Not exposed on DEV board
   //{ 29, true,  false,  "", false },                       // Not exposed on DEV board
   //{ 30, true,  false,  "", false },                       // Not exposed on DEV board
   //{ 31, true,  false,  "", false },                       // Not exposed on DEV board
-    { 32, false, false,  "", false },
-    { 33, false, false,  "", false },
-    { 34, false, false,  "", false },                       // Note, no internal pull-up
-    { 35, false, false,  "", false },                       // Note, no internal pull-up
-    { -1, false, false,  "", false }                        // End of list
+  { 32, false, false,  "", false },
+  { 33, false, false,  "", false },
+  { 34, false, false,  "", false },                       // Note, no internal pull-up
+  { 35, false, false,  "", false },                       // Note, no internal pull-up
+  { -1, false, false,  "", false }                        // End of list
 } ;
 
 struct touchpin_struct                                      // For programmable input pins
@@ -454,17 +455,17 @@ struct touchpin_struct                                      // For programmable 
 } ;
 touchpin_struct   touchpin[] =                              // Touch pins and programmed function
 {
-    {   4, false, false, "", false, 0 },                    // TOUCH0
+  {   4, false, false, "", false, 0 },                    // TOUCH0
   //{   0, true,  false, "", false, 0 },                    // TOUCH1, reserved for BOOT button
-    {   2, false, false, "", false, 0 },                    // TOUCH2
-    {  15, false, false, "", false, 0 },                    // TOUCH3
-    {  13, false, false, "", false, 0 },                    // TOUCH4
-    {  12, false, false, "", false, 0 },                    // TOUCH5
-    {  14, false, false, "", false, 0 },                    // TOUCH6
-    {  27, false, false, "", false, 0 },                    // TOUCH7
-    {  33, false, false, "", false, 0 },                    // TOUCH8
-    {  32, false, false, "", false, 0 },                    // TOUCH9
-    {  -1, false, false, "", false, 0 }                     // End of table
+  {   2, false, false, "", false, 0 },                    // TOUCH2
+  {  15, false, false, "", false, 0 },                    // TOUCH3
+  {  13, false, false, "", false, 0 },                    // TOUCH4
+  {  12, false, false, "", false, 0 },                    // TOUCH5
+  {  14, false, false, "", false, 0 },                    // TOUCH6
+  {  27, false, false, "", false, 0 },                    // TOUCH7
+  {  33, false, false, "", false, 0 },                    // TOUCH8
+  {  32, false, false, "", false, 0 },                    // TOUCH9
+  {  -1, false, false, "", false, 0 }                     // End of table
 } ;
 
 
@@ -1673,7 +1674,7 @@ void IRAM_ATTR timer100()
   {
     if ( oldclickcount == clickcount )            // Yes, stable situation?
     {
-      if ( ++eqcount == 5 )                       // Long time stable?
+      if ( ++eqcount == 4 )                       // Long time stable?
       {
         eqcount = 0 ;
         if ( clickcount > 2 )                     // Triple click?
@@ -1806,35 +1807,47 @@ void IRAM_ATTR isr_enc_switch()
 // 4 bits cover all the possible previous and actual states of the 2 PINs, so this variable is     *
 // the index enc_states[].                                                                         *
 // No debouncing is needed, because only the valid states produce values different from 0.         *
+// Rotation is 4 if position is moved from one fixed position to the next, so it is devided by 4.  *
 //**************************************************************************************************
 void IRAM_ATTR isr_enc_turn()
 {
   static uint8_t      old_state = 0x0001 ;                    // Previous state
   uint8_t             act_state ;                             // The current state of the 2 PINs
   uint8_t             inx ;                                   // Index in enc_state
+  static int16_t      locrotcount = 0 ;                       // Local rotation count
   static const int8_t enc_states [] =
   { 0,                    // 00 -> 00
-    -1,                    // 00 -> 01
+    -1,                   // 00 -> 01
     1,                    // 00 -> 10
     0,                    // 00 -> 11
     1,                    // 01 -> 00
     0,                    // 01 -> 01
     0,                    // 01 -> 10
-    -1,                    // 01 -> 11
-    -1,                    // 10 -> 00
+    -1,                   // 01 -> 11
+    -1,                   // 10 -> 00
     0,                    // 10 -> 01
     0,                    // 10 -> 10
     1,                    // 10 -> 11
     0,                    // 11 -> 00
     1,                    // 11 -> 01
-    -1,                    // 11 -> 10
+    -1,                   // 11 -> 10
     0                     // 11 -> 11
   } ;
   // Read current state of CLK, DT pin. Result is a 2 bit binairy number: 00, 01, 10 or 11.
   act_state = ( digitalRead ( ini_block.enc_clk_pin ) << 1 ) +
               digitalRead ( ini_block.enc_dt_pin ) ;
   inx = ( old_state << 2 ) + act_state ;                        // Form index in enc_states
-  rotationcount += enc_states[inx] ;                            // Get delta: 0, +1 or -1
+  locrotcount += enc_states[inx] ;                              // Get delta: 0, +1 or -1
+  if ( locrotcount == 4 )
+  {
+    rotationcount++ ;                                           // Divide by 4
+    locrotcount = 0 ;
+  }
+  else if ( locrotcount == -4 )
+  {
+    rotationcount-- ;                                           // Divide by 4
+    locrotcount = 0 ;
+  }
   old_state = act_state ;                                       // Remember current status
   enc_inactivity = 0 ;
 }
@@ -2319,7 +2332,7 @@ String readprefs ( bool output )
       winx = atoi ( key + 5 ) ;                             // Get index in wifilist
       if ( ( winx < wifilist.size() ) &&                    // Existing wifi spec in wifilist?
            ( val.indexOf ( wifilist[winx].ssid ) == 0 ) )
-      {     
+      {
         val = String ( wifilist[winx].ssid ) +              // Yes, hide password
               String ( "/*******" ) ;
       }
@@ -3580,7 +3593,7 @@ void handleIpPub()
 //**************************************************************************************************
 //                                      H A N D L E V O L P U B                                    *
 //**************************************************************************************************
-// Handle publish op Volume to MQTT.  This will happen max every 10 seconds.                       *
+// Handle publish of Volume to MQTT.  This will happen max every 10 seconds.                       *
 //**************************************************************************************************
 void handleVolPub()
 {
@@ -3608,13 +3621,11 @@ void handleVolPub()
 //**************************************************************************************************
 void chk_enc()
 {
-  static int16_t waittime = 0 ;                               // Reduce speed for selections
   static int8_t  enc_preset ;                                 // Selected preset
   static String  enc_nodeID ;                                 // Node of selected track
   static String  enc_filename ;                               // Filename of selected track
   String         tmp ;                                        // Temporary string
   int16_t        inx ;                                        // Position in string
-  int16_t        lrc ;                                        // Local rotationcount
 
   if ( enc_menu_mode != VOLUME )                              // In default mode?
   {
@@ -3627,6 +3638,7 @@ void chk_enc()
   }
   if ( tripleclick )                                          // First handle triple click
   {
+    dbgprint ( "Triple click") ;
     tripleclick = false ;
     if ( SD_nodecount )                                       // Tracks on SD?
     {
@@ -3649,6 +3661,7 @@ void chk_enc()
   }
   if ( doubleclick )                                          // Handle the doubleclick
   {
+    dbgprint ( "Double click") ;
     doubleclick = false ;
     enc_menu_mode = PRESET ;                                  // Swich to PRESET mode
     dbgprint ( "Encoder mode set to PRESET" ) ;
@@ -3658,40 +3671,41 @@ void chk_enc()
   }
   if ( singleclick )
   {
+    dbgprint ( "Single click") ;
     singleclick = false ;
     switch ( enc_menu_mode )                                  // Which mode (VOLUME, SWMUTE, PRESET, TRACK)?
     {
       case VOLUME :
         if ( muteflag )
         {
-          tftset ( 3, "Unmute" ) ;                            // Show change
+          tftset ( 3, "" ) ;                                  // Clear text
         }
         else
         {
           tftset ( 3, "Mute" ) ;
         }
         muteflag = !muteflag ;                                // Mute/unmute
-        enc_menu_mode = SWMUTE ;                              // Will go back to VOLUME after timeout
-        break ;
-      case SWMUTE :
         break ;
       case PRESET :
         currentpreset = -1 ;                                  // Make sure current is different
         ini_block.newpreset = enc_preset ;                    // Make a definite choice
         enc_menu_mode = VOLUME ;                              // Back to default mode
+        tftset ( 3, "" ) ;                                    // Clear text
         break ;
       case TRACK :
         host = getSDfilename ( enc_nodeID ) ;                 // Select track as new host
         hostreq = true ;                                      // Request this host
         enc_menu_mode = VOLUME ;                              // Back to default mode
+        tftset ( 3, "" ) ;                                   // Clear text
         break ;
     }
   }
   if ( longclick )                                            // Check for long click
   {
+    dbgprint ( "Long click") ;
     if ( datamode != STOPPED )
     {
-      datamode = STOPREQD ;                                   // Request STOP
+      datamode = STOPREQD ;                                   // Request STOP, do not touch logclick flag
     }
     else
     {
@@ -3709,42 +3723,32 @@ void chk_enc()
   {
     return ;                                                  // No, return
   }
-  if ( rotationcount > 0 )                                    // Make local
-  {
-    lrc = 1 ;                                                 // One step at the time
-  }
-  else
-  {
-    lrc = -1 ;
-  }
-  if ( --waittime <= 0 )                                      // Reduce speed?
-  {
-    waittime = 0 ;                                            // No: end of wait time
-  }
-  else
-  {
-    return ;                                                  // Yes, wait
-  }
+  dbgprint ( "Rotation count %d", rotationcount ) ;
   switch ( enc_menu_mode )                                    // Which mode (VOLUME, PRESET, TRACK)?
   {
     case VOLUME :
-      ini_block.reqvol += ( 2 * lrc ) ;
-      if ( ini_block.reqvol > 127 )                           // Wrapped around?
+      if ( ( ini_block.reqvol + rotationcount ) < 0 )         // Limit volume
       {
         ini_block.reqvol = 0 ;                                // Limit to normal values
       }
-      else if ( ini_block.reqvol > 100 )
+      else if ( ( ini_block.reqvol + rotationcount ) > 100 )
       {
         ini_block.reqvol = 100 ;                              // Limit to normal values
+      }
+      else
+      {
+        ini_block.reqvol += rotationcount ;
       }
       muteflag = false ;                                      // Mute off
       break ;
     case PRESET :
-      waittime = 10 ;                                         // Wait some time after this
-      enc_preset += lrc ;                                     // Next preset
-      if ( enc_preset < 0 )                                   // Negative not allowed
+      if ( ( enc_preset + rotationcount ) < 0 )               // Negative not allowed
       {
         enc_preset = 0 ;                                      // Stay at 0
+      }
+      else
+      {
+        enc_preset += rotationcount ;                         // Next preset
       }
       tmp = readhostfrompref ( enc_preset ) ;                 // Get host spec and possible comment
       if ( tmp == "" )                                        // End of presets?
@@ -3763,8 +3767,8 @@ void chk_enc()
       tftset ( 3, tmp ) ;                                     // Set screen segment bottom part
       break ;
     case TRACK :
-      waittime = 5 ;                                          // Wait some time after this
-      enc_nodeID = selectnextSDnode ( enc_nodeID, lrc ) ;     // Select the next file on SD
+      enc_nodeID = selectnextSDnode ( enc_nodeID,
+                                      rotationcount ) ;       // Select the next file on SD
       enc_filename = getSDfilename ( enc_nodeID ) ;           // Set new filename
       dbgprint ( "Select %s", enc_filename.c_str() ) ;
       while ( ( inx = enc_filename.indexOf ( "/" ) ) >= 0 )   // Search for last slash
