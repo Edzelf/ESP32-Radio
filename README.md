@@ -34,6 +34,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 05-mar-2018, Improved interface for Rotary Encoder.
 - 03-mar-2018, Correction bug IR pin number.
 - 15-feb-2018, Correction writing wifi credentials to NVS.
 - 13-feb-2018, Disable clock during write-back of preferences.
