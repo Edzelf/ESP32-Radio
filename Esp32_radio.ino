@@ -111,10 +111,12 @@
 // 15-02-2018, ES: Correction writing wifi credentials in NVS.
 // 03-03-2018, ES: Correction bug IR pinnumber.
 // 05-03-2018, ES: Improved rotary encoder interface.
+// 10-03-2018, ES: Minor corrections.
+// 13-04-2016, ES: Guard against empty string send to TFT, thanks to Andreas Spiess.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 05 Mar 2018 10:52:00 GMT"
+#define VERSION "Fri, 13 Apr 2018 09:57:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -592,10 +594,10 @@ mqttpubc         mqttpub ;                                    // Instance for mq
 class VS1053
 {
   private:
-    uint8_t       cs_pin ;                        // Pin where CS line is connected
-    uint8_t       dcs_pin ;                       // Pin where DCS line is connected
-    uint8_t       dreq_pin ;                      // Pin where DREQ line is connected
-    uint8_t       shutdown_pin ;                  // Pin where the shutdown line is connected
+    int8_t       cs_pin ;                         // Pin where CS line is connected
+    int8_t       dcs_pin ;                        // Pin where DCS line is connected
+    int8_t       dreq_pin ;                       // Pin where DREQ line is connected
+    int8_t       shutdown_pin ;                   // Pin where the shutdown line is connected
     uint8_t       curvol ;                        // Current volume setting 0..100%
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
@@ -661,7 +663,7 @@ class VS1053
 
   public:
     // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
-    VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t _shutdown_pin ) ;
+    VS1053 ( int8_t _cs_pin, int8_t _dcs_pin, int8_t _dreq_pin, int8_t _shutdown_pin ) ;
     void     begin() ;                                   // Begin operation.  Sets pins correctly,
     // and prepares SPI bus.
     void     startSong() ;                               // Prepare to start playing. Call this each
@@ -692,7 +694,7 @@ class VS1053
 // VS1053 class implementation.                                                                    *
 //**************************************************************************************************
 
-VS1053::VS1053 ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t _shutdown_pin ) :
+VS1053::VS1053 ( int8_t _cs_pin, int8_t _dcs_pin, int8_t _dreq_pin, int8_t _shutdown_pin ) :
   cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin), shutdown_pin(_shutdown_pin)
 {
 }
@@ -2994,7 +2996,7 @@ void setup()
     tft = new TFT_ILI9163C ( ini_block.tft_cs_pin,
                              ini_block.tft_dc_pin ) ;    // Create an instant for TFT
     tft->begin() ;                                       // Init TFT interface
-    tft->setBitrate ( 16000000 ) ;                       // High speed
+    tft->setBitrate ( 8000000 ) ;                        // High speed (8 or 16 MHz)
     tft->setRotation ( 3 ) ;                             // Use landscape format (1 for upside down)
     tft->fillRect ( 0, 0, 160, 128, BLACK ) ;            // Clear screen does not work when rotated
     tft->clearScreen() ;                                 // Clear screen
@@ -4928,32 +4930,35 @@ void displaytime ( const char* str, uint16_t color )
 //                                      D I S P L A Y I N F O                                      *
 //**************************************************************************************************
 // Show a string on the LCD at a specified y-position (0..2) in a specified color.                 *
-// The parametr is the index in tftdata[].                                                         *
+// The parameter is the index in tftdata[].                                                        *
 //**************************************************************************************************
 void displayinfo ( uint16_t inx )
 {
-  uint16_t       width = 160 ;                           // Normal number of colums
+  uint16_t       width = 160 ;                             // Normal number of colums
   scrseg_struct* p = &tftdata[inx] ;
+  uint16_t len ;                                           // Length of string, later buffer length
 
-  if ( inx == 0 )                                        // Topline is shorter
+  if ( inx == 0 )                                          // Topline is shorter
   {
-    width = TIMEPOS ;                                    // Leave space for time
+    width = TIMEPOS ;                                      // Leave space for time
   }
-  if ( tft )                                             // TFT active?
+  if ( tft )                                               // TFT active?
   {
-    uint16_t len = p->str.length() + 1 ;                 // Required length of buffer
-    char     buf [ len ] ;                               // Need some buffer space
-
-    p->str.toCharArray ( buf, len ) ;                    // Make a local copy of the string
-    utf8ascii ( buf ) ;                                  // Convert possible UTF8
-    tft->fillRect ( 0, p->y, width, p->height, BLACK ) ; // Clear the space for new info
-    if ( p->y > 1 )                                      // Need for divider?
+    tft->fillRect ( 0, p->y, width, p->height, BLACK ) ;   // Clear the space for new info
+    if ( p->y > 1 )                                        // Need for divider?
     {
-      tft->fillRect ( 0, p->y - 4, width, 1, GREEN ) ;   // Yes, show divider
+      tft->fillRect ( 0, p->y - 4, width, 1, GREEN ) ;     // Yes, show divider
     }
-    tft->setTextColor ( p->color ) ;                     // Set the requested color
-    tft->setCursor ( 0, p->y ) ;                         // Prepare to show the info
-    tft->println ( buf ) ;                               // Show the string
+    uint16_t len = p->str.length() ;                       // Required length of buffer
+    if ( len++ )                                           // Check string length, set buffer length
+    {
+      char buf [ len ] ;                                   // Need some buffer space
+      p->str.toCharArray ( buf, len ) ;                    // Make a local copy of the string
+      utf8ascii ( buf ) ;                                  // Convert possible UTF8
+      tft->setTextColor ( p->color ) ;                     // Set the requested color
+      tft->setCursor ( 0, p->y ) ;                         // Prepare to show the info
+      tft->println ( buf ) ;                               // Show the string
+    }
   }
 }
 
