@@ -1,7 +1,9 @@
 # ESP32-Radio
 Internet radio based on ESP32, VS1053 and a TFT screen.  Will compile in Arduino IDE.
+See the review by Andreas Spiess at https://www.youtube.com/watch?v=hz65vfvbXMs.
+
 The 28-jul-2017 is a major update.  You MUST include the GPIO pin assignments in the preferences.
-See the documentation and/or the defaultsettings in the config page of the webinterface.
+See the documentation and/or the default settings in the config page of the webinterface.
 
 Features:
 -	Can connect to thousands of Internet radio stations that broadcast MP3 or Ogg audio streams.
@@ -34,7 +36,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
-- 13-apr-2018, Gaurd against empty strings on TFT.
+- 13-apr-2018, Guard against empty strings on TFT.
 - 05-mar-2018, Improved interface for Rotary Encoder.
 - 03-mar-2018, Correction bug IR pin number.
 - 15-feb-2018, Correction writing wifi credentials to NVS.
