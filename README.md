@@ -36,6 +36,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 16-apr-2018, Handle ID3 tags while playing from SD.
 - 13-apr-2018, Guard against empty strings on TFT.
 - 05-mar-2018, Improved interface for Rotary Encoder.
 - 03-mar-2018, Correction bug IR pin number.
