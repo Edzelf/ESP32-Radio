@@ -48,7 +48,7 @@
 // ESP32dev Signal  Wired to LCD        Wired to VS1053      SDCARD   Wired to the rest
 // -------- ------  --------------      -------------------  ------   ---------------
 // GPIO16           -                   pin 1 XDCS            -       -
-// GPIO5            -                   pin 2 XCS             -        -
+// GPIO5            -                   pin 2 XCS             -       -
 // GPIO4            -                   pin 4 DREQ            -       -
 // GPIO2            pin 3 D/C           -                     -       -
 // GPIO18   SCK     pin 5 CLK           pin 5 SCK             CLK     -
@@ -112,11 +112,12 @@
 // 03-03-2018, ES: Correction bug IR pinnumber.
 // 05-03-2018, ES: Improved rotary encoder interface.
 // 10-03-2018, ES: Minor corrections.
-// 13-04-2016, ES: Guard against empty string send to TFT, thanks to Andreas Spiess.
+// 13-04-2018, ES: Guard against empty string send to TFT, thanks to Andreas Spiess.
+// 16-04-2018, ES: ID3 tags handling while playing from SD.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Fri, 13 Apr 2018 09:57:00 GMT"
+#define VERSION "Mon, 16 Apr 2018 16:20:00 GMT"
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -326,7 +327,7 @@ uint32_t          totalcount = 0 ;                          // Counter mp3 data
 datamode_t        datamode ;                                // State of datastream
 int               metacount ;                               // Number of bytes in metadata
 int               datacount ;                               // Counter databytes before metadata
-char              metalinebf[METASIZ + 1] ;                 // Buffer for metaline
+char              metalinebf[METASIZ + 1] ;                 // Buffer for metaline, also used for ID3 tags
 int16_t           metalinebfx ;                             // Index for metalinebf
 String            icystreamtitle ;                          // Streamtitle from metadata
 String            icyname ;                                 // Icecast station name
@@ -424,12 +425,12 @@ progpin_struct   progpin[] =                                // Input pins and pr
   { 15, false, false,  "", false },
   { 16, false, false,  "", false },
   { 17, false, false,  "", false },
-  { 18, false, false,  "", false },                       // Default for SPI CLK
-  { 19, false, false,  "", false },                       // Default for SPI MISO
+  { 18, false, false,  "", false },                         // Default for SPI CLK
+  { 19, false, false,  "", false },                         // Default for SPI MISO
   //{ 20, true,  false,  "", false },                       // Not exposed on DEV board
-  { 21, false, false,  "", false },                       // Also Wire SDA
-  { 22, false, false,  "", false },                       // Also Wire SCL
-  { 23, false, false,  "", false },                       // Default for SPI MOSI
+  { 21, false, false,  "", false },                         // Also Wire SDA
+  { 22, false, false,  "", false },                         // Also Wire SCL
+  { 23, false, false,  "", false },                         // Default for SPI MOSI
   //{ 24, true,  false,  "", false },                       // Not exposed on DEV board
   { 25, false, false,  "", false },
   { 26, false, false,  "", false },
@@ -440,9 +441,9 @@ progpin_struct   progpin[] =                                // Input pins and pr
   //{ 31, true,  false,  "", false },                       // Not exposed on DEV board
   { 32, false, false,  "", false },
   { 33, false, false,  "", false },
-  { 34, false, false,  "", false },                       // Note, no internal pull-up
-  { 35, false, false,  "", false },                       // Note, no internal pull-up
-  { -1, false, false,  "", false }                        // End of list
+  { 34, false, false,  "", false },                         // Note, no internal pull-up
+  { 35, false, false,  "", false },                         // Note, no internal pull-up
+  { -1, false, false,  "", false }                          // End of list
 } ;
 
 struct touchpin_struct                                      // For programmable input pins
@@ -457,17 +458,18 @@ struct touchpin_struct                                      // For programmable 
 } ;
 touchpin_struct   touchpin[] =                              // Touch pins and programmed function
 {
-  {   4, false, false, "", false, 0 },                    // TOUCH0
-  //{   0, true,  false, "", false, 0 },                    // TOUCH1, reserved for BOOT button
-  {   2, false, false, "", false, 0 },                    // TOUCH2
-  {  15, false, false, "", false, 0 },                    // TOUCH3
-  {  13, false, false, "", false, 0 },                    // TOUCH4
-  {  12, false, false, "", false, 0 },                    // TOUCH5
-  {  14, false, false, "", false, 0 },                    // TOUCH6
-  {  27, false, false, "", false, 0 },                    // TOUCH7
-  {  33, false, false, "", false, 0 },                    // TOUCH8
-  {  32, false, false, "", false, 0 },                    // TOUCH9
-  {  -1, false, false, "", false, 0 }                     // End of table
+  {   4, false, false, "", false, 0 },                      // TOUCH0
+  //{ 0, true,  false, "", false, 0 },                      // TOUCH1, reserved for BOOT button
+  {   2, false, false, "", false, 0 },                      // TOUCH2
+  {  15, false, false, "", false, 0 },                      // TOUCH3
+  {  13, false, false, "", false, 0 },                      // TOUCH4
+  {  12, false, false, "", false, 0 },                      // TOUCH5
+  {  14, false, false, "", false, 0 },                      // TOUCH6
+  {  27, false, false, "", false, 0 },                      // TOUCH7
+  {  33, false, false, "", false, 0 },                      // TOUCH8
+  {  32, false, false, "", false, 0 },                      // TOUCH9
+  {  -1, false, false, "", false, 0 }                   
+  // End of table
 } ;
 
 
@@ -900,7 +902,7 @@ void VS1053::startSong()
   sdi_send_fillers ( 10 ) ;
   if ( shutdown_pin >= 0 )                              // Shutdown in use?
   {
-    digitalWrite ( shutdown_pin, LOW ) ;               // Enable audio output
+    digitalWrite ( shutdown_pin, LOW ) ;                // Enable audio output
   }
 
 }
@@ -918,7 +920,7 @@ void VS1053::stopSong()
   sdi_send_fillers ( 2052 ) ;
   if ( shutdown_pin >= 0 )                              // Shutdown in use?
   {
-    digitalWrite ( shutdown_pin, HIGH ) ;              // Disable audio output
+    digitalWrite ( shutdown_pin, HIGH ) ;               // Disable audio output
   }
   delay ( 10 ) ;
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
@@ -1089,7 +1091,7 @@ void claimSPI ( const char* p )
   const        TickType_t ctry = 10 ;                       // Time to wait for semaphore
   uint32_t     count = 0 ;                                  // Wait time in ticks
 
-  while ( xSemaphoreTake ( SPIsem, ctry ) != pdTRUE  ) ;  // Claim SPI bus
+  while ( xSemaphoreTake ( SPIsem, ctry ) != pdTRUE  ) ;    // Claim SPI bus
   {
     if ( count++ > 10 )
     {
@@ -1109,7 +1111,7 @@ void claimSPI ( const char* p )
 //**************************************************************************************************
 void releaseSPI()
 {
-  xSemaphoreGive ( SPIsem ) ;                             // Release SPI bus
+  xSemaphoreGive ( SPIsem ) ;                            // Release SPI bus
 }
 
 
@@ -1996,22 +1998,135 @@ bool connecttohost()
 
 
 //**************************************************************************************************
+//                                      S S C O N V                                                *
+//**************************************************************************************************
+// Convert an array with 4 "synchsafe integers" to a number.                                       *
+// There are 7 bits used per byte.                                                                 *
+//**************************************************************************************************
+uint32_t ssconv ( const uint8_t* bytes )
+{
+  uint32_t res = 0 ;                                      // Result of conversion
+  uint8_t  i ;                                            // Counter number of bytes to convert
+  
+  for ( i = 0 ; i < 4 ; i++ )                             // Handle 4 bytes
+  {
+    res = res * 128 + bytes[i] ;                          // Convert next 7 bits
+  }
+  return res ;                                            // Return the result
+}
+
+
+//**************************************************************************************************
+//                                  H A N D L E _ I D 3                                            *
+//**************************************************************************************************
+// Check file on SD card for ID3 tags and use them to display some info.                           *
+// Extended headers are not parsed.                                                                *
+//**************************************************************************************************
+void handle_ID3 ( String &path )
+{
+  char*  p ;                                                // Pointer to filename
+  struct ID3head_t                                          // First part of ID3 info
+  {
+    char    fid[3] ;                                        // Should be filled with "ID3"
+    uint8_t majV, minV ;                                    // Major and minor version
+    uint8_t hflags ;                                        // Headerflags
+    uint8_t ttagsize[4] ;                                   // Total tag size
+  } ID3head ;
+  uint8_t  exthsiz[4] ;                                     // Extended header size
+  uint32_t stx ;                                            // Ext header size converted
+  uint32_t sttg ;                                           // Total tagsize converted
+  uint32_t stg ;                                            // Size of a single tag
+  struct ID3tag_t                                           // Tag in ID3 info
+  {
+    char    tagid[4] ;                                      // Things like "TCON", "TYER", ...
+    uint8_t tagsize[4] ;                                    // Size of the tag
+    uint8_t tagflags[2] ;                                   // Tag flags
+  } ID3tag ;
+  uint8_t  tmpbuf[4] ;                                      // Scratch buffer
+  uint8_t  tenc ;                                           // Text encoding
+  String   albttl = String() ;                              // Album and title
+  
+  tftset ( 2, "Playing from local file" ) ;                 // Assume no ID3
+  p = (char*)path.c_str() + 1 ;                             // Point to filename
+  showstreamtitle ( p, true ) ;                             // Show the filename as title (middle part)
+  mp3file = SD.open ( path ) ;                              // Open the file
+  mp3file.read ( (uint8_t*)&ID3head, sizeof(ID3head) ) ;    // Read first part of ID3 info
+  if ( strncmp ( ID3head.fid, "ID3", 3 ) == 0 )
+  {
+    sttg = ssconv ( ID3head.ttagsize ) ;                    // Convert tagsize
+    dbgprint ( "Found ID3 info" ) ;
+    if ( ID3head.hflags & 0x40 )                            // Extended header?
+    {
+      stx = ssconv ( exthsiz ) ;                            // Yes, get size of extended header
+      while ( stx-- )
+      {
+        mp3file.read () ;                                   // Skip next byte of extended header
+      }
+    }
+    while ( sttg > 10 )                                     // Now handle the tags
+    {
+      sttg -= mp3file.read ( (uint8_t*)&ID3tag,
+                             sizeof(ID3tag) ) ;             // Read first part of a tag
+      if ( ID3tag.tagid[0] == 0 )                           // Reached the end of the list?
+      {
+        break ;                                             // Yes, quit the loop 
+      }
+      stg = ssconv ( ID3tag.tagsize ) ;                     // Convert size of tag
+      if ( ID3tag.tagflags[1] & 0x08 )                      // Compressed?
+      {
+         sttg -= mp3file.read ( tmpbuf, 4 ) ;               // Yes, ignore 4 bytes
+         stg -= 4 ;                                         // Reduce tag size
+      }
+      if ( ID3tag.tagflags[1] & 0x044 )                     // Encrypted or grouped?
+      {
+         sttg -= mp3file.read ( tmpbuf, 1 ) ;               // Yes, ignore 1 byte
+         stg-- ;                                            // Reduce tagsize by 1 
+      }
+      if ( stg > ( sizeof(metalinebf) + 2 ) )               // Room for tag?
+      {
+        break ;                                             // No, skip this and further tags 
+      }
+      sttg -= mp3file.read ( (uint8_t*)metalinebf,
+                             stg ) ;                        // Read tag contents
+      metalinebf[stg] = '\0' ;                              // Add delimeter
+      tenc = metalinebf[0] ;                                // First byte is encoding type
+      if ( tenc == '\0' )                                   // Debug all tags with encoding 0
+      {
+        dbgprint ( "ID3 %s = %s", ID3tag.tagid,
+                   metalinebf + 1 ) ;
+      }
+      if ( ( strncmp ( ID3tag.tagid, "TALB", 4 ) == 0 ) ||  // Album title
+           ( strncmp ( ID3tag.tagid, "TPE1", 4 ) == 0 ) )   // or artist?
+      {
+        albttl += String ( metalinebf + 1 ) ;               // Yes, add to string 
+        albttl += String ( "\n" ) ;                         // Add newline 
+      }
+      if ( strncmp ( ID3tag.tagid, "TIT2", 4 ) == 0 )       // Songtitle?
+      {
+        tftset ( 2, metalinebf + 1 ) ;                      // Yes, show title 
+      }
+    }
+    tftset ( 1, albttl ) ;                                  // Show album and title
+  }
+  mp3file.close() ;                                         // Close the file
+  mp3file = SD.open ( path ) ;                              // And open the file again
+}
+
+
+//**************************************************************************************************
 //                                       C O N N E C T T O F I L E                                 *
 //**************************************************************************************************
 // Open the local mp3-file.                                                                        *
-// Not yet implemented.                                                                            *
 //**************************************************************************************************
 bool connecttofile()
 {
   String path ;                                           // Full file spec
-  char*  p ;                                              // Pointer to filename
 
   tftset ( 0, "ESP32 MP3 Player" ) ;                      // Set screen segment top line
   displaytime ( "" ) ;                                    // Clear time on TFT screen
   path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
-  //dbgprint ( "Open SD %s", path.c_str() ) ;
   claimSPI ( "sdopen3" ) ;                                // Claim SPI bus
-  mp3file = SD.open ( path ) ;                            // Open the file
+  handle_ID3 ( path ) ;                                   // See if there are ID3 tags in this file
   mp3filelength = mp3file.available() ;                   // Get length
   releaseSPI() ;                                          // Release SPI bus
   if ( !mp3file )
@@ -2019,11 +2134,7 @@ bool connecttofile()
     dbgprint ( "Error opening file %s", path.c_str() ) ;  // No luck
     return false ;
   }
-  //dbgprint ( "File is open now" ) ;
-  p = (char*)path.c_str() + 1 ;                           // Point to filename
-  showstreamtitle ( p, true ) ;                           // Show the filename as title (middle part)
   mqttpub.trigger ( MQTT_STREAMTITLE ) ;                  // Request publishing to MQTT
-  tftset ( 2, "Playing from local file" ) ;               // Set screen segment bottom part
   icyname = "" ;                                          // No icy name yet
   chunked = false ;                                       // File not chunked
   metaint = 0 ;                                           // No metadata
