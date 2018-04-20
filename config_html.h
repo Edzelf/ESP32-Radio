@@ -24,7 +24,7 @@ const char config_html[] PROGMEM = R"=====(
    <p>You can edit the configuration here. <i>Note that this will be effective on the next restart of the radio.</i>
    </p>
    <h3>Available WiFi networks
-   <select class="select" onChange="handletone(this)" id="ssid"></select>
+   <select class="select" id="ssid"></select>
    </h3>
    <textarea rows="20" cols="100" id="prefs">Loading preferences</textarea> 
    <br>
@@ -33,10 +33,37 @@ const char config_html[] PROGMEM = R"=====(
    <button class="button buttonr" onclick="httpGet('reset')">Restart</button>
    &nbsp;&nbsp;
    <button class="button" onclick="ldef('getdefs')">Default</button>
-    <br><input type="text" size="80" id="resultstr" placeholder="Waiting for input....">
-    <br>
+   &nbsp;&nbsp;
+   <button class="button buttonb" onclick="wFile()">Export</button>
+   &nbsp;&nbsp;
+   <button class="button buttonb" onclick="f.click()">Import</button>
+   <input type="file" id="f" style="display:none;" accept="text/*"/>
+   <br><input type="text" size="80" id="resultstr" placeholder="Waiting for input....">
 
     <script>
+
+      f.addEventListener('change', rFile, false);
+
+      function rFile(e) {
+        if (!e.target.files[0]) return;
+        var r = new FileReader();
+        r.onload = function(e) {
+          prefs.value = e.target.result;
+          
+        };
+        r.readAsText(e.target.files[0]);
+      }
+
+      function wFile() {
+        var e = document.createElement('a');
+        e.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(prefs.value));
+        e.setAttribute('download', 'esp32radio_settings.txt');
+        e.style.display = 'none';
+        document.body.appendChild(e);
+        e.click();
+        document.body.removeChild(e);
+      }
+
       function httpGet ( theReq )
       {
         var theUrl = "/?" + theReq + "&version=" + Math.random() ;
@@ -51,7 +78,6 @@ const char config_html[] PROGMEM = R"=====(
         xhr.send() ;
       }
 
-      // Load preferences or default preferences
       function ldef ( source )
       {
         var xhr = new XMLHttpRequest() ;
@@ -66,7 +92,6 @@ const char config_html[] PROGMEM = R"=====(
         xhr.send() ;
       }
 
-      // Save the preferences
       function fsav()
       {
         var str = prefs.value ;
@@ -79,7 +104,6 @@ const char config_html[] PROGMEM = R"=====(
             resultstr.value = xhr.responseText ;
           }
         }
-        // Remove empty lines
         while ( str.indexOf ( "\r\n\r\n" ) >= 0 )
         {
           str = str.replace ( /\r\n\r\n/g, "\r\n" )      
@@ -93,31 +117,29 @@ const char config_html[] PROGMEM = R"=====(
         xhr.send ( str + "\n" ) ;
       }
 
-      // Fill configuration initially
-      // First the available WiFi networks
-      var i, select, opt, networks, params ;
-
-      select = document.getElementById("selnet") ;
-      var theUrl = "/?getnetworks" + "&version=" + Math.random() ;
-      var xhr = new XMLHttpRequest() ;
-      xhr.onreadystatechange = function() {
-        if ( xhr.readyState == XMLHttpRequest.DONE )
-        {
-          networks = xhr.responseText.split ( "|" ) ;
-          
-          for ( i = 0 ; i < ( networks.length - 1 ) ; i++ )
+      function lnet(){
+        var i, opt, networks ;
+        var xhr = new XMLHttpRequest() ;
+        xhr.onreadystatechange = function() {
+          if ( xhr.readyState == XMLHttpRequest.DONE )
           {
-            opt = document.createElement( "OPTION" ) ;
-            opt.value = i ;
-            opt.text = networks[i] ;
-            ssid.add( opt ) ;
+            networks = xhr.responseText.split ( "|" ) ;
+            
+            for ( i = 0 ; i < ( networks.length - 1 ) ; i++ )
+            {
+              opt = document.createElement( "OPTION" ) ;
+              opt.value = i ;
+              opt.text = networks[i] ;
+              ssid.add( opt ) ;
+            }
+            ldef ( "getprefs" ) ;
           }
         }
+        xhr.open ( "GET", "/?getnetworks" + "&version=" + Math.random(), false ) ;
+        xhr.send() ;
       }
-      xhr.open ( "GET", theUrl, false ) ;
-      xhr.send() ;
-      // Now get the configuration parameters from preferences
-      ldef ( "getprefs" ) ;
+      
+      lnet();
     </script>
   </body>
 </html>

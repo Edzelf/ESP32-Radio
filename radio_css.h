@@ -61,6 +61,8 @@ li a:hover, a.active {
 
 .buttonr {background-color: #D62C1A;}
 
+.buttonb {background-color: #1E90FF;}
+
 .select {
    width: 160px;
    height: 32px;
