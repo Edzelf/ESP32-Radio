@@ -5,6 +5,8 @@ See the review by Andreas Spiess at https://www.youtube.com/watch?v=hz65vfvbXMs.
 The 28-jul-2017 is a major update.  You MUST include the GPIO pin assignments in the preferences.
 See the documentation and/or the default settings in the config page of the webinterface.
 
+Look for documentation and printdesign in the doc directory.
+
 Features:
 -	Can connect to thousands of Internet radio stations that broadcast MP3 or Ogg audio streams.
 - Can connect to a standalone mp3 file on a server.
