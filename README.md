@@ -26,7 +26,7 @@ Features:
 -	The strongest available WiFi network is automatically selected.
 -	Heavily commented source code, easy to add extra functionality.
 -	Debug information through serial output.
--	20 kB ring buffer to provide smooth playback.
+-	Uses a 12 kB queue to provide smooth playback.
 -	Software update over WiFi possible (OTA).
 -	Bass and treble control.
 -	Saves volume, bass, treble and preset station over restart.
