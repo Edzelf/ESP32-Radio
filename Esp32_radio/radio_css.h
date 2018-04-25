@@ -45,7 +45,7 @@ li a:hover, a.active {
 }
 
 .button {
-   width: 80px;
+   width: 90px;
    height: 30px;
    background-color: #128F76;
    border: none;
