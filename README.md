@@ -2,9 +2,6 @@
 Internet radio based on ESP32, VS1053 and a TFT screen.  Will compile in Arduino IDE.
 See the review by Andreas Spiess at https://www.youtube.com/watch?v=hz65vfvbXMs.
 
-The 28-jul-2017 is a major update.  You MUST include the GPIO pin assignments in the preferences.
-See the documentation and/or the default settings in the config page of the webinterface.
-
 Look for documentation and printdesign in the doc directory.
 
 Features:
@@ -38,6 +35,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 25-apr-2018, Support for different display (OLED 128x64 for now).
 - 20-apr-2018, Added (unfinished) diptrace printdesign.
 - 16-apr-2018, Handle ID3 tags while playing from SD.
 - 13-apr-2018, Guard against empty strings on TFT.
