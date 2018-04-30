@@ -114,10 +114,16 @@
 // 13-04-2018, ES: Guard against empty string send to TFT, thanks to Andreas Spiess.
 // 16-04-2018, ES: ID3 tags handling while playing from SD.
 // 25-04-2018, ES: Choice of several display boards
+// 30-04-2018, ES: Bugfix: crash when no IR is configured, no display without VS1063.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 25 Apr 2018 14:45:00 GMT"
+#define VERSION "Mon, 30 Apr 2018 11:03:00 GMT"
+//
+// Define type of display.  See documentation.
+//#define BLUETFT                      // Works also for RED TFT 128x160
+#define OLED                         // 64x128 I2C OLED
+//#define DUMMYTFT                     // Dummy display
 
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -136,23 +142,6 @@
 #include <esp_task_wdt.h>
 #include <esp_partition.h>
 #include <driver/adc.h>
-
-// Digital I/O used
-// Default pins for VS1053 module.  Better specify these in the preferences
-#if defined ( ARDUINO_FEATHER_ESP32 )
-#define VS1053_CS     32
-#define VS1053_DCS    33
-#define VS1053_DREQ   15
-#else
-#define VS1053_CS     5
-#define VS1053_DCS    16
-#define VS1053_DREQ   4
-#endif
-
-// Define type of display.  See documentation.
-#define BLUETFT                      // Works also for RED TFT 128x160
-//#define OLED                         // 64x128 I2C OLED
-//#define DUMMYTFT                     // Dummy display
 
 // Number of entries in the queue
 #define QSIZ 400
@@ -631,7 +620,8 @@ class VS1053
   protected:
     inline void await_data_request() const
     {
-      while ( !digitalRead ( dreq_pin ) )
+       while ( ( dreq_pin >= 0 ) &&
+               ( !digitalRead ( dreq_pin ) ) )
       {
         NOP() ;                                   // Very short delay
       }
@@ -2390,9 +2380,9 @@ void readIOprefs()
     { "pin_tft_scl",  &ini_block.tft_scl_pin,     -1          },   // Display I2C version
     { "pin_tft_sda",  &ini_block.tft_sda_pin,     -1          },   // Display I2C version
     { "pin_sd_cs",    &ini_block.sd_cs_pin,       -1          },
-    { "pin_vs_cs",    &ini_block.vs_cs_pin,       VS1053_CS   },
-    { "pin_vs_dcs",   &ini_block.vs_dcs_pin,      VS1053_DCS  },
-    { "pin_vs_dreq",  &ini_block.vs_dreq_pin,     VS1053_DREQ },
+    { "pin_vs_cs",    &ini_block.vs_cs_pin,       -1          },
+    { "pin_vs_dcs",   &ini_block.vs_dcs_pin,      -1          },
+    { "pin_vs_dreq",  &ini_block.vs_dreq_pin,     -1          },
     { "pin_shutdown", &ini_block.vs_shutdown_pin, -1          },
     { "pin_spi_sck",  &ini_block.spi_sck_pin,     18          },
     { "pin_spi_miso", &ini_block.spi_miso_pin,    19          },
@@ -3076,8 +3066,9 @@ void setup()
     dbgprint ( "Enable pin %d for IR",
                ini_block.ir_pin ) ;
     pinMode ( ini_block.ir_pin, INPUT ) ;                // Pin for IR receiver VS1838B
+    attachInterrupt ( ini_block.ir_pin,                  // Interrupts will be handle by isr_IR
+                      isr_IR, CHANGE ) ;
   }
-  attachInterrupt ( ini_block.ir_pin, isr_IR, CHANGE ) ; // Interrupts will be handle by isr_IR
   if ( ( ini_block.tft_cs_pin >= 0  ) ||                 // Display configured?
        ( ini_block.tft_scl_pin >= 0 ) )
   {
@@ -3124,7 +3115,7 @@ void setup()
   }
   mk_lsan() ;                                            // Make al list of acceptable networks in preferences.
   WiFi.mode ( WIFI_STA ) ;                               // This ESP is a station
-  //WiFi.persistent ( false ) ;                          // Do not save SSID and password
+  WiFi.persistent ( false ) ;                            // Do not save SSID and password
   WiFi.disconnect() ;                                    // After restart router could still keep old connection
   delay ( 100 ) ;
   listNetworks() ;                                       // Search for WiFi networks
