@@ -35,6 +35,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 30-apr-2018, Bugfix: crashed when no IR was configured.
 - 25-apr-2018, Support for different display (OLED 128x64 for now).
 - 20-apr-2018, Added (unfinished) diptrace printdesign.
 - 16-apr-2018, Handle ID3 tags while playing from SD.
