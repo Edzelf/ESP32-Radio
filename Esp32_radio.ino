@@ -114,11 +114,11 @@
 // 13-04-2018, ES: Guard against empty string send to TFT, thanks to Andreas Spiess.
 // 16-04-2018, ES: ID3 tags handling while playing from SD.
 // 25-04-2018, ES: Choice of several display boards
-// 30-04-2018, ES: Correct bug: crash when no IR is configured.
+// 30-04-2018, ES: Bugfix: crash when no IR is configured, no display without VS1063.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 30 Apr 2018 08:51:00 GMT"
+#define VERSION "Mon, 30 Apr 2018 11:03:00 GMT"
 //
 // Define type of display.  See documentation.
 //#define BLUETFT                      // Works also for RED TFT 128x160
@@ -142,18 +142,6 @@
 #include <esp_task_wdt.h>
 #include <esp_partition.h>
 #include <driver/adc.h>
-
-// Digital I/O used
-// Default pins for VS1053 module.  Better specify these in the preferences
-#if defined ( ARDUINO_FEATHER_ESP32 )
-#define VS1053_CS     32
-#define VS1053_DCS    33
-#define VS1053_DREQ   15
-#else
-#define VS1053_CS     5
-#define VS1053_DCS    16
-#define VS1053_DREQ   4
-#endif
 
 // Number of entries in the queue
 #define QSIZ 400
@@ -632,7 +620,8 @@ class VS1053
   protected:
     inline void await_data_request() const
     {
-      while ( !digitalRead ( dreq_pin ) )
+       while ( ( dreq_pin >= 0 ) &&
+               ( !digitalRead ( dreq_pin ) ) )
       {
         NOP() ;                                   // Very short delay
       }
@@ -2391,9 +2380,9 @@ void readIOprefs()
     { "pin_tft_scl",  &ini_block.tft_scl_pin,     -1          },   // Display I2C version
     { "pin_tft_sda",  &ini_block.tft_sda_pin,     -1          },   // Display I2C version
     { "pin_sd_cs",    &ini_block.sd_cs_pin,       -1          },
-    { "pin_vs_cs",    &ini_block.vs_cs_pin,       VS1053_CS   },
-    { "pin_vs_dcs",   &ini_block.vs_dcs_pin,      VS1053_DCS  },
-    { "pin_vs_dreq",  &ini_block.vs_dreq_pin,     VS1053_DREQ },
+    { "pin_vs_cs",    &ini_block.vs_cs_pin,       -1          },
+    { "pin_vs_dcs",   &ini_block.vs_dcs_pin,      -1          },
+    { "pin_vs_dreq",  &ini_block.vs_dreq_pin,     -1          },
     { "pin_shutdown", &ini_block.vs_shutdown_pin, -1          },
     { "pin_spi_sck",  &ini_block.spi_sck_pin,     18          },
     { "pin_spi_miso", &ini_block.spi_miso_pin,    19          },
