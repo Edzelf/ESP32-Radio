@@ -35,6 +35,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 08-may-2018, Support for 1602 display (I2C).
 - 30-apr-2018, Bugfix: crashed when no IR was configured.
 - 25-apr-2018, Support for different display (OLED 128x64 for now).
 - 20-apr-2018, Added (unfinished) diptrace printdesign.
