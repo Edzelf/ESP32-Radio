@@ -117,10 +117,11 @@
 // 25-04-2018, ES: Choice of several display boards.
 // 30-04-2018, ES: Bugfix: crash when no IR is configured, no display without VS1063.
 // 08-05-2018, ES: 1602 LCD display support (limited).
+// 11-05-2018, ES: Bugfix: incidental crash in isr_enc_turn().
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 8 May 2018 08:03:00 GMT"
+#define VERSION "Fri, 1 May 2018 09:10:00 GMT"
 //
 // Define type of display.  See documentation.
 #define BLUETFT                      // Works also for RED TFT 128x160
@@ -308,6 +309,7 @@ TaskHandle_t      xplaytask ;                            // Task handle for play
 TaskHandle_t      xspftask ;                             // Task handle for special functions
 SemaphoreHandle_t SPIsem = NULL ;                        // For exclusive SPI usage
 hw_timer_t*       timer = NULL ;                         // For timer
+char              timetxt[9] ;                           // Converted timeinfo
 char              cmd[130] ;                             // Command from MQTT or Serial
 QueueHandle_t     dataqueue ;                            // Queue for mp3 datastream
 QueueHandle_t     spfqueue ;                             // Queue for special functions
@@ -365,14 +367,14 @@ uint8_t                 namespace_ID ;                   // Namespace ID found
 char                    nvskeys[MAXKEYS][16] ;           // Space for NVS keys
 std::vector<keyname_t> keynames ;                        // Keynames in NVS
 // Rotary encoder stuff
-uint16_t          clickcount = 0 ;                       // Incremented per encoder click
-int16_t           rotationcount = 0 ;                    // Current position of rotary switch
-uint16_t          enc_inactivity = 0 ;                   // Time inactive
-char              timetxt[9] ;                           // Converted timeinfo
-bool              singleclick = false ;                  // True if single click detected
-bool              doubleclick = false ;                  // True if double click detected
-bool              tripleclick = false ;                  // True if triple click detected
-bool              longclick = false ;                    // True if longclick detected
+#define sv static volatile
+sv uint16_t       clickcount = 0 ;                       // Incremented per encoder click
+sv int16_t        rotationcount = 0 ;                    // Current position of rotary switch
+sv uint16_t       enc_inactivity = 0 ;                   // Time inactive
+sv bool           singleclick = false ;                  // True if single click detected
+sv bool           doubleclick = false ;                  // True if double click detected
+sv bool           tripleclick = false ;                  // True if triple click detected
+sv bool           longclick = false ;                    // True if longclick detected
 enum enc_menu_t { VOLUME, PRESET, TRACK } ;              // State for rotary encoder menu
 enc_menu_t        enc_menu_mode = VOLUME ;               // Default is VOLUME mode
 
@@ -1713,9 +1715,6 @@ void IRAM_ATTR timer100()
       eqcount = 0 ;                               // Not stable, reset count
     }
   }
-  // Read ADC and do some filtering
-  adcval = ( 15 * adcval +
-             adc1_get_raw ( ADC1_CHANNEL_0 ) ) / 16 ;
 }
 
 
@@ -1826,29 +1825,29 @@ void IRAM_ATTR isr_enc_switch()
 //**************************************************************************************************
 void IRAM_ATTR isr_enc_turn()
 {
-  static uint8_t      old_state = 0x0001 ;                    // Previous state
-  uint8_t             act_state ;                             // The current state of the 2 PINs
-  uint8_t             inx ;                                   // Index in enc_state
-  static int16_t      locrotcount = 0 ;                       // Local rotation count
-  static const int8_t enc_states [] =
+  sv uint32_t     old_state = 0x0001 ;                          // Previous state
+  uint8_t         act_state = 0 ;                               // The current state of the 2 PINs
+  uint8_t         inx ;                                         // Index in enc_state
+  sv int16_t      locrotcount = 0 ;                             // Local rotation count
+  DRAM_ATTR static const int8_t enc_states [] =                 // Table must be in DRAM (iram safe)
   { 0,                    // 00 -> 00
-    -1,                   // 00 -> 01
+    -1,                   // 00 -> 01                           // dt goes HIGH
     1,                    // 00 -> 10
     0,                    // 00 -> 11
-    1,                    // 01 -> 00
+    1,                    // 01 -> 00                           // dt goes LOW
     0,                    // 01 -> 01
     0,                    // 01 -> 10
-    -1,                   // 01 -> 11
-    -1,                   // 10 -> 00
+    -1,                   // 01 -> 11                           // clk goes HIGH
+    -1,                   // 10 -> 00                           // clk goes LOW
     0,                    // 10 -> 01
     0,                    // 10 -> 10
-    1,                    // 10 -> 11
+    1,                    // 10 -> 11                           // dt goes HIGH
     0,                    // 11 -> 00
-    1,                    // 11 -> 01
-    -1,                   // 11 -> 10
+    1,                    // 11 -> 01                           // clk goes LOW
+    -1,                   // 11 -> 10                           // dt goes HIGH
     0                     // 11 -> 11
   } ;
-  // Read current state of CLK, DT pin. Result is a 2 bit binairy number: 00, 01, 10 or 11.
+  // Read current state of CLK, DT pin. Result is a 2 bit binary number: 00, 01, 10 or 11.
   act_state = ( digitalRead ( ini_block.enc_clk_pin ) << 1 ) +
               digitalRead ( ini_block.enc_dt_pin ) ;
   inx = ( old_state << 2 ) + act_state ;                        // Form index in enc_states
@@ -3194,7 +3193,7 @@ void setup()
   if ( ( ini_block.enc_clk_pin + ini_block.enc_dt_pin + ini_block.enc_sw_pin ) > 2 )
   {
     attachInterrupt ( ini_block.enc_clk_pin, isr_enc_turn,   CHANGE ) ;
-    attachInterrupt ( ini_block.enc_dt_pin,  isr_enc_turn,   CHANGE ) ;
+    //attachInterrupt ( ini_block.enc_dt_pin,  isr_enc_turn,   CHANGE ) ;
     attachInterrupt ( ini_block.enc_sw_pin,  isr_enc_switch, CHANGE ) ;
     dbgprint ( "Rotary encoder is enabled" ) ;
   }
@@ -3735,6 +3734,7 @@ void chk_enc()
     {
       enc_inactivity = 0 ;
       enc_menu_mode = VOLUME ;                                // Return to VOLUME mode
+      dbgprint ( "Encoder mode back to VOLUME" ) ;
       tftset ( 2, (char*)NULL ) ;                             // Restore original text at bottom
     }
   }
@@ -5243,6 +5243,7 @@ void handle_spec()
 //                                     S P F T A S K                                               *
 //**************************************************************************************************
 // Handles display of text, time and volume on TFT.                                                *
+// Handles ADC meassurements.                                                                      *
 // This task runs on a low priority.                                                               *
 //**************************************************************************************************
 void spftask ( void * parameter )
@@ -5251,6 +5252,8 @@ void spftask ( void * parameter )
   {
     handle_spec() ;                                                 // Maybe some special funcs?
     vTaskDelay ( 100 / portTICK_PERIOD_MS ) ;                       // Pause for a short time
+    adcval = ( 15 * adcval +                                        // Read ADC and do some filtering
+               adc1_get_raw ( ADC1_CHANNEL_0 ) ) / 16 ;
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
