@@ -1,6 +1,3 @@
-#ifndef MAIN_SSD1366_H_
-#define MAIN_SSD1366_H_
-
 #include <driver/i2c.h>
 #include <string.h>
 
@@ -72,6 +69,7 @@ scrseg_struct     tftdata[TFTSECS] =                        // Screen divided in
 #define dsp_getwidth()          128                                // Get width of screen
 #define dsp_getheight()         64                                 // Get height of screen
 #define dsp_update()            tft->display()                     // Updates to the physical screen
+#define dsp_usesSPI()           false                              // Does not use SPI
 
 bool dsp_begin()
 {
@@ -394,6 +392,4 @@ SSD1306::SSD1306 ( uint8_t sda, uint8_t scl )
   i2c_cmd_link_delete ( cmd ) ;
   clear() ;                                                       // Clear the display
 }
-
-#endif /* MAIN_SSD1366_H_ */
 

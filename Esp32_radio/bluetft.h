@@ -1,6 +1,10 @@
 // bluetft.h
-// Includes for various ST7735 displays.  Size is 160 x 128.
+//
 // Separated from the main sketch to allow several display types.
+// Includes for various ST7735 displays.  Size is 160 x 128.  Select INITR_BLACKTAB
+// for this and set dsp_getwidth() to 160.
+// Works also for the 128 x 128 version.  Select INITR_144GREENTAB for this and
+// set dsp_getwidth() to 128.
 
 #include <Adafruit_ST7735.h>
 
@@ -37,9 +41,11 @@ Adafruit_ST7735*     tft = NULL ;                                  // For instan
 #define dsp_setTextColor(a)     tft->setTextColor(a)               // Set the text color
 #define dsp_setCursor(a,b)      tft->setCursor ( a, b )            // Position the cursor
 #define dsp_erase()             tft->fillScreen ( BLACK ) ;        // Clear the screen
-#define dsp_getwidth()          160                                // Get width of screen
+#define dsp_getwidth()          160                                // Adjust to your display
 #define dsp_getheight()         128                                // Get height of screen
 #define dsp_update()                                               // Updates to the physical screen
+#define dsp_usesSPI()           true                               // Does use SPI
+
 
 bool dsp_begin()
 {
@@ -48,10 +54,10 @@ bool dsp_begin()
   // Uncomment one of the following initR lines for ST7735R displays
   //tft->initR ( INITR_GREENTAB ) ;                               // Init TFT interface
   //tft->initR ( INITR_REDTAB ) ;                                 // Init TFT interface
-  //tft->initR ( INITR_BLACKTAB ) ;                               // Init TFT interface
+  tft->initR ( INITR_BLACKTAB ) ;                                 // Init TFT interface
   //tft->initR ( INITR_144GREENTAB ) ;                            // Init TFT interface
   //tft->initR ( INITR_MINI160x80 ) ;                             // Init TFT interface
-  tft->initR ( INITR_BLACKTAB ) ;                                 // Init TFT interface
+  //tft->initR ( INITR_BLACKTAB ) ;                               // Init TFT interface (160x128)
   // Uncomment the next line for ST7735B displays
   //tft_initB() ;
   return ( tft != NULL ) ;
