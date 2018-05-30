@@ -118,10 +118,11 @@
 // 30-04-2018, ES: Bugfix: crash when no IR is configured, no display without VS1063.
 // 08-05-2018, ES: 1602 LCD display support (limited).
 // 11-05-2018, ES: Bugfix: incidental crash in isr_enc_turn().
+// 30-05-2018, ES: Bugfix: Assigned DRAM to global variables used in timer ISR.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Fri, 1 May 2018 09:10:00 GMT"
+#define VERSION "Wed, 30 May 2018 09:48:00 GMT"
 //
 // Define type of display.  See documentation.
 #define BLUETFT                      // Works also for RED TFT 128x160
@@ -367,7 +368,7 @@ uint8_t                 namespace_ID ;                   // Namespace ID found
 char                    nvskeys[MAXKEYS][16] ;           // Space for NVS keys
 std::vector<keyname_t> keynames ;                        // Keynames in NVS
 // Rotary encoder stuff
-#define sv static volatile
+#define sv DRAM_ATTR static volatile
 sv uint16_t       clickcount = 0 ;                       // Incremented per encoder click
 sv int16_t        rotationcount = 0 ;                    // Current position of rotary switch
 sv uint16_t       enc_inactivity = 0 ;                   // Time inactive
@@ -1656,9 +1657,9 @@ void IRAM_ATTR timer10sec()
 //**************************************************************************************************
 void IRAM_ATTR timer100()
 {
-  static int16_t   count10sec = 0 ;               // Counter for activatie 10 seconds process
-  static int16_t   eqcount = 0 ;                  // Counter for equal number of clicks
-  static int16_t   oldclickcount = 0 ;            // To detect difference
+  sv int16_t   count10sec = 0 ;                   // Counter for activatie 10 seconds process
+  sv int16_t   eqcount = 0 ;                      // Counter for equal number of clicks
+  sv int16_t   oldclickcount = 0 ;                // To detect difference
 
   if ( ++count10sec == 100  )                     // 10 seconds passed?
   {
@@ -1728,12 +1729,12 @@ void IRAM_ATTR timer100()
 //**************************************************************************************************
 void IRAM_ATTR isr_IR()
 {
-  static uint32_t t0 = 0 ;                           // To get the interval
-  uint32_t        t1, intval ;                       // Current time and interval since last change
-  static uint32_t ir_locvalue = 0 ;                  // IR code
-  static int      ir_loccount ;                      // Length of code
-  uint32_t        mask_in = 2 ;                      // Mask input for conversion
-  uint16_t        mask_out = 1 ;                     // Mask output for conversion
+  sv uint32_t      t0 = 0 ;                          // To get the interval
+  sv uint32_t      ir_locvalue = 0 ;                 // IR code
+  sv int           ir_loccount = 0 ;                 // Length of code
+  uint32_t         t1, intval ;                      // Current time and interval since last change
+  uint32_t         mask_in = 2 ;                     // Mask input for conversion
+  uint16_t         mask_out = 1 ;                    // Mask output for conversion
 
   t1 = micros() ;                                    // Get current time
   intval = t1 - t0 ;                                 // Compute interval
@@ -1776,8 +1777,8 @@ void IRAM_ATTR isr_IR()
 //**************************************************************************************************
 void IRAM_ATTR isr_enc_switch()
 {
-  static uint32_t oldtime = 0 ;                            // Time in millis previous interrupt
-  static bool     sw_state ;                               // True is pushed (LOW)
+  sv uint32_t     oldtime = 0 ;                            // Time in millis previous interrupt
+  sv bool         sw_state ;                               // True is pushed (LOW)
   bool            newstate ;                               // Current state of input signal
   uint32_t        newtime ;                                // Current timestamp
 
@@ -1826,10 +1827,10 @@ void IRAM_ATTR isr_enc_switch()
 void IRAM_ATTR isr_enc_turn()
 {
   sv uint32_t     old_state = 0x0001 ;                          // Previous state
+  sv int16_t      locrotcount = 0 ;                             // Local rotation count
   uint8_t         act_state = 0 ;                               // The current state of the 2 PINs
   uint8_t         inx ;                                         // Index in enc_state
-  sv int16_t      locrotcount = 0 ;                             // Local rotation count
-  DRAM_ATTR static const int8_t enc_states [] =                 // Table must be in DRAM (iram safe)
+  sv const int8_t enc_states [] =                               // Table must be in DRAM (iram safe)
   { 0,                    // 00 -> 00
     -1,                   // 00 -> 01                           // dt goes HIGH
     1,                    // 00 -> 10
@@ -3259,7 +3260,7 @@ uint8_t rinbyt ( bool forcestart )
       {
         if ( ++trycount > 3 )                           // Not for a long time?
         {
-          dbgprint ( "HTTP input shorter then expected" ) ;
+          dbgprint ( "HTTP input shorter than expected" ) ;
           return '\n' ;                                 // Error! No input
         }
         delay ( 10 ) ;                                  // Give communication some time
