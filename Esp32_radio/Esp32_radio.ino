@@ -119,13 +119,14 @@
 // 08-05-2018, ES: 1602 LCD display support (limited).
 // 11-05-2018, ES: Bugfix: incidental crash in isr_enc_turn().
 // 30-05-2018, ES: Bugfix: Assigned DRAM to global variables used in timer ISR.
+// 31-05-2018, ES: Bugfix: Crashed if I2C is used, but pins not defined.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 30 May 2018 09:48:00 GMT"
+#define VERSION "Thu, 31 May 2018 07:38:00 GMT"
 //
 // Define type of display.  See documentation.
-#define BLUETFT                      // Works also for RED TFT 128x160
+#define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
 //#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
