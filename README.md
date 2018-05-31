@@ -35,6 +35,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 31-may-2018, Bugfix. Crashed if I2C was used, but no pins assigned.
 - 30-may-2018, Bugfix. Assigned DRAM to global variables used in ISRs.
 - 11-may-2018, Bugfix for incidental crash in rotary encoder function.
 - 08-may-2018, Support for 1602 display (I2C).
