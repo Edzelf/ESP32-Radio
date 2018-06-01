@@ -120,10 +120,11 @@
 // 11-05-2018, ES: Bugfix: incidental crash in isr_enc_turn().
 // 30-05-2018, ES: Bugfix: Assigned DRAM to global variables used in timer ISR.
 // 31-05-2018, ES: Bugfix: Crashed if I2C is used, but pins not defined.
+// 01-06-2018, ES: Run Playtask on CPU 0.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Thu, 31 May 2018 07:38:00 GMT"
+#define VERSION "Fri, 1 June 2018 16:38:00 GMT"
 //
 // Define type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
@@ -359,6 +360,8 @@ String            SD_nodelist ;                          // Nodes of mp3-files o
 int               SD_nodecount = 0 ;                     // Number of nodes in SD_nodelist
 String            SD_currentnode = "" ;                  // Node ID of song playing ("0" if random)
 uint16_t          adcval ;                               // ADC value (battery voltage)
+int16_t           scanios ;                              // TEST*TEST*TEST
+int16_t           scaniocount ;                          // TEST*TEST*TEST
 std::vector<WifiInfo_t> wifilist ;                       // List with wifi_xx info
 // nvs stuff
 nvs_page                nvsbuf ;                         // Space for 1 page of NVS info
@@ -1263,7 +1266,7 @@ String utf8ascii ( const char* s )
 //                                          D B G P R I N T                                        *
 //**************************************************************************************************
 // Send a line of info to serial output.  Works like vsprintf(), but checks the DEBUG flag.        *
-// Print only if DEBUG flag is true.  Always returns the the formatted string.                     *
+// Print only if DEBUG flag is true.  Always returns the formatted string.                         *
 //**************************************************************************************************
 char* dbgprint ( const char* format, ... )
 {
@@ -1669,6 +1672,8 @@ void IRAM_ATTR timer100()
   }
   if ( ( count10sec % 10 ) == 0 )                 // One second over?
   {
+    scaniocount = scanios ;                       // TEST*TEST*TEST
+    scanios = 0 ;
     if ( ++timeinfo.tm_sec >= 60 )                // Yes, update number of seconds
     {
       timeinfo.tm_sec = 0 ;                       // Wrap after 60 seconds
@@ -2635,6 +2640,7 @@ void  scandigital()
   {
     return ;
   }
+  scanios++ ;                                               // TEST*TEST*TEST
   oldmillis = millis() ;                                    // 100 msec over
   for ( i = 0 ; ( pinnr = progpin[i].gpio ) >= 0 ; i++ )    // Scan all inputs
   {
@@ -3221,13 +3227,14 @@ void setup()
   adc1_config_channel_atten ( ADC1_CHANNEL_0, ADC_ATTEN_0db ) ;
   dataqueue = xQueueCreate ( QSIZ,                        // Create queue for communication
                              sizeof ( qdata_struct ) ) ;
-  xTaskCreate (
+  xTaskCreatePinnedToCore (
     playtask,                                             // Task to play data in dataqueue.
     "Playtask",                                           // name of task.
     1600,                                                 // Stack size of task
     NULL,                                                 // parameter of the task
     2,                                                    // priority of the task
-    &xplaytask ) ;                                        // Task handle to keep track of created task
+    &xplaytask,                                           // Task handle to keep track of created task
+    0 ) ;                                                 // Run on CPU 0
   xTaskCreate (
     spftask,                                              // Task to handle special functions.
     "Spftask",                                            // name of task.
@@ -4065,7 +4072,7 @@ void loop()
   scandigital() ;                                           // Scan digital inputs
   scanIR() ;                                                // See if IR input
   ArduinoOTA.handle() ;                                     // Check for OTA
-  mp3loop() ;                                               // Do more mp3 related actions
+  //mp3loop() ;                                               // Do more mp3 related actions
   handlehttpreply() ;
   cmdclient = cmdserver.available() ;                       // Check Input from client?
   if ( cmdclient )                                          // Client connected?
@@ -4803,6 +4810,7 @@ const char* analyzeCmd ( const char* par, const char* val )
     dbgprint ( "Stack playtask is %d", uxTaskGetStackHighWaterMark ( xplaytask ) ) ;
     dbgprint ( "Stack spftask  is %d", uxTaskGetStackHighWaterMark ( xspftask ) ) ;
     dbgprint ( "ADC reading is %d", adcval ) ;
+    dbgprint ( "scaniocount is %d", scaniocount ) ;
   }
   // Commands for bass/treble control
   else if ( argument.startsWith ( "tone" ) )          // Tone command
