@@ -121,10 +121,11 @@
 // 30-05-2018, ES: Bugfix: Assigned DRAM to global variables used in timer ISR.
 // 31-05-2018, ES: Bugfix: Crashed if I2C is used, but pins not defined.
 // 01-06-2018, ES: Run Playtask on CPU 0.
+// 04-06-2018, ES: Made handling of playlistdata more tolerant.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Fri, 1 June 2018 16:38:00 GMT"
+#define VERSION "Mon, 4 June 2018 09:30:00 GMT"
 //
 // Define type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
@@ -152,7 +153,7 @@
 // Number of entries in the queue
 #define QSIZ 400
 // Debug buffer size
-#define DEBUG_BUFFER_SIZE 130
+#define DEBUG_BUFFER_SIZE 150
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
 // Not that the password of an AP must be at least as long as 8 characters.
 // Also used for other naming.
@@ -360,6 +361,7 @@ String            SD_nodelist ;                          // Nodes of mp3-files o
 int               SD_nodecount = 0 ;                     // Number of nodes in SD_nodelist
 String            SD_currentnode = "" ;                  // Node ID of song playing ("0" if random)
 uint16_t          adcval ;                               // ADC value (battery voltage)
+uint16_t          clength ;                              // Content length found in http header
 int16_t           scanios ;                              // TEST*TEST*TEST
 int16_t           scaniocount ;                          // TEST*TEST*TEST
 std::vector<WifiInfo_t> wifilist ;                       // List with wifi_xx info
@@ -3949,7 +3951,7 @@ void mp3loop()
       {
         if ( datamode == PLAYLISTDATA )                  // End of playlist
         {
-          playlist_num = 0 ;                             // Yes, reset
+          playlist_num = 0 ;                             // And reset
           dbgprint ( "End of playlist seen" ) ;
           datamode = STOPPED ;
           ini_block.newpreset++ ;                        // Go to next preset
@@ -4072,7 +4074,7 @@ void loop()
   scandigital() ;                                           // Scan digital inputs
   scanIR() ;                                                // See if IR input
   ArduinoOTA.handle() ;                                     // Check for OTA
-  //mp3loop() ;                                               // Do more mp3 related actions
+  mp3loop() ;                                               // Do more mp3 related actions
   handlehttpreply() ;
   cmdclient = cmdserver.available() ;                       // Check Input from client?
   if ( cmdclient )                                          // Client connected?
@@ -4122,6 +4124,21 @@ bool chkhdrline ( const char* str )
     }
   }
   return false ;                                      // End of string without colon
+}
+
+
+//**************************************************************************************************
+//                            S C A N _ C O N T E N T _ L E N G T H                                *
+//**************************************************************************************************
+// If the line contains content-length information: set clength (content length counter).          *
+//**************************************************************************************************
+void scan_content_length ( const char* metalinebf )
+{
+  if ( strstr ( metalinebf, "Content-Length" ) )        // Line contains content length
+  {
+    clength = atoi ( metalinebf + 15 ) ;                // Yes, set clength
+    dbgprint ( "Content-Length is %d", clength ) ;      // Show for debugging purposes
+  }
 }
 
 
@@ -4333,6 +4350,7 @@ void handlebyte_ch ( uint8_t b )
     datamode = PLAYLISTHEADER ;                        // Handle playlist data
     playlistcnt = 1 ;                                  // Reset for compare
     totalcount = 0 ;                                   // Reset totalcount
+    clength = 0xFFFF ;                                 // Content-length unknown
     dbgprint ( "Read from playlist" ) ;
   }
   if ( datamode == PLAYLISTHEADER )                    // Read header
@@ -4341,7 +4359,7 @@ void handlebyte_ch ( uint8_t b )
          ( b == '\r' ) ||                              // Ignore CR
          ( b == '\0' ) )                               // Ignore NULL
     {
-      // Yes, ignore
+      return ;                                         // Quick return
     }
     else if ( b == '\n' )                              // Linefeed ?
     {
@@ -4349,6 +4367,7 @@ void handlebyte_ch ( uint8_t b )
       metalinebf[metalinebfx] = '\0' ;                 // Take care of delimeter
       dbgprint ( "Playlistheader: %s",                 // Show playlistheader
                  metalinebf ) ;
+      scan_content_length ( metalinebf ) ;             // Check if it is a content-length line
       metalinebfx = 0 ;                                // Ready for next line
       if ( LFcount == 2 )
       {
@@ -4371,13 +4390,23 @@ void handlebyte_ch ( uint8_t b )
   }
   if ( datamode == PLAYLISTDATA )                      // Read next byte of .m3u file data
   {
+    clength-- ;                                        // Decrease content length by 1
     if ( ( b > 0x7F ) ||                               // Ignore unprintable characters
          ( b == '\r' ) ||                              // Ignore CR
          ( b == '\0' ) )                               // Ignore NULL
     {
       // Yes, ignore
     }
-    else if ( b == '\n' )                              // Linefeed ?
+    if ( b != '\n' )                                   // Linefeed?
+    {                                                  // No, normal character in playlistdata,
+      metalinebf[metalinebfx++] = (char)b ;            // add it to metaline
+      if ( metalinebfx >= METASIZ )                    // Prevent overflow
+      {
+        metalinebfx-- ;
+      }
+    }
+    if ( ( b == '\n' ) ||                              // linefeed ?
+         ( clength == 0 ) )                            // Or end of playlist data contents
     {
       int inx ;                                        // Pointer in metaline
       metalinebf[metalinebfx] = '\0' ;                 // Take care of delimeter
@@ -4426,14 +4455,6 @@ void handlebyte_ch ( uint8_t b )
       metalinebfx = 0 ;                                // Prepare for next line
       host = playlist ;                                // Back to the .m3u host
       playlistcnt++ ;                                  // Next entry in playlist
-    }
-    else
-    {
-      metalinebf[metalinebfx++] = (char)b ;            // Normal character, add it to metaline
-      if ( metalinebfx >= METASIZ )                    // Prevent overflow
-      {
-        metalinebfx-- ;
-      }
     }
   }
 }
