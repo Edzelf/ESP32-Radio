@@ -50,7 +50,7 @@ Adafruit_ST7735*     tft = NULL ;                                  // For instan
 bool dsp_begin()
 {
   tft = new Adafruit_ST7735 ( ini_block.tft_cs_pin,
-                              ini_block.tft_dc_pin ) ;            // Create an instant for TFT
+                              ini_block.tft_dc_pin, -1 ) ;        // Create an instant for TFT
   // Uncomment one of the following initR lines for ST7735R displays
   //tft->initR ( INITR_GREENTAB ) ;                               // Init TFT interface
   //tft->initR ( INITR_REDTAB ) ;                                 // Init TFT interface
