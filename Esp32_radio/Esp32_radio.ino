@@ -121,7 +121,8 @@
 // 30-05-2018, ES: Bugfix: Assigned DRAM to global variables used in timer ISR.
 // 31-05-2018, ES: Bugfix: Crashed if I2C is used, but pins not defined.
 // 01-06-2018, ES: Run Playtask on CPU 0.
-// 04-06-2018, ES: Made handling of playlistdata more tolerant.
+// 04-06-2018, ES: Made handling of playlistdata more tolerant (NDR).
+// 09-06-2018, ES: Typo in defaultprefs.h
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
@@ -3024,7 +3025,7 @@ void setup()
   if ( config_html_version  < 171207 ) dbgprint ( wvn, "config" ) ;
   if ( index_html_version   < 180102 ) dbgprint ( wvn, "index" ) ;
   if ( mp3play_html_version < 170626 ) dbgprint ( wvn, "mp3play" ) ;
-  if ( defaultprefs_version < 171215 ) dbgprint ( wvn, "defaultprefs" ) ;
+  if ( defaultprefs_version < 190609 ) dbgprint ( wvn, "defaultprefs" ) ;
   // Print some memory and sketch info
   dbgprint ( "Starting ESP32-radio running on CPU %d at %d MHz.  Version %s.  Free memory %d",
              xPortGetCoreID(),
