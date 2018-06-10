@@ -7,7 +7,7 @@
 //  - nvs
 //  - Adafruit_ST7735
 //  - ArduinoOTA
-//  - PubSubClient
+//  - PubSubClientenc_dt_pin
 //  - SD
 //  - FS
 // A library for the VS1053 (for ESP32) is not available (or not easy to find).  Therefore
@@ -123,10 +123,11 @@
 // 01-06-2018, ES: Run Playtask on CPU 0.
 // 04-06-2018, ES: Made handling of playlistdata more tolerant (NDR).
 // 09-06-2018, ES: Typo in defaultprefs.h
+// 10-06-2018, ES: Rotary encoder, interrupts on all 3 signals.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 4 June 2018 09:30:00 GMT"
+#define VERSION "Sun, 10 June 2018 18:30:00 GMT"
 //
 // Define type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
@@ -3204,7 +3205,7 @@ void setup()
   if ( ( ini_block.enc_clk_pin + ini_block.enc_dt_pin + ini_block.enc_sw_pin ) > 2 )
   {
     attachInterrupt ( ini_block.enc_clk_pin, isr_enc_turn,   CHANGE ) ;
-    //attachInterrupt ( ini_block.enc_dt_pin,  isr_enc_turn,   CHANGE ) ;
+    attachInterrupt ( ini_block.enc_dt_pin,  isr_enc_turn,   CHANGE ) ;
     attachInterrupt ( ini_block.enc_sw_pin,  isr_enc_switch, CHANGE ) ;
     dbgprint ( "Rotary encoder is enabled" ) ;
   }
