@@ -124,10 +124,11 @@
 // 04-06-2018, ES: Made handling of playlistdata more tolerant (NDR).
 // 09-06-2018, ES: Typo in defaultprefs.h
 // 10-06-2018, ES: Rotary encoder, interrupts on all 3 signals.
+// 25-06-2018, ES: Timing of mp3loop.  Limit read from stream to free queue space.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Sun, 10 June 2018 18:30:00 GMT"
+#define VERSION "Mon, 25 June 2018 11:10:00 GMT"
 //
 // Define type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
@@ -364,6 +365,7 @@ int               SD_nodecount = 0 ;                     // Number of nodes in S
 String            SD_currentnode = "" ;                  // Node ID of song playing ("0" if random)
 uint16_t          adcval ;                               // ADC value (battery voltage)
 uint16_t          clength ;                              // Content length found in http header
+uint32_t          max_mp3loop_time = 0 ;                 // To check max handling time in mp3loop (msec)
 int16_t           scanios ;                              // TEST*TEST*TEST
 int16_t           scaniocount ;                          // TEST*TEST*TEST
 std::vector<WifiInfo_t> wifilist ;                       // List with wifi_xx info
@@ -3915,13 +3917,17 @@ void mp3loop()
   int             res = 0 ;                              // Result reading from mp3 stream
   uint32_t        av = 0 ;                               // Available in stream
   String          nodeID ;                               // Next nodeID of track on SD
-
+  uint32_t        timing ;                               // Startime and duration this function
+  uint32_t        qspace ;                               // Free space in data queue
+  
   // Try to keep the Queue to playtask filled up by adding as much bytes as possible
+  
   if ( datamode & ( INIT | HEADER | DATA |               // Test op playing
                     METADATA | PLAYLISTINIT |
                     PLAYLISTHEADER |
                     PLAYLISTDATA ) )
   {
+    timing = millis() ;                                  // Start time this function
     maxchunk = sizeof(tmpbuff) ;                         // Reduce byte count for this mp3loop()
     if ( localfile )                                     // Playing file from SD card?
     {
@@ -3940,10 +3946,16 @@ void mp3loop()
     }
     else
     {
+      qspace = uxQueueSpacesAvailable( dataqueue ) *     // Compute free space in data queue
+               sizeof(qdata_struct) ;
       av = mp3client.available() ;                       // Available from stream
       if ( av < maxchunk )                               // Limit read size
       {
         maxchunk = av ;
+      }
+      if ( maxchunk > qspace )                           // Enough space in queue?
+      {
+        maxchunk = qspace ;                              // No, limit to free queue space
       }
       if ( maxchunk )                                    // Anything to read?
       {
@@ -3963,6 +3975,12 @@ void mp3loop()
     for ( int i = 0 ; i < res ; i++ )
     {
       handlebyte_ch ( tmpbuff[i] ) ;                     // Handle one byte
+    }
+    timing = millis() - timing ;                         // Duration this function
+    if ( timing > max_mp3loop_time )                     // New maximum found?
+    {
+      max_mp3loop_time = timing ;                        // Yes, set new maximum
+      dbgprint ( "Duration mp3loop %d", timing ) ;       // and report it
     }
   }
   if ( datamode == STOPREQD )                            // STOP requested?
@@ -4834,6 +4852,10 @@ const char* analyzeCmd ( const char* par, const char* val )
     dbgprint ( "Stack spftask  is %d", uxTaskGetStackHighWaterMark ( xspftask ) ) ;
     dbgprint ( "ADC reading is %d", adcval ) ;
     dbgprint ( "scaniocount is %d", scaniocount ) ;
+    dbgprint ( "Max. mp3_loop duration is %d", max_mp3loop_time ) ;
+    max_mp3loop_time = 0 ;                            // Start new check
+
+
   }
   // Commands for bass/treble control
   else if ( argument.startsWith ( "tone" ) )          // Tone command
