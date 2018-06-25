@@ -35,6 +35,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 25-may-2018, Limit read from stream to free queue space.
 - 04-may-2018, Made handling of playlistdata more tolerant.
 - 31-may-2018, Bugfix. Crashed if I2C was used, but no pins assigned.
 - 30-may-2018, Bugfix. Assigned DRAM to global variables used in ISRs.
