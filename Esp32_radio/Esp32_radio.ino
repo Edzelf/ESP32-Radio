@@ -128,7 +128,7 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 25 June 2018 11:10:00 GMT"
+#define VERSION "Mon, 25 June 2018 14:15:00 GMT"
 //
 // Define type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
@@ -3929,12 +3929,18 @@ void mp3loop()
   {
     timing = millis() ;                                  // Start time this function
     maxchunk = sizeof(tmpbuff) ;                         // Reduce byte count for this mp3loop()
+    qspace = uxQueueSpacesAvailable( dataqueue ) *       // Compute free space in data queue
+             sizeof(qdata_struct) ;
     if ( localfile )                                     // Playing file from SD card?
     {
       av = mp3filelength ;                               // Bytes left in file
       if ( av < maxchunk )                               // Reduce byte count for this mp3loop()
       {
         maxchunk = av ;
+      }
+      if ( maxchunk > qspace )                           // Enough space in queue?
+      {
+        maxchunk = qspace ;                              // No, limit to free queue space
       }
       if ( maxchunk )                                    // Anything to read?
       {
@@ -3946,8 +3952,6 @@ void mp3loop()
     }
     else
     {
-      qspace = uxQueueSpacesAvailable( dataqueue ) *     // Compute free space in data queue
-               sizeof(qdata_struct) ;
       av = mp3client.available() ;                       // Available from stream
       if ( av < maxchunk )                               // Limit read size
       {
