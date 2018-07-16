@@ -128,9 +128,9 @@
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 25 June 2018 14:15:00 GMT"
+#define VERSION "Mon, 16 July 2018 07:49:00 GMT"
 //
-// Define type of display.  See documentation.
+// Define (one) type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
 //#define DUMMYTFT                     // Dummy display
@@ -3018,7 +3018,8 @@ void setup()
   char                      tmpstr[20] ;                 // For version and Mac address
   const char*               partname = "nvs" ;           // Partition with NVS info
   esp_partition_iterator_t  pi ;                         // Iterator for find
-  const char*               wvn = "Include file %s_html has the wrong version number!"
+  const char*               dtyp = "Display type is %s" ;
+  const char*               wvn = "Include file %s_html has the wrong version number! "
                                   "Replace header file." ;
 
   Serial.begin ( 115200 ) ;                              // For debug
@@ -3028,13 +3029,25 @@ void setup()
   if ( config_html_version  < 171207 ) dbgprint ( wvn, "config" ) ;
   if ( index_html_version   < 180102 ) dbgprint ( wvn, "index" ) ;
   if ( mp3play_html_version < 170626 ) dbgprint ( wvn, "mp3play" ) ;
-  if ( defaultprefs_version < 190609 ) dbgprint ( wvn, "defaultprefs" ) ;
+  if ( defaultprefs_version < 180609 ) dbgprint ( wvn, "defaultprefs" ) ;
   // Print some memory and sketch info
   dbgprint ( "Starting ESP32-radio running on CPU %d at %d MHz.  Version %s.  Free memory %d",
              xPortGetCoreID(),
              ESP.getCpuFreqMHz(),
              VERSION,
              ESP.getFreeHeap() ) ;                       // Normally about 170 kB
+  #if defined ( BLUETFT )                                // Report display option
+    dbgprint ( dtyp, "BLUETFT" ) ;
+  #endif
+  #if defined ( OLED )
+    dbgprint ( dtyp, "OLED" ) ;
+  #endif
+  #if defined ( DUMMYTFT )
+    dbgprint ( dtyp, "DUMMYTFT" ) ;
+  #endif
+  #if defined ( LCD1602I2C )
+    dbgprint ( dtyp, "BLUETFT" ) ;
+  #endif
   maintask = xTaskGetCurrentTaskHandle() ;               // My taskhandle
   SPIsem = xSemaphoreCreateMutex(); ;                    // Semaphore for SPI bus
   pi = esp_partition_find ( ESP_PARTITION_TYPE_DATA,     // Get partition iterator for
