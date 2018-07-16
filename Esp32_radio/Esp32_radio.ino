@@ -125,10 +125,11 @@
 // 09-06-2018, ES: Typo in defaultprefs.h
 // 10-06-2018, ES: Rotary encoder, interrupts on all 3 signals.
 // 25-06-2018, ES: Timing of mp3loop.  Limit read from stream to free queue space.
+// 16-07-2018, ES: Correction tftset().
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 16 July 2018 07:49:00 GMT"
+#define VERSION "Mon, 16 July 2018 11:00:00 GMT"
 //
 // Define (one) type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
@@ -1180,8 +1181,11 @@ void tftset ( uint16_t inx, const char *str )
 
 void tftset ( uint16_t inx, String& str )
 {
-  tftdata[inx].str = str ;                              // Set string
-  tftdata[inx].update_req = true ;                      // and request flag
+  if ( inx < TFTSECS )                                  // Segment available on display
+  {
+    tftdata[inx].str = str ;                            // Set string
+    tftdata[inx].update_req = true ;                    // and request flag
+  }
 }
 
 
