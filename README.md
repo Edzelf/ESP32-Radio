@@ -4,6 +4,8 @@ See the review by Andreas Spiess at https://www.youtube.com/watch?v=hz65vfvbXMs.
 
 Look for documentation and printdesign in the doc directory.
 
+Note: The radio will NOT play AACP streams.
+
 Features:
 -	Can connect to thousands of Internet radio stations that broadcast MP3 or Ogg audio streams.
 - Can connect to a standalone mp3 file on a server.
