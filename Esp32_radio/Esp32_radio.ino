@@ -1,5 +1,5 @@
 //***************************************************************************************************
-//*  ESP32_Radio -- Webradio receiver for ESP32, 1.8 color display and VS1053 MP3 module.           *
+//*  ESP32_Radio -- Webradio receiver for ESP32, VS1053 MP3 module and optional (color) display.    *
 //*                 By Ed Smallenburg.                                                              *
 //***************************************************************************************************
 // ESP32 libraries used:
@@ -126,10 +126,11 @@
 // 10-06-2018, ES: Rotary encoder, interrupts on all 3 signals.
 // 25-06-2018, ES: Timing of mp3loop.  Limit read from stream to free queue space.
 // 16-07-2018, ES: Correction tftset().
+// 25-07-2018, ES: Correction touch pins.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 16 July 2018 11:00:00 GMT"
+#define VERSION "Wed, 25 July 2018 11:30:00 GMT"
 //
 // Define (one) type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
@@ -462,14 +463,14 @@ struct touchpin_struct                                   // For programmable inp
   bool           reserved ;                              // Reserved for connected devices
   bool           avail ;                                 // Pin is available for a command
   String         command ;                               // Command to execute when activated
-  // Example: "uppreset=1"
+                                                         // Example: "uppreset=1"
   bool           cur ;                                   // Current state, true = HIGH, false = LOW
   int16_t        count ;                                 // Counter number of times low level
 } ;
 touchpin_struct   touchpin[] =                           // Touch pins and programmed function
 {
   {   4, false, false, "", false, 0 },                   // TOUCH0
-  //{ 0, true,  false, "", false, 0 },                   // TOUCH1, reserved for BOOT button
+  {   0, true,  false, "", false, 0 },                   // TOUCH1, reserved for BOOT button
   {   2, false, false, "", false, 0 },                   // TOUCH2
   {  15, false, false, "", false, 0 },                   // TOUCH3
   {  13, false, false, "", false, 0 },                   // TOUCH4
@@ -478,7 +479,7 @@ touchpin_struct   touchpin[] =                           // Touch pins and progr
   {  27, false, false, "", false, 0 },                   // TOUCH7
   {  33, false, false, "", false, 0 },                   // TOUCH8
   {  32, false, false, "", false, 0 },                   // TOUCH9
-  {  -1, false, false, "", false, 0 }
+  {  -1, false, false, "", false, 0 }                    // End of list
   // End of table
 } ;
 
@@ -2324,7 +2325,7 @@ void readprogbuttons()
   // Now for the touch pins 0..9, identified by their GPIO pin number
   for ( i = 0 ; ( pinnr = touchpin[i].gpio ) >= 0 ; i++ )   // Scan for all programmable pins
   {
-    sprintf ( mykey, "touch_%02d", pinnr ) ;                // Form key in preferences
+    sprintf ( mykey, "touch_%02d", i ) ;                    // Form key in preferences
     if ( nvssearch ( mykey ) )
     {
       val = nvsgetstr ( mykey ) ;                           // Get the contents
@@ -2336,12 +2337,14 @@ void readprogbuttons()
           touchpin[i].command = val ;                       // Set command
           //pinMode ( touchpin[i].gpio,  INPUT ) ;          // Free floating input
           dbgprint ( "touch_%02d will execute %s",          // Show result
-                     pinnr, val.c_str() ) ;
+                     i, val.c_str() ) ;
+          dbgprint ( "Level is now %d",
+                     touchRead ( pinnr ) ) ;                // Sample the pin
         }
         else
         {
           dbgprint ( "touch_%02d pin (GPIO%02d) is reserved for I/O!",
-                     pinnr, pinnr ) ;
+                     i, pinnr ) ;
 
         }
       }
@@ -2979,8 +2982,6 @@ void fillkeylist()
     i = 0 ;
     while ( i < 126 )
     {
-
-
       bm = ( nvsbuf.Bitmap[i / 4] >> ( ( i % 4 ) * 2 ) ) ;      // Get bitmap for this entry,
       bm &= 0x03 ;                                              // 2 bits for one entry
       if ( bm == 2 )                                            // Entry is active?
@@ -5037,7 +5038,7 @@ void displayvolume()
   {
     static uint8_t oldvol = 0 ;                         // Previous volume
     uint8_t        newvol ;                             // Current setting
-    uint8_t        pos ;                                // Positon of volume indicator
+    uint16_t       pos ;                                // Positon of volume indicator
 
     newvol = vs1053player->getVolume() ;                // Get current volume setting
     if ( newvol != oldvol )                             // Volume changed?
@@ -5065,7 +5066,7 @@ void displaytime ( const char* str, uint16_t color )
 {
   static char oldstr[9] = "........" ;             // For compare
   uint8_t     i ;                                  // Index in strings
-  uint8_t     pos = dsp_getwidth() + TIMEPOS ;     // X-position of character
+  uint16_t    pos = dsp_getwidth() + TIMEPOS ;     // X-position of character
 
   if ( str[0] == '\0' )                            // Empty string?
   {
