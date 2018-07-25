@@ -37,6 +37,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 25-jul-2018, Correction touch pins.
 - 15-jul-2018, Correction tftset().
 - 25-may-2018, Limit read from stream to free queue space.
 - 04-may-2018, Made handling of playlistdata more tolerant.
