@@ -452,6 +452,8 @@ progpin_struct   progpin[] =                             // Input pins and progr
   { 33, false, false,  "", false },
   { 34, false, false,  "", false },                      // Note, no internal pull-up
   { 35, false, false,  "", false },                      // Note, no internal pull-up
+  { 36, false, false,  "", false },                      // Note, no internal pull-up // DAVID // SVP
+  { 39, false, false,  "", false },                      // Note, no internal pull-up // DAVID // SVN
   { -1, false, false,  "", false }                       // End of list
 } ;
 
@@ -2655,6 +2657,7 @@ void  scandigital()
       continue ;
     }
     level = ( digitalRead ( pinnr ) == HIGH ) ;             // Sample the pin
+    if (progpin[i].gpio == 36) dbgprint( "********* Scanning GPIO36 - level is %d", level); // DAVID DEBUG
     if ( level != progpin[i].cur )                          // Change seen?
     {
       progpin[i].cur = level ;                              // And the new level
