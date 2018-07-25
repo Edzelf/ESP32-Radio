@@ -4,6 +4,8 @@ See the review by Andreas Spiess at https://www.youtube.com/watch?v=hz65vfvbXMs.
 
 Look for documentation and printdesign in the doc directory.
 
+Note: The radio will NOT play AACP streams.
+
 Features:
 -	Can connect to thousands of Internet radio stations that broadcast MP3 or Ogg audio streams.
 - Can connect to a standalone mp3 file on a server.
@@ -35,6 +37,8 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 25-jul-2018, Correction touch pins.
+- 15-jul-2018, Correction tftset().
 - 25-may-2018, Limit read from stream to free queue space.
 - 04-may-2018, Made handling of playlistdata more tolerant.
 - 31-may-2018, Bugfix. Crashed if I2C was used, but no pins assigned.
