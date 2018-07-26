@@ -454,8 +454,8 @@ progpin_struct   progpin[] =                             // Input pins and progr
   { 33, false, false,  "", false },
   { 34, false, false,  "", false },                      // Note, no internal pull-up
   { 35, false, false,  "", false },                      // Note, no internal pull-up
-  { 36, false, false,  "", false },                      // Note, no internal pull-up // DAVID // SVP
-  { 39, false, false,  "", false },                      // Note, no internal pull-up // DAVID // SVN
+  //{ 36, false, false,  "", false },                    // Used as ADC for battery status // CHANGED BY DAVID
+  { 39, false, false,  "", false },                      // Note, no internal pull-up // CHANGED BY DAVID // SVN
   { -1, false, false,  "", false }                       // End of list
 } ;
 
@@ -2664,7 +2664,6 @@ void  scandigital()
       continue ;
     }
     level = ( digitalRead ( pinnr ) == HIGH ) ;             // Sample the pin
-    if (progpin[i].gpio == 36) dbgprint( "********* Scanning GPIO36 - level is %d", level); // DAVID DEBUG
     if ( level != progpin[i].cur )                          // Change seen?
     {
       progpin[i].cur = level ;                              // And the new level
@@ -3227,6 +3226,9 @@ void setup()
   // Init settings for rotary switch (if existing).
   if ( ( ini_block.enc_clk_pin + ini_block.enc_dt_pin + ini_block.enc_sw_pin ) > 2 )
   {
+    pinMode ( ini_block.enc_clk_pin, INPUT_PULLUP ) ;
+    pinMode ( ini_block.enc_dt_pin, INPUT_PULLUP ) ;
+    pinMode ( ini_block.enc_sw_pin, INPUT_PULLUP ) ;         
     attachInterrupt ( ini_block.enc_clk_pin, isr_enc_turn,   CHANGE ) ;
     attachInterrupt ( ini_block.enc_dt_pin,  isr_enc_turn,   CHANGE ) ;
     attachInterrupt ( ini_block.enc_sw_pin,  isr_enc_switch, CHANGE ) ;
