@@ -127,6 +127,7 @@
 // 25-06-2018, ES: Timing of mp3loop.  Limit read from stream to free queue space.
 // 16-07-2018, ES: Correction tftset().
 // 25-07-2018, ES: Correction touch pins.
+// 26-07-2018, DK: Added support for GPIO 39
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
@@ -454,8 +455,8 @@ progpin_struct   progpin[] =                             // Input pins and progr
   { 33, false, false,  "", false },
   { 34, false, false,  "", false },                      // Note, no internal pull-up
   { 35, false, false,  "", false },                      // Note, no internal pull-up
-  //{ 36, false, false,  "", false },                    // Used as ADC for battery status // CHANGED BY DAVID
-  { 39, false, false,  "", false },                      // Note, no internal pull-up // CHANGED BY DAVID // SVN
+  //{ 36, false, false,  "", false },                    // Used as ADC for battery status // SVP
+  { 39, false, false,  "", false },                      // Note, no internal pull-up // SVN
   { -1, false, false,  "", false }                       // End of list
 } ;
 
@@ -3225,10 +3226,7 @@ void setup()
   timeinfo.tm_year = 0 ;                                 // Set TOD to illegal
   // Init settings for rotary switch (if existing).
   if ( ( ini_block.enc_clk_pin + ini_block.enc_dt_pin + ini_block.enc_sw_pin ) > 2 )
-  {
-    pinMode ( ini_block.enc_clk_pin, INPUT_PULLUP ) ;
-    pinMode ( ini_block.enc_dt_pin, INPUT_PULLUP ) ;
-    pinMode ( ini_block.enc_sw_pin, INPUT_PULLUP ) ;         
+  { 
     attachInterrupt ( ini_block.enc_clk_pin, isr_enc_turn,   CHANGE ) ;
     attachInterrupt ( ini_block.enc_dt_pin,  isr_enc_turn,   CHANGE ) ;
     attachInterrupt ( ini_block.enc_sw_pin,  isr_enc_switch, CHANGE ) ;
