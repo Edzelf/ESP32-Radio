@@ -127,7 +127,7 @@
 // 25-06-2018, ES: Timing of mp3loop.  Limit read from stream to free queue space.
 // 16-07-2018, ES: Correction tftset().
 // 25-07-2018, ES: Correction touch pins.
-// 27-07-2018, DK: Added support for inverse logic of shutdown pin // DAVID
+// 27-07-2018, DK: Added support for inverse logic of shutdown pin
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
@@ -392,7 +392,7 @@ sv bool           longclick = false ;                    // True if longclick de
 enum enc_menu_t { VOLUME, PRESET, TRACK } ;              // State for rotary encoder menu
 enc_menu_t        enc_menu_mode = VOLUME ;               // Default is VOLUME mode
 
-int8_t            shutdown_logic = -1 ;                   // shutdown pin is active high by default // DAVID
+int8_t            shutdown_logic = -1 ;                   // shutdown pin is active high by default
 
 // Include software for the right display
 #ifdef BLUETFT
@@ -617,7 +617,7 @@ class VS1053
     int8_t       dcs_pin ;                        // Pin where DCS line is connected
     int8_t       dreq_pin ;                       // Pin where DREQ line is connected
     int8_t       shutdown_pin ;                   // Pin where the shutdown line is connected
-    bool         shutdown_val ;                   // If shutdown logic is inverted (LOW shuts amp down) this is set to LOW, otherwise HIGH // DAVID
+    bool         shutdown_val ;                   // If shutdown logic is inverted (LOW shuts amp down) this is set to LOW, otherwise HIGH
     uint8_t       curvol ;                        // Current volume setting 0..100%
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
@@ -685,7 +685,7 @@ class VS1053
 
   public:
     // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
-    VS1053 ( int8_t _cs_pin, int8_t _dcs_pin, int8_t _dreq_pin, int8_t _shutdown_pin, bool _shutdown_val ) ; // DAVID
+    VS1053 ( int8_t _cs_pin, int8_t _dcs_pin, int8_t _dreq_pin, int8_t _shutdown_pin, bool _shutdown_val ) ;
     void     begin() ;                                   // Begin operation.  Sets pins correctly,
                                                          // and prepares SPI bus.
     void     startSong() ;                               // Prepare to start playing. Call this each
@@ -718,7 +718,7 @@ class VS1053
 //**************************************************************************************************
 
 VS1053::VS1053 ( int8_t _cs_pin, int8_t _dcs_pin, int8_t _dreq_pin, int8_t _shutdown_pin, bool _shutdown_val ) :
-  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin), shutdown_pin(_shutdown_pin), shutdown_val(_shutdown_val) // DAVID
+  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin), shutdown_pin(_shutdown_pin), shutdown_val(_shutdown_val)
 {
 }
 
@@ -854,7 +854,7 @@ void VS1053::begin()
   if ( shutdown_pin >= 0 )                              // Shutdown in use?
   {
     pinMode ( shutdown_pin,   OUTPUT ) ;
-    digitalWrite ( shutdown_pin, shutdown_val ) ;              // Shut down audio output // DAVID
+    digitalWrite ( shutdown_pin, shutdown_val ) ;              // Shut down audio output
   }
   delay ( 100 ) ;
   // Init SPI in slow mode ( 0.2 MHz )
@@ -905,12 +905,12 @@ void VS1053::setVolume ( uint8_t vol )
     value = ( value << 8 ) | value ;
     write_register ( SCI_VOL, value ) ;                 // Volume left and right
 
-    if ( shutdown_pin >= 0 )                              // Shutdown in use? // DAVID
+    if ( shutdown_pin >= 0 )                              // Shutdown in use? Then also use this when muted (volume==0)
     {
       if ( vol == 0 ) {
-        digitalWrite ( shutdown_pin, shutdown_val ) ;               // Disable audio output // DAVID
+        digitalWrite ( shutdown_pin, shutdown_val ) ;               // Disable audio output
       } else {
-        digitalWrite ( shutdown_pin, !shutdown_val ) ;              // Enable audio output // DAVID
+        digitalWrite ( shutdown_pin, !shutdown_val ) ;              // Enable audio output
       }
     }
   }
@@ -935,7 +935,7 @@ void VS1053::startSong()
   sdi_send_fillers ( 10 ) ;
   if ( shutdown_pin >= 0 )                              // Shutdown in use?
   {
-    digitalWrite ( shutdown_pin, !shutdown_val ) ;                // Enable audio output  // DAVID
+    digitalWrite ( shutdown_pin, !shutdown_val ) ;                // Enable audio output
   }
 
 }
@@ -953,7 +953,7 @@ void VS1053::stopSong()
   sdi_send_fillers ( 2052 ) ;
   if ( shutdown_pin >= 0 )                              // Shutdown in use?
   {
-    digitalWrite ( shutdown_pin, shutdown_val ) ;               // Disable audio output // DAVID
+    digitalWrite ( shutdown_pin, shutdown_val ) ;               // Disable audio output
   }
   delay ( 10 ) ;
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
@@ -3121,7 +3121,7 @@ void setup()
                               ini_block.vs_dcs_pin,
                               ini_block.vs_dreq_pin,
                               ini_block.vs_shutdown_pin,
-                              shutdown_logic) ;                  // DAVID
+                              shutdown_logic) ;
   if ( ini_block.ir_pin >= 0 )
   {
     dbgprint ( "Enable pin %d for IR",
