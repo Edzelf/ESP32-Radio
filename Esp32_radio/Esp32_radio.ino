@@ -127,7 +127,6 @@
 // 25-06-2018, ES: Timing of mp3loop.  Limit read from stream to free queue space.
 // 16-07-2018, ES: Correction tftset().
 // 25-07-2018, ES: Correction touch pins.
-// 26-07-2018, DK: Added support for GPIO 39// DAVID
 // 27-07-2018, DK: Added support for inverse logic of shutdown pin // DAVID
 //
 //
