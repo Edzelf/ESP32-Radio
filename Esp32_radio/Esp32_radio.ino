@@ -3227,7 +3227,7 @@ void setup()
   // Init settings for rotary switch (if existing).
   if ( ( ini_block.enc_clk_pin + ini_block.enc_dt_pin + ini_block.enc_sw_pin ) > 2 )
   {
-    if ( enc_internal_pullup ) {                        // DAVID
+    if ( enc_internal_pullup ) {
       pinMode ( ini_block.enc_clk_pin, INPUT_PULLUP );
       pinMode ( ini_block.enc_dt_pin, INPUT_PULLUP );
       pinMode ( ini_block.enc_sw_pin, INPUT_PULLUP );
