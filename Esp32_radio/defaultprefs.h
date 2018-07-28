@@ -27,13 +27,13 @@ tonehf = 0
 tonela = 0
 tonelf = 0
 #
-preset = 1
+preset = 6
 # Some preset examples
-preset_00 = st01.dlf.de/dlf/01/104/ogg/stream.ogg    #  0 - Deutschlandfunk
-preset_01 = st02.dlf.de/dlf/02/104/ogg/stream.ogg    #  1 - Deutschlandfunk Kultur
-preset_02 = ndr-ndrinfo-hamburg.cast.addradio.de/ndr/ndrinfo/hamburg/mp3/128/stream.mp3 #  2 - NDR Info Hamburg
-preset_03 = ndr-ndrkultur-live.cast.addradio.de/ndr/ndrkultur/live/mp3/128/stream.mp3 #  3 - NDR Kultur
-preset_04 = ndr-ndr903-hamburg.cast.addradio.de/ndr/ndr903/hamburg/mp3/128/stream.mp3 #  4 - NDR 90,3 Hamburg Welle
+preset_00 = 109.206.96.34:8100                       #  0 - NAXI LOVE RADIO, Belgrade, Serbia
+preset_01 = airspectrum.cdnstream1.com:8114/1648_128 #  1 - Easy Hits Florida 128k
+preset_02 = us2.internet-radio.com:8050              #  2 - CLASSIC ROCK MIAMI 256k
+preset_03 = airspectrum.cdnstream1.com:8000/1261_192 #  3 - Magic Oldies Florida
+preset_04 = airspectrum.cdnstream1.com:8008/1604_128 #  4 - Magic 60s Florida 60s Classic Rock
 preset_05 = us1.internet-radio.com:8105              #  5 - Classic Rock Florida - SHE Radio
 preset_06 = icecast.omroep.nl:80/radio1-bb-mp3       #  6 - Radio 1, NL
 preset_07 = 205.164.62.15:10032                      #  7 - 1.FM - GAIA, 64k
@@ -47,12 +47,8 @@ clk_server = pool.ntp.org                            # Time server to be used
 clk_offset = 1                                       # Offset with respect to UTC in hours
 clk_dst = 1                                          # Offset during daylight saving time (hours)
 # Some IR codes
-ir_301C = downvolume = 2
-ir_501C = upvolume = 2
-ir_601C = uppreset = 1
-ir_901C = downpreset = 1
-ir_A01C = stop
-ir_C01C = stop
+ir_40BF = upvolume = 2
+ir_C03F = downvolume = 2
 # GPIO pinnings
 pin_ir = 35                                          # GPIO Pin number for IR receiver VS1838B
 pin_enc_clk = 25                                     # GPIO Pin number for rotary encoder "CLK"
