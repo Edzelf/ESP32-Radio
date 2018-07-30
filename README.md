@@ -35,6 +35,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 30-jul-2018, Added GPIO39 and inversed shutdown pin.  Thanks to fletche.
 - 25-jul-2018, Correction touch pins.
 - 15-jul-2018, Correction tftset().
 - 25-may-2018, Limit read from stream to free queue space.
