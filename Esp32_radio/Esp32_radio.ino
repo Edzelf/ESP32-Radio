@@ -126,11 +126,13 @@
 // 10-06-2018, ES: Rotary encoder, interrupts on all 3 signals.
 // 25-06-2018, ES: Timing of mp3loop.  Limit read from stream to free queue space.
 // 16-07-2018, ES: Correction tftset().
-// 25-07-2018, ES: Correction touch pins.
+// 25-07-2018, ES: Correction touch pins, thanks to Fletsche.
+// 30-07-2018, ES: Added GPIO39 and inversed shutdown pin.  Thanks to 
+// 
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 25 July 2018 11:30:00 GMT"
+#define VERSION "Mon, 30 July 2018 09:30:00 GMT"
 //
 // Define (one) type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
@@ -248,6 +250,7 @@ struct ini_struct
   int8_t         vs_dcs_pin ;                         // GPIO connected to DCS of VS1053
   int8_t         vs_dreq_pin ;                        // GPIO connected to DREQ of VS1053
   int8_t         vs_shutdown_pin ;                    // GPIO to shut down the amplifier
+  int8_t         vs_shutdownx_pin ;                   // GPIO to shut down the amplifier (inversed logic)
   int8_t         spi_sck_pin ;                        // GPIO connected to SPI SCK pin
   int8_t         spi_miso_pin ;                       // GPIO connected to SPI MISO pin
   int8_t         spi_mosi_pin ;                       // GPIO connected to SPI MOSI pin
@@ -454,6 +457,8 @@ progpin_struct   progpin[] =                             // Input pins and progr
   { 33, false, false,  "", false },
   { 34, false, false,  "", false },                      // Note, no internal pull-up
   { 35, false, false,  "", false },                      // Note, no internal pull-up
+  //{ 36, true,  false,  "", false },                    // Reserved for ADC battery level
+  { 39, false,  false,  "", false },                     // Note, no internal pull-up
   { -1, false, false,  "", false }                       // End of list
 } ;
 
@@ -614,6 +619,7 @@ class VS1053
     int8_t       dcs_pin ;                        // Pin where DCS line is connected
     int8_t       dreq_pin ;                       // Pin where DREQ line is connected
     int8_t       shutdown_pin ;                   // Pin where the shutdown line is connected
+    int8_t       shutdownx_pin ;                  // Pin where the shutdown (inversed) line is connected
     uint8_t       curvol ;                        // Current volume setting 0..100%
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
@@ -681,7 +687,8 @@ class VS1053
 
   public:
     // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
-    VS1053 ( int8_t _cs_pin, int8_t _dcs_pin, int8_t _dreq_pin, int8_t _shutdown_pin ) ;
+    VS1053 ( int8_t _cs_pin, int8_t _dcs_pin, int8_t _dreq_pin,
+             int8_t _shutdown_pin, int8_t _shutdownx_pin ) ;
     void     begin() ;                                   // Begin operation.  Sets pins correctly,
                                                          // and prepares SPI bus.
     void     startSong() ;                               // Prepare to start playing. Call this each
@@ -713,8 +720,10 @@ class VS1053
 // VS1053 class implementation.                                                                    *
 //**************************************************************************************************
 
-VS1053::VS1053 ( int8_t _cs_pin, int8_t _dcs_pin, int8_t _dreq_pin, int8_t _shutdown_pin ) :
-  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin), shutdown_pin(_shutdown_pin)
+VS1053::VS1053 ( int8_t _cs_pin, int8_t _dcs_pin, int8_t _dreq_pin,
+                 int8_t _shutdown_pin, int8_t _shutdownx_pin ) :
+  cs_pin(_cs_pin), dcs_pin(_dcs_pin), dreq_pin(_dreq_pin), shutdown_pin(_shutdown_pin),
+  shutdownx_pin(_shutdownx_pin)
 {
 }
 
@@ -852,6 +861,11 @@ void VS1053::begin()
     pinMode ( shutdown_pin,   OUTPUT ) ;
     digitalWrite ( shutdown_pin, HIGH ) ;              // Shut down audio output
   }
+  if ( shutdownx_pin >= 0 )                            // Shutdown (inversed logic) in use?
+  {
+    pinMode ( shutdownx_pin,   OUTPUT ) ;
+    digitalWrite ( shutdownx_pin, LOW ) ;              // Shut down audio output
+  }
   delay ( 100 ) ;
   // Init SPI in slow mode ( 0.2 MHz )
   VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
@@ -923,7 +937,10 @@ void VS1053::startSong()
   {
     digitalWrite ( shutdown_pin, LOW ) ;                // Enable audio output
   }
-
+  if ( shutdownx_pin >= 0 )                             // Shutdown (inversed logic) in use?
+  {
+    digitalWrite ( shutdownx_pin, HIGH ) ;               // Enable audio output
+  }
 }
 
 bool VS1053::playChunk ( uint8_t* data, size_t len )
@@ -940,6 +957,10 @@ void VS1053::stopSong()
   if ( shutdown_pin >= 0 )                              // Shutdown in use?
   {
     digitalWrite ( shutdown_pin, HIGH ) ;               // Disable audio output
+  }
+  if ( shutdownx_pin >= 0 )                             // Shutdown (inversed logic) in use?
+  {
+    digitalWrite ( shutdown_pin, LOW ) ;                // Disable audio output
   }
   delay ( 10 ) ;
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
@@ -2403,23 +2424,24 @@ void readIOprefs()
     int8_t      pdefault ;                                // Default pin
   };
   struct iosetting klist[] = {                            // List of I/O related keys
-    { "pin_ir",       &ini_block.ir_pin,          -1          },
-    { "pin_enc_clk",  &ini_block.enc_clk_pin,     -1          },
-    { "pin_enc_dt",   &ini_block.enc_dt_pin,      -1          },
-    { "pin_enc_sw",   &ini_block.enc_sw_pin,      -1          },
-    { "pin_tft_cs",   &ini_block.tft_cs_pin,      -1          },   // Display SPI version
-    { "pin_tft_dc",   &ini_block.tft_dc_pin,      -1          },   // Display SPI version
-    { "pin_tft_scl",  &ini_block.tft_scl_pin,     -1          },   // Display I2C version
-    { "pin_tft_sda",  &ini_block.tft_sda_pin,     -1          },   // Display I2C version
-    { "pin_sd_cs",    &ini_block.sd_cs_pin,       -1          },
-    { "pin_vs_cs",    &ini_block.vs_cs_pin,       -1          },
-    { "pin_vs_dcs",   &ini_block.vs_dcs_pin,      -1          },
-    { "pin_vs_dreq",  &ini_block.vs_dreq_pin,     -1          },
-    { "pin_shutdown", &ini_block.vs_shutdown_pin, -1          },
-    { "pin_spi_sck",  &ini_block.spi_sck_pin,     18          },
-    { "pin_spi_miso", &ini_block.spi_miso_pin,    19          },
-    { "pin_spi_mosi", &ini_block.spi_mosi_pin,    23          },
-    { NULL,           NULL,                       0           }    // End of list
+    { "pin_ir",        &ini_block.ir_pin,           -1 },
+    { "pin_enc_clk",   &ini_block.enc_clk_pin,      -1 },
+    { "pin_enc_dt",    &ini_block.enc_dt_pin,       -1 },
+    { "pin_enc_sw",    &ini_block.enc_sw_pin,       -1 },
+    { "pin_tft_cs",    &ini_block.tft_cs_pin,       -1 }, // Display SPI version
+    { "pin_tft_dc",    &ini_block.tft_dc_pin,       -1 }, // Display SPI version
+    { "pin_tft_scl",   &ini_block.tft_scl_pin,      -1 }, // Display I2C version
+    { "pin_tft_sda",   &ini_block.tft_sda_pin,      -1 }, // Display I2C version
+    { "pin_sd_cs",     &ini_block.sd_cs_pin,        -1 },
+    { "pin_vs_cs",     &ini_block.vs_cs_pin,        -1 },
+    { "pin_vs_dcs",    &ini_block.vs_dcs_pin,       -1 },
+    { "pin_vs_dreq",   &ini_block.vs_dreq_pin,      -1 },
+    { "pin_shutdown",  &ini_block.vs_shutdown_pin,  -1 },
+    { "pin_shutdownx", &ini_block.vs_shutdownx_pin, -1 },
+    { "pin_spi_sck",   &ini_block.spi_sck_pin,      18 },
+    { "pin_spi_miso",  &ini_block.spi_miso_pin,     19 },
+    { "pin_spi_mosi",  &ini_block.spi_mosi_pin,     23 },
+    { NULL,            NULL,                        0  }  // End of list
   } ;
   int         i ;                                         // Loop control
   int         count = 0 ;                                 // Number of keys found
@@ -3105,7 +3127,8 @@ void setup()
   vs1053player = new VS1053 ( ini_block.vs_cs_pin,       // Make instance of player
                               ini_block.vs_dcs_pin,
                               ini_block.vs_dreq_pin,
-                              ini_block.vs_shutdown_pin ) ;
+                              ini_block.vs_shutdown_pin,
+                              ini_block.vs_shutdownx_pin ) ;
   if ( ini_block.ir_pin >= 0 )
   {
     dbgprint ( "Enable pin %d for IR",
