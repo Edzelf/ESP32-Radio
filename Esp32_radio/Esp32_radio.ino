@@ -127,7 +127,7 @@
 // 25-06-2018, ES: Timing of mp3loop.  Limit read from stream to free queue space.
 // 16-07-2018, ES: Correction tftset().
 // 25-07-2018, ES: Correction touch pins, thanks to Fletsche.
-// 30-07-2018, ES: Added GPIO39 and inversed shutdown pin.  Thanks to 
+// 30-07-2018, ES: Added GPIO39 and inversed shutdown pin.  Thanks to fletche.
 // 
 //
 //
