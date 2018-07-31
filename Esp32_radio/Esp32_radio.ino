@@ -128,11 +128,12 @@
 // 16-07-2018, ES: Correction tftset().
 // 25-07-2018, ES: Correction touch pins, thanks to Fletsche.
 // 30-07-2018, ES: Added GPIO39 and inversed shutdown pin.  Thanks to fletche.
+// 31-07-2018, ES: Added TFT backlight control.
 // 
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 30 July 2018 09:30:00 GMT"
+#define VERSION "Tue, 31 July 2018 11:20:00 GMT"
 //
 // Define (one) type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
@@ -177,6 +178,8 @@
 #define METASIZ 1024
 // Max. number of NVS keys in table
 #define MAXKEYS 200
+// Time-out [sec] for blanking TFT display (BL pin)
+#define BL_TIME 45
 //
 // Subscription topics for MQTT.  The topic will be pefixed by "PREFIX/", where PREFIX is replaced
 // by the the mqttprefix in the preferences.  The next definition will yield the topic
@@ -245,6 +248,8 @@ struct ini_struct
   int8_t         tft_dc_pin ;                         // GPIO connected to D/C or A0 of TFT screen
   int8_t         tft_scl_pin ;                        // GPIO connected to SCL of i2c TFT screen
   int8_t         tft_sda_pin ;                        // GPIO connected to SDA of I2C TFT screen
+  int8_t         tft_bl_pin ;                         // GPIO to activate BL of display
+  int8_t         tft_blx_pin ;                        // GPIO to activate BL of display (inversed logic)
   int8_t         sd_cs_pin ;                          // GPIO connected to CS of SD card
   int8_t         vs_cs_pin ;                          // GPIO connected to CS of VS1053
   int8_t         vs_dcs_pin ;                         // GPIO connected to DCS of VS1053
@@ -373,6 +378,7 @@ uint16_t          clength ;                              // Content length found
 uint32_t          max_mp3loop_time = 0 ;                 // To check max handling time in mp3loop (msec)
 int16_t           scanios ;                              // TEST*TEST*TEST
 int16_t           scaniocount ;                          // TEST*TEST*TEST
+uint16_t          bltimer = 0 ;                          // Backlight time-out counter
 std::vector<WifiInfo_t> wifilist ;                       // List with wifi_xx info
 // nvs stuff
 nvs_page                nvsbuf ;                         // Space for 1 page of NVS info
@@ -1011,6 +1017,29 @@ VS1053* vs1053player ;
 //**************************************************************************************************
 // End VS1053 stuff.                                                                               *
 //**************************************************************************************************
+
+
+//**************************************************************************************************
+//                                           B L S E T                                             *
+//**************************************************************************************************
+// Enable or disable the TFT backlight if configured.                                              *
+// May be called from interrupt level.                                                             *
+//**************************************************************************************************
+void IRAM_ATTR blset ( bool enable )
+{
+  if ( ini_block.tft_bl_pin >= 0 )                       // Backlight for TFT control?
+  {
+    digitalWrite ( ini_block.tft_bl_pin, enable ) ;      // Enable/disable backlight
+  }
+  if ( ini_block.tft_blx_pin >= 0 )                      // Backlight for TFT (inversed logic) control?
+  {
+    digitalWrite ( ini_block.tft_blx_pin, !enable ) ;    // Enable/disable backlight
+  }
+  if ( enable )
+  {
+    bltimer = 0 ;                                        // Reset counter backlight time-out
+  }
+}
 
 
 //**************************************************************************************************
@@ -1719,6 +1748,11 @@ void IRAM_ATTR timer100()
       }
     }
     time_req = true ;                             // Yes, show current time request
+    if ( ++bltimer == BL_TIME )                   // Time to blank the TFT screen?
+    {
+      bltimer = 0 ;                               // Yes, reset counter
+      blset ( false ) ;                           // Disable TFT (backlight)
+    }
   }
   // Handle rotary encoder. Inactivity counter will be reset by encoder interrupt
   if ( ++enc_inactivity == 36000 )                // Count inactivity time
@@ -2432,12 +2466,14 @@ void readIOprefs()
     { "pin_tft_dc",    &ini_block.tft_dc_pin,       -1 }, // Display SPI version
     { "pin_tft_scl",   &ini_block.tft_scl_pin,      -1 }, // Display I2C version
     { "pin_tft_sda",   &ini_block.tft_sda_pin,      -1 }, // Display I2C version
+    { "pin_tft_bl",    &ini_block.tft_bl_pin,       -1 }, // Display backlight
+    { "pin_tft_blx",   &ini_block.tft_blx_pin,      -1 }, // Display backlight (inversed logic)
     { "pin_sd_cs",     &ini_block.sd_cs_pin,        -1 },
     { "pin_vs_cs",     &ini_block.vs_cs_pin,        -1 },
     { "pin_vs_dcs",    &ini_block.vs_dcs_pin,       -1 },
     { "pin_vs_dreq",   &ini_block.vs_dreq_pin,      -1 },
-    { "pin_shutdown",  &ini_block.vs_shutdown_pin,  -1 },
-    { "pin_shutdownx", &ini_block.vs_shutdownx_pin, -1 },
+    { "pin_shutdown",  &ini_block.vs_shutdown_pin,  -1 }, // Amplifier shut-down pin
+    { "pin_shutdownx", &ini_block.vs_shutdownx_pin, -1 }, // Amplifier shut-down pin (inversed logic)
     { "pin_spi_sck",   &ini_block.spi_sck_pin,      18 },
     { "pin_spi_miso",  &ini_block.spi_miso_pin,     19 },
     { "pin_spi_mosi",  &ini_block.spi_mosi_pin,     23 },
@@ -3155,6 +3191,15 @@ void setup()
       dsp_update() ;                                     // Show on physical screen
     }
   }
+  if ( ini_block.tft_bl_pin >= 0 )                       // Backlight for TFT control?
+  {
+    pinMode ( ini_block.tft_bl_pin, OUTPUT ) ;           // Yes, enable output
+  }
+  if ( ini_block.tft_blx_pin >= 0 )                      // Backlight for TFT (inversed logic) control?
+  {
+    pinMode ( ini_block.tft_blx_pin, OUTPUT ) ;          // Yes, enable output
+  }
+  blset ( true ) ;                                       // Enable backlight (if configured)
   if ( ini_block.sd_cs_pin >= 0 )                        // SD configured?
   {
     if ( !SD.begin ( ini_block.sd_cs_pin, SPI,           // Yes,
@@ -3793,6 +3838,16 @@ void chk_enc()
       dbgprint ( "Encoder mode back to VOLUME" ) ;
       tftset ( 2, (char*)NULL ) ;                             // Restore original text at bottom
     }
+  }
+  if ( singleclick || doubleclick ||                          // Any activity?
+       tripleclick || longclick ||
+       ( rotationcount != 0 ) )
+  {
+    blset ( true ) ;                                          // Yes, activate display if needed
+  }
+  else
+  {
+    return ;                                                  // No, nothing to do
   }
   if ( tripleclick )                                          // First handle triple click
   {
@@ -4738,6 +4793,7 @@ const char* analyzeCmd ( const char* par, const char* val )
   String             tmpstr ;                         // Temporary for value
   uint32_t           av ;                             // Available in stream/file
 
+  blset ( true ) ;                                    // Enable backlight of TFT
   strcpy ( reply, "Command accepted" ) ;              // Default reply
   argument = String ( par ) ;                         // Get the argument
   chomp ( argument ) ;                                // Remove comment and useless spaces
@@ -4899,8 +4955,6 @@ const char* analyzeCmd ( const char* par, const char* val )
     dbgprint ( "scaniocount is %d", scaniocount ) ;
     dbgprint ( "Max. mp3_loop duration is %d", max_mp3loop_time ) ;
     max_mp3loop_time = 0 ;                            // Start new check
-
-
   }
   // Commands for bass/treble control
   else if ( argument.startsWith ( "tone" ) )          // Tone command
