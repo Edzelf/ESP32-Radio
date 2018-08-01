@@ -129,11 +129,12 @@
 // 25-07-2018, ES: Correction touch pins, thanks to Fletsche.
 // 30-07-2018, ES: Added GPIO39 and inversed shutdown pin.  Thanks to fletche.
 // 31-07-2018, ES: Added TFT backlight control.
+// 01-08-2018, ES: Debug info for IR.
 // 
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Tue, 31 July 2018 11:20:00 GMT"
+#define VERSION "Wed, 01 Aug 2018 11:20:00 GMT"
 //
 // Define (one) type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
@@ -367,6 +368,8 @@ String            http_getcmd ;                          // Contents of last GET
 String            http_rqfile ;                          // Requested file
 bool              http_reponse_flag = false ;            // Response required
 uint16_t          ir_value = 0 ;                         // IR code
+uint32_t          ir_0 = 550 ;                           // Average duration of an IR short pulse
+uint32_t          ir_1 = 1650 ;                          // Average duration of an IR long pulse
 struct tm         timeinfo ;                             // Will be filled by NTP server
 bool              time_req = false ;                     // Set time requested
 bool              SD_okay = false ;                      // True if SD card in place and readable
@@ -1815,11 +1818,13 @@ void IRAM_ATTR isr_IR()
   {
     ir_locvalue = ir_locvalue << 1 ;                 // Shift in a "zero" bit
     ir_loccount++ ;                                  // Count number of received bits
+    ir_0 = ( ir_0 * 3 + intval ) / 4 ;               // Compute average durartion of a short pulse
   }
-  else if ( ( intval > 1500 ) && ( intval < 1800 ) ) // Long pulse?
+  else if ( ( intval > 1400 ) && ( intval < 1900 ) ) // Long pulse?
   {
     ir_locvalue = ( ir_locvalue << 1 ) + 1 ;         // Shift in a "one" bit
     ir_loccount++ ;                                  // Count number of received bits
+    ir_1 = ( ir_1 * 3 + intval ) / 4 ;               // Compute average durartion of a short pulse
   }
   else if ( ir_loccount == 65 )                      // Value is correct after 65 level changes
   {
@@ -2792,8 +2797,8 @@ void scanIR()
     }
     else
     {
-      dbgprint ( "IR code %04X received, but not found in preferences!",
-                 ir_value ) ;
+      dbgprint ( "IR code %04X received, but not found in preferences!  Timing %d/%d",
+                 ir_value, ir_0, ir_1 ) ;
     }
     ir_value = 0 ;                                          // Reset IR code received
   }
