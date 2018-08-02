@@ -137,11 +137,11 @@
 #define VERSION "Wed, 01 Aug 2018 11:20:00 GMT"
 //
 // Define (one) type of display.  See documentation.
-//#define BLUETFT                        // Works also for RED TFT 128x160
+#define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
 //#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
-#define ILI9341                        // ILI9341 240*320
+//#define ILI9341                        // ILI9341 240*320
 //
 #include <nvs.h>
 #include <PubSubClient.h>
