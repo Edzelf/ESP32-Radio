@@ -6,7 +6,6 @@
 // Requires Adafruit ILI9341 library, available from library manager.
 // Below set your dsp_getwidth() and dsp_getwidth() to suite your display.
 
-
 #include <Adafruit_ILI9341.h>
 
 // Color definitions for the TFT screen (if used)
@@ -50,12 +49,10 @@ Adafruit_ILI9341*     tft = NULL ;                                  // For insta
 
 bool dsp_begin()
 {
-  tft = new Adafruit_ILI9341( ini_block.tft_cs_pin,
-                              ini_block.tft_dc_pin ) ;        // Create an instant for TFT
+  tft = new Adafruit_ILI9341 ( ini_block.tft_cs_pin,
+                               ini_block.tft_dc_pin ) ;            // Create an instant for TFT
 
-  // Uncomment the next 2 lines for ILI9341 displays
-  tft->begin();                                                     // Init TFT interface
-  //tft->fillScreen(ILI9341_BLACK);                                 // Set Black Background
-  
+  tft->begin();                                                    // Init TFT interface
   return ( tft != NULL ) ;
 }
+

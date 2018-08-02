@@ -126,22 +126,23 @@
 // 10-06-2018, ES: Rotary encoder, interrupts on all 3 signals.
 // 25-06-2018, ES: Timing of mp3loop.  Limit read from stream to free queue space.
 // 16-07-2018, ES: Correction tftset().
-// 25-07-2018, ES: Correction touch pins, thanks to Fletsche.
-// 30-07-2018, ES: Added GPIO39 and inversed shutdown pin.  Thanks to fletche.
+// 25-07-2018, ES: Correction touch pins.
+// 30-07-2018, ES: Added GPIO39 and inversed shutdown pin.  Thanks to fletsche.
 // 31-07-2018, ES: Added TFT backlight control.
-// 01-08-2018, ES: Debug info for IR.
-// 
+// 01-08-2018, ES: Debug info for IR.  Shutdown amplifier if volume is 0.
+// 02-08-2018, ES: Added support for ILI9341 display.
+//
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Wed, 01 Aug 2018 11:20:00 GMT"
+#define VERSION "Thu, 02 Aug 2018 08:23:00 GMT"
 //
 // Define (one) type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
 //#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
-//#define ILI9341                        // ILI9341 240*320
+//#define ILI9341                      // ILI9341 240*320
 //
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -481,7 +482,7 @@ struct touchpin_struct                                   // For programmable inp
   bool           reserved ;                              // Reserved for connected devices
   bool           avail ;                                 // Pin is available for a command
   String         command ;                               // Command to execute when activated
-                                                         // Example: "uppreset=1"
+  // Example: "uppreset=1"
   bool           cur ;                                   // Current state, true = HIGH, false = LOW
   int16_t        count ;                                 // Counter number of times low level
 } ;
@@ -628,12 +629,12 @@ mqttpubc         mqttpub ;                                    // Instance for mq
 class VS1053
 {
   private:
-    int8_t       cs_pin ;                         // Pin where CS line is connected
-    int8_t       dcs_pin ;                        // Pin where DCS line is connected
-    int8_t       dreq_pin ;                       // Pin where DREQ line is connected
-    int8_t       shutdown_pin ;                   // Pin where the shutdown line is connected
-    int8_t       shutdownx_pin ;                  // Pin where the shutdown (inversed) line is connected
-    uint8_t       curvol ;                        // Current volume setting 0..100%
+    int8_t        cs_pin ;                         // Pin where CS line is connected
+    int8_t        dcs_pin ;                        // Pin where DCS line is connected
+    int8_t        dreq_pin ;                       // Pin where DREQ line is connected
+    int8_t        shutdown_pin ;                   // Pin where the shutdown line is connected
+    int8_t        shutdownx_pin ;                  // Pin where the shutdown (inversed) line is connected
+    uint8_t       curvol ;                         // Current volume setting 0..100%
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
     const uint8_t SCI_MODE          = 0x0 ;
@@ -659,8 +660,8 @@ class VS1053
   protected:
     inline void await_data_request() const
     {
-       while ( ( dreq_pin >= 0 ) &&
-               ( !digitalRead ( dreq_pin ) ) )
+      while ( ( dreq_pin >= 0 ) &&
+              ( !digitalRead ( dreq_pin ) ) )
       {
         NOP() ;                                   // Very short delay
       }
@@ -681,7 +682,7 @@ class VS1053
     inline void data_mode_on() const
     {
       SPI.beginTransaction ( VS1053_SPI ) ;       // Prevent other SPI users
-      //digitalWrite ( cs_pin, HIGH ) ;             // Bring slave in data mode
+      //digitalWrite ( cs_pin, HIGH ) ;           // Bring slave in data mode
       digitalWrite ( dcs_pin, LOW ) ;
     }
 
@@ -697,27 +698,28 @@ class VS1053
     void        sdi_send_fillers ( size_t length ) ;
     void        wram_write ( uint16_t address, uint16_t data ) ;
     uint16_t    wram_read ( uint16_t address ) ;
+    void        output_enable ( bool ena ) ;             // Enable amplifier through shutdown pin(s)
 
   public:
     // Constructor.  Only sets pin values.  Doesn't touch the chip.  Be sure to call begin()!
     VS1053 ( int8_t _cs_pin, int8_t _dcs_pin, int8_t _dreq_pin,
              int8_t _shutdown_pin, int8_t _shutdownx_pin ) ;
     void     begin() ;                                   // Begin operation.  Sets pins correctly,
-                                                         // and prepares SPI bus.
+    // and prepares SPI bus.
     void     startSong() ;                               // Prepare to start playing. Call this each
-                                                         // time a new song starts.
+    // time a new song starts.
     inline bool playChunk ( uint8_t* data,               // Play a chunk of data.  Copies the data to
                             size_t len ) ;               // the chip.  Blocks until complete.
-                                                         // Returns true if more data can be added
-                                                         // to fifo
+    // Returns true if more data can be added
+    // to fifo
     void     stopSong() ;                                // Finish playing a song. Call this after
-                                                         // the last playChunk call.
+    // the last playChunk call.
     void     setVolume ( uint8_t vol ) ;                 // Set the player volume.Level from 0-100,
-                                                         // higher is louder.
+    // higher is louder.
     void     setTone ( uint8_t* rtone ) ;                // Set the player baas/treble, 4 nibbles for
-                                                         // treble gain/freq and bass gain/freq
+    // treble gain/freq and bass gain/freq
     inline uint8_t  getVolume() const                    // Get the current volume setting.
-    {                                                    // higher is louder.
+    { // higher is louder.
       return curvol ;
     }
     void     printDetails ( const char *header ) ;       // Print config details to serial output
@@ -872,13 +874,12 @@ void VS1053::begin()
   if ( shutdown_pin >= 0 )                              // Shutdown in use?
   {
     pinMode ( shutdown_pin,   OUTPUT ) ;
-    digitalWrite ( shutdown_pin, HIGH ) ;              // Shut down audio output
   }
   if ( shutdownx_pin >= 0 )                            // Shutdown (inversed logic) in use?
   {
     pinMode ( shutdownx_pin,   OUTPUT ) ;
-    digitalWrite ( shutdownx_pin, LOW ) ;              // Shut down audio output
   }
+  output_enable ( false ) ;                            // Disable amplifier through shutdown pin(s)
   delay ( 100 ) ;
   // Init SPI in slow mode ( 0.2 MHz )
   VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
@@ -900,7 +901,7 @@ void VS1053::begin()
     write_register ( SCI_AUDATA, 44100 + 1 ) ;            // 44.1kHz + stereo
     // The next clocksetting allows SPI clocking at 5 MHz, 4 MHz is safe then.
     write_register ( SCI_CLOCKF, 6 << 12 ) ;              // Normal clock settings
-                                                          // multiplyer 3.0 = 12.2 MHz
+    // multiplyer 3.0 = 12.2 MHz
     //SPI Clock to 4 MHz. Now you can set high speed SPI clock.
     VS1053_SPI = SPISettings ( 5000000, MSBFIRST, SPI_MODE0 ) ;
     write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_LINE1 ) ) ;
@@ -927,6 +928,7 @@ void VS1053::setVolume ( uint8_t vol )
     value = map ( vol, 0, 100, 0xF8, 0x00 ) ;           // 0..100% to one channel
     value = ( value << 8 ) | value ;
     write_register ( SCI_VOL, value ) ;                 // Volume left and right
+    output_enable ( vol != 0 ) ;                        // Enable/disable amplifier through shutdown pin(s)
   }
 }
 
@@ -946,14 +948,7 @@ void VS1053::setTone ( uint8_t *rtone )                 // Set bass/treble (4 ni
 void VS1053::startSong()
 {
   sdi_send_fillers ( 10 ) ;
-  if ( shutdown_pin >= 0 )                              // Shutdown in use?
-  {
-    digitalWrite ( shutdown_pin, LOW ) ;                // Enable audio output
-  }
-  if ( shutdownx_pin >= 0 )                             // Shutdown (inversed logic) in use?
-  {
-    digitalWrite ( shutdownx_pin, HIGH ) ;               // Enable audio output
-  }
+  output_enable ( true ) ;                              // Enable amplifier through shutdown pin(s)
 }
 
 bool VS1053::playChunk ( uint8_t* data, size_t len )
@@ -967,14 +962,7 @@ void VS1053::stopSong()
   int      i ;                                          // Loop control
 
   sdi_send_fillers ( 2052 ) ;
-  if ( shutdown_pin >= 0 )                              // Shutdown in use?
-  {
-    digitalWrite ( shutdown_pin, HIGH ) ;               // Disable audio output
-  }
-  if ( shutdownx_pin >= 0 )                             // Shutdown (inversed logic) in use?
-  {
-    digitalWrite ( shutdown_pin, LOW ) ;                // Disable audio output
-  }
+  output_enable ( false ) ;                             // Disable amplifier through shutdown pin(s)
   delay ( 10 ) ;
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
   for ( i = 0 ; i < 200 ; i++ )
@@ -1017,6 +1005,19 @@ void VS1053::printDetails ( const char *header )
     dbgprint ( "%3X - %5X", i, regbuf[i] ) ;
   }
 }
+
+void  VS1053::output_enable ( bool ena )               // Enable amplifier through shutdown pin(s)
+{
+  if ( shutdown_pin >= 0 )                             // Shutdown in use?
+  {
+    digitalWrite ( shutdown_pin, !ena ) ;              // Shut down or enable audio output
+  }
+  if ( shutdownx_pin >= 0 )                            // Shutdown (inversed logic) in use?
+  {
+    digitalWrite ( shutdownx_pin, ena ) ;              // Shut down or enable audio output
+  }
+}
+
 
 // The object for the MP3 player
 VS1053* vs1053player ;
@@ -3108,21 +3109,21 @@ void setup()
              ESP.getCpuFreqMHz(),
              VERSION,
              ESP.getFreeHeap() ) ;                       // Normally about 170 kB
-  #if defined ( BLUETFT )                                // Report display option
-    dbgprint ( dtyp, "BLUETFT" ) ;
-  #endif
-  #if defined ( ILI9341 )                                // Report display option
-    dbgprint ( dtyp, "ILI9341" ) ;
-  #endif
-  #if defined ( OLED )
-    dbgprint ( dtyp, "OLED" ) ;
-  #endif
-  #if defined ( DUMMYTFT )
-    dbgprint ( dtyp, "DUMMYTFT" ) ;
-  #endif
-  #if defined ( LCD1602I2C )
-    dbgprint ( dtyp, "BLUETFT" ) ;
-  #endif
+#if defined ( BLUETFT )                                // Report display option
+  dbgprint ( dtyp, "BLUETFT" ) ;
+#endif
+#if defined ( ILI9341 )                                // Report display option
+  dbgprint ( dtyp, "ILI9341" ) ;
+#endif
+#if defined ( OLED )
+  dbgprint ( dtyp, "OLED" ) ;
+#endif
+#if defined ( DUMMYTFT )
+  dbgprint ( dtyp, "DUMMYTFT" ) ;
+#endif
+#if defined ( LCD1602I2C )
+  dbgprint ( dtyp, "BLUETFT" ) ;
+#endif
   maintask = xTaskGetCurrentTaskHandle() ;               // My taskhandle
   SPIsem = xSemaphoreCreateMutex(); ;                    // Semaphore for SPI bus
   pi = esp_partition_find ( ESP_PARTITION_TYPE_DATA,     // Get partition iterator for
@@ -3152,7 +3153,7 @@ void setup()
   ini_block.bat0 = 0 ;                                   // Battery ADC levels not yet defined
   ini_block.bat100 = 0 ;
   readIOprefs() ;                                        // Read pins used for SPI, TFT, VS1053, IR,
-                                                         // Rotary encoder
+  // Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
   {
     pinMode ( pinnr, INPUT_PULLUP ) ;                    // Input for control button
@@ -3239,7 +3240,7 @@ void setup()
     }
   }
   mk_lsan() ;                                            // Make al list of acceptable networks
-                                                         // in preferences.
+  // in preferences.
   WiFi.mode ( WIFI_STA ) ;                               // This ESP is a station
   WiFi.persistent ( false ) ;                            // Do not save SSID and password
   WiFi.disconnect() ;                                    // After restart router could still
@@ -4002,8 +4003,8 @@ void chk_enc()
         tmp.remove ( 0, inx + 1 ) ;                           // Remove before the slash
       }
       dbgprint ( "Simplified %s", tmp.c_str() ) ;
-      tftset ( 3, tmp ) ;         
-      // Set screen segment bottom part
+      tftset ( 3, tmp ) ;
+    // Set screen segment bottom part
     default :
       break ;
   }
@@ -4027,9 +4028,9 @@ void mp3loop()
   String          nodeID ;                               // Next nodeID of track on SD
   uint32_t        timing ;                               // Startime and duration this function
   uint32_t        qspace ;                               // Free space in data queue
-  
+
   // Try to keep the Queue to playtask filled up by adding as much bytes as possible
-  
+
   if ( datamode & ( INIT | HEADER | DATA |               // Test op playing
                     METADATA | PLAYLISTINIT |
                     PLAYLISTHEADER |
@@ -4530,7 +4531,7 @@ void handlebyte_ch ( uint8_t b )
       // Yes, ignore
     }
     if ( b != '\n' )                                   // Linefeed?
-    {                                                  // No, normal character in playlistdata,
+    { // No, normal character in playlistdata,
       metalinebf[metalinebfx++] = (char)b ;            // add it to metaline
       if ( metalinebfx >= METASIZ )                    // Prevent overflow
       {
@@ -5107,8 +5108,8 @@ void displaybattery()
         ypos = tftdata[1].y - 5 ;                         // Just before 1st divider
         dsp_fillRect ( 0, ypos, newpos, 2, GREEN ) ;      // Paint green part
         dsp_fillRect ( newpos, ypos,
-                      dsp_getwidth() - newpos,
-                      2, RED ) ;                          // Paint red part
+                       dsp_getwidth() - newpos,
+                       2, RED ) ;                          // Paint red part
       }
     }
   }
