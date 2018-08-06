@@ -131,11 +131,13 @@
 // 31-07-2018, ES: Added TFT backlight control.
 // 01-08-2018, ES: Debug info for IR.  Shutdown amplifier if volume is 0.
 // 02-08-2018, ES: Added support for ILI9341 display.
+// 03-08-2018, ES: Added playlistposition for MQTT.
+// 06-08-2018, ES: Correction negative time offset.
 //
 //
 //
 // Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Thu, 02 Aug 2018 08:23:00 GMT"
+#define VERSION "Mon, 06 Aug 2018 67:52:00 GMT"
 //
 // Define (one) type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
@@ -360,7 +362,7 @@ bool              mqtt_on = false ;                      // MQTT in use
 String            networks ;                             // Found networks in the surrounding
 uint16_t          mqttcount = 0 ;                        // Counter MAXMQTTCONNECTS
 int8_t            playingstat = 0 ;                      // 1 if radio is playing (for MQTT)
-int8_t            playlist_num = 0 ;                     // Nonzero for selection from playlist
+int16_t           playlist_num = 0 ;                     // Nonzero for selection from playlist
 File              mp3file ;                              // File containing mp3 on SD card
 uint32_t          mp3filelength ;                        // File length
 bool              localfile = false ;                    // Play from local mp3-file or not
@@ -526,9 +528,9 @@ touchpin_struct   touchpin[] =                           // Touch pins and progr
 //**************************************************************************************************
 // ID's for the items to publish to MQTT.  Is index in amqttpub[]
 enum { MQTT_IP,     MQTT_ICYNAME, MQTT_STREAMTITLE, MQTT_NOWPLAYING,
-       MQTT_PRESET, MQTT_VOLUME, MQTT_PLAYING
+       MQTT_PRESET, MQTT_VOLUME, MQTT_PLAYING, MQTT_PLAYLISTPOS
      } ;
-enum { MQSTRING, MQINT8 } ;                              // Type of variable to publish
+enum { MQSTRING, MQINT8, MQINT16 } ;                     // Type of variable to publish
 
 class mqttpubc                                           // For MQTT publishing
 {
@@ -542,7 +544,7 @@ class mqttpubc                                           // For MQTT publishing
     // Publication topics for MQTT.  The topic will be pefixed by "PREFIX/", where PREFIX is replaced
     // by the the mqttprefix in the preferences.
   protected:
-    mqttpub_struct amqttpub[8] =                   // Definitions of various MQTT topic to publish
+    mqttpub_struct amqttpub[9] =                   // Definitions of various MQTT topic to publish
     { // Index is equal to enum above
       { "ip",              MQSTRING, &ipaddress,        false }, // Definition for MQTT_IP
       { "icy/name",        MQSTRING, &icyname,          false }, // Definition for MQTT_ICYNAME
@@ -551,6 +553,7 @@ class mqttpubc                                           // For MQTT publishing
       { "preset" ,         MQINT8,   &currentpreset,    false }, // Definition for MQTT_PRESET
       { "volume" ,         MQINT8,   &ini_block.reqvol, false }, // Definition for MQTT_VOLUME
       { "playing",         MQINT8,   &playingstat,      false }, // Definition for MQTT_PLAYING
+      { "playlist/pos",    MQINT16,  &playlist_num,     false }, // Definition for MQTT_PLAYLISTPOS
       { NULL,              0,        NULL,              false }  // End of definitions
     } ;
   public:
@@ -600,6 +603,11 @@ void mqttpubc::publishtopic()
         case MQINT8 :
           sprintf ( intvar, "%d",
                     *(int8_t*)amqttpub[i].payload ) ;         // Convert to array of char
+          payload = intvar ;                                  // Point to this array
+          break ;
+        case MQINT16 :
+          sprintf ( intvar, "%d",
+                    *(int16_t*)amqttpub[i].payload ) ;        // Convert to array of char
           payload = intvar ;                                  // Point to this array
           break ;
         default :
@@ -2410,7 +2418,6 @@ void readprogbuttons()
         {
           dbgprint ( "touch_%02d pin (GPIO%02d) is reserved for I/O!",
                      i, pinnr ) ;
-
         }
       }
     }
@@ -4508,6 +4515,7 @@ void handlebyte_ch ( uint8_t b )
                    "search for entry %d",
                    playlist_num ) ;
         datamode = PLAYLISTDATA ;                      // Expecting data now
+        mqttpub.trigger ( MQTT_PLAYLISTPOS ) ;         // Playlistposition to MQTT
         return ;
       }
     }
@@ -5032,11 +5040,11 @@ const char* analyzeCmd ( const char* par, const char* val )
     }
     if ( argument.indexOf ( "offset" ) > 0 )          // Offset with respect to UTC spec?
     {
-      ini_block.clk_offset = ivalue ;                 // Yes, set offset
+      ini_block.clk_offset = value.toInt() ;          // Yes, set offset
     }
     if ( argument.indexOf ( "dst" ) > 0 )             // Offset duringe DST spec?
     {
-      ini_block.clk_dst = ivalue ;                    // Yes, set DST offset
+      ini_block.clk_dst = value.toInt() ;             // Yes, set DST offset
     }
   }
   else if ( argument.startsWith ( "bat" ) )           // Battery ADC value?
