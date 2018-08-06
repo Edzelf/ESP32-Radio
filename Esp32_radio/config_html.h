@@ -1,6 +1,6 @@
 // config.html file in raw data format for PROGMEM
 //
-#define config_html_version 171207
+#define config_html_version 180806
 const char config_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
@@ -31,6 +31,8 @@ const char config_html[] PROGMEM = R"=====(
    <button class="button" onclick="fsav()">Save</button>
    &nbsp;&nbsp;
    <button class="button buttonr" onclick="httpGet('reset')">Restart</button>
+   &nbsp;&nbsp;
+   <button class="button buttonr" onclick="httpGet('update')">Update</button>
    &nbsp;&nbsp;
    <button class="button" onclick="ldef('getdefs')">Default</button>
     <br><input type="text" size="80" id="resultstr" placeholder="Waiting for input....">

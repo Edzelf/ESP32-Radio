@@ -10,6 +10,7 @@
 //  - PubSubClientenc_dt_pin
 //  - SD
 //  - FS
+//  - update
 // A library for the VS1053 (for ESP32) is not available (or not easy to find).  Therefore
 // a class for this module is derived from the maniacbug library and integrated in this sketch.
 //
@@ -132,12 +133,15 @@
 // 01-08-2018, ES: Debug info for IR.  Shutdown amplifier if volume is 0.
 // 02-08-2018, ES: Added support for ILI9341 display.
 // 03-08-2018, ES: Added playlistposition for MQTT.
-// 06-08-2018, ES: Correction negative time offset.
+// 06-08-2018, ES: Correction negative time offset, OTA through remote host.
 //
 //
 //
-// Define the version number, also used for webserver as Last-Modified header:
-#define VERSION "Mon, 06 Aug 2018 67:52:00 GMT"
+// Define the version number, also used for webserver as Last-Modified header and to
+// check version for update.  The format must be exactly as specified by the HTTP standard!
+#define VERSION     "Mon, 06 Aug 2018 12:12:32 GMT"
+#define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
+#define BINFILE     "/Arduino/Esp32_radio.ino.bin"      // Binary file name for update
 //
 // Define (one) type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
@@ -150,18 +154,19 @@
 #include <PubSubClient.h>
 #include <WiFiMulti.h>
 #include <ESPmDNS.h>
+#include <time.h>
 #include <stdio.h>
 #include <string.h>
 #include <FS.h>
 #include <SD.h>
 #include <SPI.h>
 #include <ArduinoOTA.h>
-#include <time.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include <esp_task_wdt.h>
 #include <esp_partition.h>
 #include <driver/adc.h>
+#include <Update.h>
 
 // Number of entries in the queue
 #define QSIZ 400
@@ -191,6 +196,8 @@
 // "ESP32Radio/command" if mqttprefix is "ESP32Radio".
 #define MQTT_SUBTOPIC     "command"           // Command to receive from MQTT
 //
+#define otaclient mp3client                   // OTA uses mp3client for connection to host
+
 //**************************************************************************************************
 // Forward declaration and prototypes of various functions.                                        *
 //**************************************************************************************************
@@ -322,7 +329,7 @@ int               numSsid ;                              // Number of available 
 WiFiMulti         wifiMulti ;                            // Possible WiFi networks
 ini_struct        ini_block ;                            // Holds configurable data
 WiFiServer        cmdserver ( 80 ) ;                     // Instance of embedded webserver, port 80
-WiFiClient        mp3client ;                            // An instance of the mp3 client
+WiFiClient        mp3client ;                            // An instance of the mp3 client, also used for OTA
 WiFiClient        cmdclient ;                            // An instance of the client for commands
 WiFiClient        wmqttclient ;                          // An instance for mqtt
 PubSubClient      mqttclient ( wmqttclient ) ;           // Client for MQTT subscriber
@@ -357,6 +364,7 @@ bool              hostreq = false ;                      // Request for new host
 bool              reqtone = false ;                      // New tone setting requested
 bool              muteflag = false ;                     // Mute output
 bool              resetreq = false ;                     // Request to reset the ESP32
+bool              updatereq = false ;                    // Request to update software from remote host
 bool              NetworkFound = false ;                 // True if WiFi network connected
 bool              mqtt_on = false ;                      // MQTT in use
 String            networks ;                             // Found networks in the surrounding
@@ -381,11 +389,12 @@ String            SD_nodelist ;                          // Nodes of mp3-files o
 int               SD_nodecount = 0 ;                     // Number of nodes in SD_nodelist
 String            SD_currentnode = "" ;                  // Node ID of song playing ("0" if random)
 uint16_t          adcval ;                               // ADC value (battery voltage)
-uint16_t          clength ;                              // Content length found in http header
+uint32_t          clength ;                              // Content length found in http header
 uint32_t          max_mp3loop_time = 0 ;                 // To check max handling time in mp3loop (msec)
 int16_t           scanios ;                              // TEST*TEST*TEST
 int16_t           scaniocount ;                          // TEST*TEST*TEST
 uint16_t          bltimer = 0 ;                          // Backlight time-out counter
+String            lstmod = "" ;                          // Last modified timestamp binary on remote host
 std::vector<WifiInfo_t> wifilist ;                       // List with wifi_xx info
 // nvs stuff
 nvs_page                nvsbuf ;                         // Space for 1 page of NVS info
@@ -2304,7 +2313,7 @@ bool connectwifi()
 //**************************************************************************************************
 //                                           O T A S T A R T                                       *
 //**************************************************************************************************
-// Update via WiFi has been started by Arduino IDE.                                                *
+// Update via WiFi has been started by Arduino IDE or update request.                              *
 //**************************************************************************************************
 void otastart()
 {
@@ -2312,6 +2321,125 @@ void otastart()
 
   p = dbgprint ( "OTA update Started" ) ;
   tftset ( 2, p ) ;                                   // Set screen segment bottom part
+}
+
+
+//**************************************************************************************************
+//                                        U P D A T E _ S O F T W A R E                            *
+//**************************************************************************************************
+// Update software by download from remote host.                                                   *
+//**************************************************************************************************
+void update_software()
+{
+  uint32_t    timeout = millis() ;                              // To detect time-out
+  bool        isoc    = false ;                                 // True for valid stream
+  String      line ;                                            // Input header line
+  String      newlstmod ;                                       // Last modified from host
+  
+  updatereq = false ;                                           // Clear update flag
+  otastart() ;                                                  // Show something on screen
+  stop_mp3client () ;                                           // Stop input stream
+  lstmod = nvsgetstr ( "lstmod" ) ;                             // Get current last modified timestamp
+  dbgprint ( "Connecting to %s for %s",
+              UPDATEHOST, BINFILE ) ;
+  if ( !otaclient.connect ( UPDATEHOST, 80 ) )                  // Connect to host
+  {
+    dbgprint ( "Connect to updatehost failed!" ) ;
+    return ;
+  }
+  otaclient.print ( "GET " BINFILE " HTTP/1.1\r\n"
+                    "Host: " UPDATEHOST "\r\n"
+                    "Cache-Control: no-cache\r\n"
+                    "Connection: close\r\n\r\n" ) ;
+  while ( otaclient.available() == 0 )                          // Wait until response appears
+  {
+    if ( millis() - timeout > 5000 )
+    {
+      dbgprint ( "Connect to Update host Timeout!" ) ;
+      otaclient.stop() ;
+      return ;
+    }
+  }
+  // Connected, handle response
+  while ( otaclient.available() )
+  {
+    line = otaclient.readStringUntil ( '\n' ) ;                 // Read a line from response
+    line.trim() ;                                               // Remove garbage
+    dbgprint ( line.c_str() ) ;                                 // Debug info
+    if ( !line.length() )                                       // End of headers?
+    {
+      break ;                                                   // Yes, get the OTA started
+    }
+    // Check if the HTTP Response is 200.  Any other response is an error.
+    if ( line.startsWith ( "HTTP/1.1" ) )                       // 
+    {
+      if ( line.indexOf ( " 200 " ) < 0 )
+      {
+        dbgprint ( "Got a non 200 status code from server!" ) ;
+        return ;
+      }
+    }
+    scan_content_length ( line.c_str() ) ;                      // Scan for content_length
+    if ( line.startsWith ( "Content-Type: " ) )                 // Contents-Type line?
+    {                                                           // Yes, scan for right type
+      isoc = ( line.indexOf ( "octet-stream" ) > 0  ) ;
+    }
+    else if ( line.startsWith ( "Last-Modified: " ) )           // Timestamp of binary file
+    {
+      newlstmod = line.substring ( 15 ) ;                       // Isolate timestamp
+    }
+  }
+  // End of headers reached
+  if ( newlstmod == lstmod )                                    // Need for update?
+  {
+    dbgprint ( "No new version available" ) ;                   // No, show reason
+    otaclient.flush() ;
+    return ;    
+  }
+  if ( ( clength > 0 ) && isoc )
+  {
+    if ( Update.begin ( clength ) )                             // Update possible?
+    {
+      dbgprint ( "Begin OTA update, length is %d",
+                 clength ) ;
+      if ( Update.writeStream ( otaclient ) == clength )        // writeStream is the real download
+      {
+        dbgprint ( "Written %d bytes successfully", clength ) ;
+      }
+      else
+      {
+        dbgprint ( "Write failed!" ) ;
+      }
+      if ( Update.end() )                                       // Check for successful flash
+      {
+        dbgprint( "OTA done" ) ;
+        if ( Update.isFinished() )
+        {
+          dbgprint ( "Update successfully completed" ) ;
+          nvssetstr ( "lstmod", newlstmod ) ;                   // Update Last Modified in NVS
+        }
+        else
+        {
+          dbgprint ( "Update not finished!" ) ;
+        }
+      }
+      else
+      {
+        dbgprint ( "Error Occurred. Error %s", Update.getError() ) ;
+      }
+    }
+    else
+    {
+      // Not enough space to begin OTA
+      dbgprint ( "Not enough space to begin OTA" ) ;
+      otaclient.flush() ;
+    }
+  }
+  else
+  {
+    dbgprint ( "There was no content in the response" ) ;
+    otaclient.flush() ;
+  }
 }
 
 
@@ -2557,6 +2685,7 @@ String readprefs ( bool output )
               String ( "/*******" ) ;
       }
       cmd = String ( "" ) ;                                 // Do not analyze this
+      
     }
     else if ( strstr ( key, "mqttpasswd"  ) )               // Is it a MQTT password?
     {
@@ -2757,7 +2886,7 @@ void  scandigital()
       continue ;
     }
     tlevel = ( touchRead ( pinnr ) ) ;                      // Sample the pin
-    level = ( tlevel >= 30 ) ;                              // True if below threshold
+    level = ( tlevel >= THRESHOLD ) ;                       // True if below threshold
     if ( level )                                            // Level HIGH?
     {
       touchpin[i].count = 0 ;                               // Reset count number of times
@@ -3106,7 +3235,7 @@ void setup()
   Serial.println() ;
   // Version tests for some vital include files
   if ( about_html_version   < 170626 ) dbgprint ( wvn, "about" ) ;
-  if ( config_html_version  < 171207 ) dbgprint ( wvn, "config" ) ;
+  if ( config_html_version  < 180806 ) dbgprint ( wvn, "config" ) ;
   if ( index_html_version   < 180102 ) dbgprint ( wvn, "index" ) ;
   if ( mp3play_html_version < 170626 ) dbgprint ( wvn, "mp3play" ) ;
   if ( defaultprefs_version < 180609 ) dbgprint ( wvn, "defaultprefs" ) ;
@@ -4205,6 +4334,11 @@ void mp3loop()
 void loop()
 {
   mp3loop() ;                                               // Do mp3 related actions
+  if ( updatereq )                                          // Software update requested?
+  {
+    update_software() ;                                     // Yes, handle it
+    resetreq = true ;                                       // And reset
+  }
   if ( resetreq )                                           // Reset requested?
   {
     delay ( 1000 ) ;                                        // Yes, wait some time
@@ -4490,7 +4624,7 @@ void handlebyte_ch ( uint8_t b )
     datamode = PLAYLISTHEADER ;                        // Handle playlist data
     playlistcnt = 1 ;                                  // Reset for compare
     totalcount = 0 ;                                   // Reset totalcount
-    clength = 0xFFFF ;                                 // Content-length unknown
+    clength = 0xFFFFFFFF ;                             // Content-length unknown
     dbgprint ( "Read from playlist" ) ;
   }
   if ( datamode == PLAYLISTHEADER )                    // Read header
@@ -4953,6 +5087,10 @@ const char* analyzeCmd ( const char* par, const char* val )
   else if ( argument.startsWith ( "reset" ) )         // Reset request
   {
     resetreq = true ;                                 // Reset all
+  }
+  else if ( argument.startsWith ( "update" ) )        // Update request
+  {
+    updatereq = true ;                                // Reset all
   }
   else if ( argument == "test" )                      // Test command
   {
