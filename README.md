@@ -24,7 +24,7 @@ Features:
 -	Heavily commented source code, easy to add extra functionality.
 -	Debug information through serial output.
 -	Uses a 12 kB queue to provide smooth playback.
--	Software update over WiFi possible (OTA).
+-	Software update over WiFi possible (OTA) through Arduino IDE or remote host.
 -	Bass and treble control.
 -	Saves volume, bass, treble and preset station over restart.
 - Configuration also possible if no WiFi connection can be established.
@@ -35,7 +35,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
-- 06-aug-2018, Added playlistposition for MQTT.  Correction negative time offset.
+- 06-aug-2018, Added playlistposition for MQTT.  Correction negative time offset. OTA update through remote host.
 - 02-aug-2018, Added support for ILI9341 display.
 - 01-aug-2018, Added debug info for timing of IR remote.
 - 30-jul-2018, Added GPIO39 and inversed shutdown pin.  Thanks to fletche.
