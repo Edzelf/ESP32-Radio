@@ -35,6 +35,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 06-aug-2018, Added playlistposition for MQTT.  Correction negative time offset.
 - 02-aug-2018, Added support for ILI9341 display.
 - 01-aug-2018, Added debug info for timing of IR remote.
 - 30-jul-2018, Added GPIO39 and inversed shutdown pin.  Thanks to fletche.
