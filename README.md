@@ -35,7 +35,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
-- 28-sep-2019, Support for NEXTION display.
+- 28-sep-2018, Support for NEXTION display.
 - 06-aug-2018, Added playlistposition for MQTT.  Correction negative time offset. OTA update through remote host.
 - 02-aug-2018, Added support for ILI9341 display.
 - 01-aug-2018, Added debug info for timing of IR remote.
