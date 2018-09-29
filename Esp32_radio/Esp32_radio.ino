@@ -1,5 +1,5 @@
 //***************************************************************************************************
-//*  ESP32_Radio -- Webradio receiver for ESP32, VS1053 MP3 module and optional (color) display.    *
+//*  ESP32_Radio -- Webradio receiver for ESP32, VS1053 MP3 module and optional display.            *
 //*                 By Ed Smallenburg.                                                              *
 //***************************************************************************************************
 // ESP32 libraries used:
@@ -38,6 +38,7 @@
 // The display used is a Chinese 1.8 color TFT module 128 x 160 pixels.
 // Now there is room for 26 characters per line and 16 lines.
 // Software will work without installing the display.
+// Other displays are also supported. See documentation.
 // The SD card interface of the module may be used to play mp3-tracks on the SD card.
 //
 // For configuration of the WiFi network(s): see the global data section further on.
@@ -48,11 +49,13 @@
 // can be configured in the config page of the web interface.
 // ESP32dev Signal  Wired to LCD        Wired to VS1053      SDCARD   Wired to the rest
 // -------- ------  --------------      -------------------  ------   ---------------
-// GPIO16           -                   pin 1 XDCS            -       -
+// GPIO32           -                   pin 1 XDCS            -       -
 // GPIO5            -                   pin 2 XCS             -       -
 // GPIO4            -                   pin 4 DREQ            -       -
 // GPIO2            pin 3 D/C or A0     -                     -       -
-// GPIO17           -                   -                     CS      -
+// GPIO22           -                   -                     CS      -
+// GPIO16   RXD2    -                   -                     -       TX of NEXTION (if in use)
+// GPIO17   TXD2    -                   -                     -       RX of NEXTION (if in use)
 // GPIO18   SCK     pin 5 CLK or SCK    pin 5 SCK             CLK     -
 // GPIO19   MISO    -                   pin 7 MISO            MISO    -
 // GPIO23   MOSI    pin 4 DIN or SDA    pin 6 MOSI            MOSI    -
@@ -123,7 +126,7 @@
 // 31-05-2018, ES: Bugfix: Crashed if I2C is used, but pins not defined.
 // 01-06-2018, ES: Run Playtask on CPU 0.
 // 04-06-2018, ES: Made handling of playlistdata more tolerant (NDR).
-// 09-06-2018, ES: Typo in defaultprefs.h
+// 09-06-2018, ES: Typo in defaultprefs.h.
 // 10-06-2018, ES: Rotary encoder, interrupts on all 3 signals.
 // 25-06-2018, ES: Timing of mp3loop.  Limit read from stream to free queue space.
 // 16-07-2018, ES: Correction tftset().
@@ -134,21 +137,26 @@
 // 02-08-2018, ES: Added support for ILI9341 display.
 // 03-08-2018, ES: Added playlistposition for MQTT.
 // 06-08-2018, ES: Correction negative time offset, OTA through remote host.
-//
+// 16-08-2018, ES: Added Nextion support.
+// 18-09-2018, ES: "uppreset" and "downpreset" for MP3 player.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Mon, 06 Aug 2018 12:12:32 GMT"
+#define VERSION     "Fri, 28 Sep 2018 14:12:32 GMT"
+// ESP32-Radio can be updated (OTA) to the latest version from a remote server.
+// The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
-#define BINFILE     "/Arduino/Esp32_radio.ino.bin"      // Binary file name for update
+#define BINFILE     "/Arduino/Esp32_radio.ino.bin"      // Binary file name for update software
+#define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
-// Define (one) type of display.  See documentation.
-#define BLUETFT                        // Works also for RED TFT 128x160
+// Define (just one) type of display.  See documentation.
+#define BLUETFT                      // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
 //#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
 //#define ILI9341                      // ILI9341 240*320
+//#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
 //
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -217,6 +225,8 @@ void        tftlog ( const char *str ) ;
 void        playtask ( void * parameter ) ;       // Task to play the stream
 void        spftask ( void * parameter ) ;        // Task for special functions
 void        gettime() ;
+void        reservepin ( int8_t rpinnr ) ;
+
 
 //**************************************************************************************************
 // Several structs.                                                                                *
@@ -317,6 +327,10 @@ struct keyname_t                                      // For keys in NVS
 // Items in ini_block can be changed by commands from webserver/MQTT/Serial.                       *
 //**************************************************************************************************
 
+enum display_t { T_UNDEFINED, T_BLUETFT, T_OLED,         // Various types of display
+                 T_DUMMYTFT, T_LCD1602I2C, T_ILI9341,
+                 T_NEXTION } ;
+
 enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,        // State for datastream
                   METADATA = 8, PLAYLISTINIT = 16,
                   PLAYLISTHEADER = 32, PLAYLISTDATA = 64,
@@ -333,6 +347,7 @@ WiFiClient        mp3client ;                            // An instance of the m
 WiFiClient        cmdclient ;                            // An instance of the client for commands
 WiFiClient        wmqttclient ;                          // An instance for mqtt
 PubSubClient      mqttclient ( wmqttclient ) ;           // Client for MQTT subscriber
+HardwareSerial*   nxtserial = NULL ;                     // Serial port for NEXTION (if defined)
 TaskHandle_t      maintask ;                             // Taskhandle for main task
 TaskHandle_t      xplaytask ;                            // Task handle for playtask
 TaskHandle_t      xspftask ;                             // Task handle for special functions
@@ -340,6 +355,7 @@ SemaphoreHandle_t SPIsem = NULL ;                        // For exclusive SPI us
 hw_timer_t*       timer = NULL ;                         // For timer
 char              timetxt[9] ;                           // Converted timeinfo
 char              cmd[130] ;                             // Command from MQTT or Serial
+uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream 
 QueueHandle_t     dataqueue ;                            // Queue for mp3 datastream
 QueueHandle_t     spfqueue ;                             // Queue for special functions
 qdata_struct      outchunk ;                             // Data to queue
@@ -394,7 +410,7 @@ uint32_t          max_mp3loop_time = 0 ;                 // To check max handlin
 int16_t           scanios ;                              // TEST*TEST*TEST
 int16_t           scaniocount ;                          // TEST*TEST*TEST
 uint16_t          bltimer = 0 ;                          // Backlight time-out counter
-String            lstmod = "" ;                          // Last modified timestamp binary on remote host
+display_t         displaytype = T_UNDEFINED ;            // Display type
 std::vector<WifiInfo_t> wifilist ;                       // List with wifi_xx info
 // nvs stuff
 nvs_page                nvsbuf ;                         // Space for 1 page of NVS info
@@ -415,23 +431,6 @@ sv bool           tripleclick = false ;                  // True if triple click
 sv bool           longclick = false ;                    // True if longclick detected
 enum enc_menu_t { VOLUME, PRESET, TRACK } ;              // State for rotary encoder menu
 enc_menu_t        enc_menu_mode = VOLUME ;               // Default is VOLUME mode
-
-// Include software for the right display
-#ifdef BLUETFT
-#include "bluetft.h"                                     // For ILI9163C or ST7735S 128x160 display
-#endif
-#ifdef ILI9341
-#include "ILI9341.h"                                     // For ILI9341 320x240 display
-#endif
-#ifdef OLED
-#include "SSD1306.h"                                     // For OLED I2C SD1306 64x128 display
-#endif
-#ifdef LCD1602I2C
-#include "LCD1602.h"                                     // For LCD 1602 display (I2C)
-#endif
-#ifdef DUMMYTFT
-#include "Dummytft.h"                                    // For Dummy display
-#endif
 
 //
 struct progpin_struct                                    // For programmable input pins
@@ -462,8 +461,8 @@ progpin_struct   progpin[] =                             // Input pins and progr
   { 13, false, false,  "", false },
   { 14, false, false,  "", false },
   { 15, false, false,  "", false },
-  { 16, false, false,  "", false },
-  { 17, false, false,  "", false },
+  { 16, false, false,  "", false },                      // May be UART 2 RX for Nextion
+  { 17, false, false,  "", false },                      // May be UART 2 TX for Nextion
   { 18, false, false,  "", false },                      // Default for SPI CLK
   { 19, false, false,  "", false },                      // Default for SPI MISO
   //{ 20, true,  false,  "", false },                    // Not exposed on DEV board
@@ -1043,6 +1042,26 @@ VS1053* vs1053player ;
 // End VS1053 stuff.                                                                               *
 //**************************************************************************************************
 
+// Include software for the right display
+#ifdef BLUETFT
+#include "bluetft.h"                                     // For ILI9163C or ST7735S 128x160 display
+#endif
+#ifdef ILI9341
+#include "ILI9341.h"                                     // For ILI9341 320x240 display
+#endif
+#ifdef OLED
+#include "SSD1306.h"                                     // For OLED I2C SD1306 64x128 display
+#endif
+#ifdef LCD1602I2C
+#include "LCD1602.h"                                     // For LCD 1602 display (I2C)
+#endif
+#ifdef DUMMYTFT
+#include "Dummytft.h"                                    // For Dummy display
+#endif
+#ifdef NEXTION
+#include "NEXTION.h"                                     // For NEXTION display
+#endif
+
 
 //**************************************************************************************************
 //                                           B L S E T                                             *
@@ -1458,7 +1477,8 @@ String getSDfilename ( String nodeID )
       nodeinx = SD_nodelist.indexOf ( "\n", nodeinx ) + 1 ;
     }
     nodeinx2 = SD_nodelist.indexOf ( "\n", nodeinx ) ;     // Find end of node ID
-    nodeID = SD_nodelist.substring ( nodeinx, nodeinx2 ) ; // Get node ID
+    nodeID = SD_nodelist.substring ( nodeinx,
+                                     nodeinx2 ) ;          // Get node ID
   }
   dbgprint ( "getSDfilename requested node ID is %s",      // Show requeste node ID
              nodeID.c_str() ) ;
@@ -2012,8 +2032,16 @@ void showstreamtitle ( const char *ml, bool full )
   icystreamtitle = streamtitle ;
   if ( ( p1 = strstr ( streamtitle, " - " ) ) ) // look for artist/title separator
   {
-    *p1++ = '\n' ;                              // Found: replace 3 characters by newline
-    p2 = p1 + 2 ;
+    p2 = p1 + 3 ;                               // 2nd part of text at this position
+    if ( displaytype == T_NEXTION )
+    {
+      *p1++ = '\\' ;                            // Found: replace 3 characters by "\r"
+      *p1++ = 'r' ;                             // Found: replace 3 characters by "\r"
+    }
+    else
+    {
+      *p1++ = '\n' ;                            // Found: replace 3 characters by newline
+    }
     if ( *p2 == ' ' )                           // Leading space in title?
     {
       p2++ ;
@@ -2209,7 +2237,14 @@ void handle_ID3 ( String &path )
            ( strncmp ( ID3tag.tagid, "TPE1", 4 ) == 0 ) )   // or artist?
       {
         albttl += String ( metalinebf + 1 ) ;               // Yes, add to string
-        albttl += String ( "\n" ) ;                         // Add newline
+        if ( displaytype == T_NEXTION )                     // NEXTION display?
+        {
+          albttl += String ( "\\r" ) ;                      // Add code for newline (2 characters)
+        }
+        else
+        {
+          albttl += String ( "\n" ) ;                       // Add newline (1 character)
+        }
       }
       if ( strncmp ( ID3tag.tagid, "TIT2", 4 ) == 0 )       // Songtitle?
       {
@@ -2306,6 +2341,7 @@ bool connectwifi()
   }
   tftlog ( pfs ) ;                                      // Show IP
   delay ( 3000 ) ;                                      // Allow user to read this
+  tftlog ( "\f" ) ;                                     // Select new page if NEXTION 
   return ( localAP == false ) ;                         // Return result of connection
 }
 
@@ -2325,32 +2361,146 @@ void otastart()
 
 
 //**************************************************************************************************
+//                                D O _ N E X T I O N _ U P D A T E                                *
+//**************************************************************************************************
+// Update NEXTION image from OTA stream.                                                           *
+//**************************************************************************************************
+bool do_nextion_update ( uint32_t clength )
+{
+  bool     res = false ;                                       // Update result
+  uint32_t k ;
+  int      c ;                                                 // Reply from NEXTION
+
+  if ( nxtserial )                                             // NEXTION active?
+  {
+    vTaskDelete ( xspftask ) ;                                 // Prevent output to NEXTION
+    delay ( 1000 ) ;
+    nxtserial->printf ( "\xFF\xFF\xFF" ) ;                     // Empty command
+    for ( int i = 0 ; i < 100 ; i++ )                          // Any input seen?
+    {
+      if ( nxtserial->available() )
+      {
+        c =  nxtserial->read() ;                               // Read garbage
+      }
+      delay ( 20 ) ;
+    }
+    nxtserial->printf ( "whmi-wri %d,9600,0\xFF\xFF\xFF",      // Start upload
+                        clength ) ;
+    while ( !nxtserial->available() )                          // Any input seen?
+    {
+      delay ( 20 ) ;
+    }
+    c =  nxtserial->read() ;                                   // Yes, read the 0x05 ACK
+    while ( clength )                                          // Loop for the transfer
+    {
+      k = clength ;
+      if ( k > 4096 )
+      {
+        k = 4096 ;
+      }
+      k = otaclient.read ( tmpbuff, k ) ;                      // Read a number of bytes from the stream
+      dbgprint ( "TFT file, read %d bytes", k ) ;
+      nxtserial->write ( tmpbuff, k ) ;     
+      while ( !nxtserial->available() )                        // Any input seen?
+      {
+        delay ( 20 ) ;
+      }
+      c =  (char)nxtserial->read() ;                           // Yes, read the 0x05 ACK
+      if ( c != 0x05 )
+      {
+        break ;
+      }
+      clength -= k ;
+    }
+    otaclient.flush() ;
+    if ( clength == 0 )
+    {
+      dbgprint ( "Update successfully completed" ) ;
+      res = true ;
+    }
+  }
+  return res ;
+}
+
+
+//**************************************************************************************************
+//                                D O _ S O F T W A R E _ U P D A T E                              *
+//**************************************************************************************************
+// Update software from OTA stream.                                                                *
+//**************************************************************************************************
+bool do_software_update ( uint32_t clength )
+{
+  bool res = false ;                                          // Update result
+  
+  if ( Update.begin ( clength ) )                             // Update possible?
+  {
+    dbgprint ( "Begin OTA update, length is %d",
+               clength ) ;
+    if ( Update.writeStream ( otaclient ) == clength )        // writeStream is the real download
+    {
+      dbgprint ( "Written %d bytes successfully", clength ) ;
+    }
+    else
+    {
+      dbgprint ( "Write failed!" ) ;
+    }
+    if ( Update.end() )                                       // Check for successful flash
+    {
+      dbgprint( "OTA done" ) ;
+      if ( Update.isFinished() )
+      {
+        dbgprint ( "Update successfully completed" ) ;
+        res = true ;                                          // Positive result
+      }
+      else
+      {
+        dbgprint ( "Update not finished!" ) ;
+      }
+    }
+    else
+    {
+      dbgprint ( "Error Occurred. Error %s", Update.getError() ) ;
+    }
+  }
+  else
+  {
+    // Not enough space to begin OTA
+    dbgprint ( "Not enough space to begin OTA" ) ;
+    otaclient.flush() ;
+  }
+  return res ;
+}
+
+
+//**************************************************************************************************
 //                                        U P D A T E _ S O F T W A R E                            *
 //**************************************************************************************************
 // Update software by download from remote host.                                                   *
 //**************************************************************************************************
-void update_software()
+void update_software ( const char* lstmodkey, const char* updatehost, const char* binfile )
 {
   uint32_t    timeout = millis() ;                              // To detect time-out
-  bool        isoc    = false ;                                 // True for valid stream
   String      line ;                                            // Input header line
+  String      lstmod = "" ;                                     // Last modified timestamp in NVS
   String      newlstmod ;                                       // Last modified from host
   
   updatereq = false ;                                           // Clear update flag
   otastart() ;                                                  // Show something on screen
   stop_mp3client () ;                                           // Stop input stream
-  lstmod = nvsgetstr ( "lstmod" ) ;                             // Get current last modified timestamp
+  lstmod = nvsgetstr ( lstmodkey ) ;                            // Get current last modified timestamp
   dbgprint ( "Connecting to %s for %s",
-              UPDATEHOST, BINFILE ) ;
-  if ( !otaclient.connect ( UPDATEHOST, 80 ) )                  // Connect to host
+              updatehost, binfile ) ;
+  if ( !otaclient.connect ( updatehost, 80 ) )                  // Connect to host
   {
     dbgprint ( "Connect to updatehost failed!" ) ;
     return ;
   }
-  otaclient.print ( "GET " BINFILE " HTTP/1.1\r\n"
-                    "Host: " UPDATEHOST "\r\n"
-                    "Cache-Control: no-cache\r\n"
-                    "Connection: close\r\n\r\n" ) ;
+  otaclient.printf ( "GET %s HTTP/1.1\r\n"
+                     "Host: %s\r\n"
+                     "Cache-Control: no-cache\r\n"
+                     "Connection: close\r\n\r\n",
+                     binfile,
+                     updatehost ) ;
   while ( otaclient.available() == 0 )                          // Wait until response appears
   {
     if ( millis() - timeout > 5000 )
@@ -2380,11 +2530,7 @@ void update_software()
       }
     }
     scan_content_length ( line.c_str() ) ;                      // Scan for content_length
-    if ( line.startsWith ( "Content-Type: " ) )                 // Contents-Type line?
-    {                                                           // Yes, scan for right type
-      isoc = ( line.indexOf ( "octet-stream" ) > 0  ) ;
-    }
-    else if ( line.startsWith ( "Last-Modified: " ) )           // Timestamp of binary file
+    if ( line.startsWith ( "Last-Modified: " ) )                // Timestamp of binary file
     {
       newlstmod = line.substring ( 15 ) ;                       // Isolate timestamp
     }
@@ -2396,43 +2542,21 @@ void update_software()
     otaclient.flush() ;
     return ;    
   }
-  if ( ( clength > 0 ) && isoc )
+  if ( clength > 0 )
   {
-    if ( Update.begin ( clength ) )                             // Update possible?
+    if ( strstr ( binfile, ".bin" ) )                           // Update of the sketch?
     {
-      dbgprint ( "Begin OTA update, length is %d",
-                 clength ) ;
-      if ( Update.writeStream ( otaclient ) == clength )        // writeStream is the real download
+      if ( do_software_update ( clength ) )                     // Flash updated sketch
       {
-        dbgprint ( "Written %d bytes successfully", clength ) ;
-      }
-      else
-      {
-        dbgprint ( "Write failed!" ) ;
-      }
-      if ( Update.end() )                                       // Check for successful flash
-      {
-        dbgprint( "OTA done" ) ;
-        if ( Update.isFinished() )
-        {
-          dbgprint ( "Update successfully completed" ) ;
-          nvssetstr ( "lstmod", newlstmod ) ;                   // Update Last Modified in NVS
-        }
-        else
-        {
-          dbgprint ( "Update not finished!" ) ;
-        }
-      }
-      else
-      {
-        dbgprint ( "Error Occurred. Error %s", Update.getError() ) ;
+        nvssetstr ( lstmodkey, newlstmod ) ;                    // Update Last Modified in NVS
       }
     }
-    else
+    if ( strstr ( binfile, ".tft" ) )                           // Update of the NEXTION image?
     {
-      // Not enough space to begin OTA
-      dbgprint ( "Not enough space to begin OTA" ) ;
-      otaclient.flush() ;
+      if ( do_nextion_update ( clength ) )                      // Flash updated NEXTION
+      {
+        nvssetstr ( lstmodkey, newlstmod ) ;                    // Update Last Modified in NVS
+      }
     }
   }
   else
@@ -2568,6 +2692,10 @@ void reservepin ( int8_t rpinnr )
   {
     if ( pin == rpinnr )                                    // Entry found?
     {
+      if ( progpin[i].reserved )                            // Already reserved?
+      {
+        dbgprint ( "Pin %d is already reserved!", rpinnr ) ;
+      }
       //dbgprint ( "GPIO%02d unavailabe for 'gpio_'-command", pin ) ;
       progpin[i].reserved = true ;                          // Yes, pin is reserved now
       break ;                                               // No need to continue
@@ -2808,7 +2936,7 @@ void scanserial()
 {
   static String serialcmd ;                      // Command from Serial input
   char          c ;                              // Input character
-  const char*   reply ;                          // Reply string froma analyzeCmd
+  const char*   reply = "" ;                     // Reply string from analyzeCmd
   uint16_t      len ;                            // Length of input string
 
   while ( Serial.available() )                   // Any input seen?
@@ -2821,6 +2949,13 @@ void scanserial()
       if ( len )
       {
         strncpy ( cmd, serialcmd.c_str(), sizeof(cmd) ) ;
+        if ( nxtserial )                         // NEXTION test possible?
+        {
+          if ( serialcmd.startsWith ( "N:" ) )   // Command meant to test Nextion display?
+          {
+            nxtserial->printf ( "%s\xFF\xFF\xFF", cmd + 2 ) ;
+          }
+        }
         reply = analyzeCmd ( cmd ) ;             // Analyze command and handle it
         dbgprint ( reply ) ;                     // Result for debugging
         serialcmd = "" ;                         // Prepare for new command
@@ -2833,6 +2968,58 @@ void scanserial()
     if ( len >= ( sizeof(cmd) - 2 )  )           // Check for excessive length
     {
       serialcmd = "" ;                           // Too long, reset
+    }
+  }
+}
+
+
+//**************************************************************************************************
+//                                     S C A N S E R I A L 2                                       *
+//**************************************************************************************************
+// Listen to commands on the 2nd Serial inputline (NEXTION).                                       *
+//**************************************************************************************************
+void scanserial2()
+{
+  static String  serialcmd ;                       // Command from Serial input
+  char           c ;                               // Input character
+  const char*    reply = "" ;                      // Reply string from analyzeCmd
+  uint16_t       len ;                             // Length of input string
+  static uint8_t ffcount = 0 ;                     // Counter for 3 tmes "0xFF"
+
+  if ( nxtserial )                                 // NEXTION active?
+  {
+    while ( nxtserial->available() )               // Yes, any input seen?
+    {
+      c =  (char)nxtserial->read() ;               // Yes, read the next input character
+      len = serialcmd.length() ;                   // Get the length of the current string
+      if ( c == 0xFF )                             // End of command?
+      {
+        if ( ++ffcount < 3 )                       // 3 times FF?
+        {
+          continue ;                               // No, continue to read
+        }
+        ffcount = 0 ;                              // For next command
+        if ( len )
+        {
+          strncpy ( cmd, serialcmd.c_str(), sizeof(cmd) ) ;
+          dbgprint ( "NEXTION command seen %02X %s",
+                     cmd[0], cmd + 1 ) ;
+          if ( cmd[0] == 0x70 )                    // Button pressed?
+          { 
+            reply = analyzeCmd ( cmd + 1 ) ;       // Analyze command and handle it
+            dbgprint ( reply ) ;                   // Result for debugging
+          }
+          serialcmd = "" ;                         // Prepare for new command
+        }
+      }
+      else if ( c >= ' ' )                         // Only accept useful characters
+      {
+        serialcmd += c ;                           // Add to the command
+      }
+      if ( len >= ( sizeof(cmd) - 2 )  )           // Check for excessive length
+      {
+        serialcmd = "" ;                           // Too long, reset
+      }
     }
   }
 }
@@ -3237,8 +3424,8 @@ void setup()
   if ( about_html_version   < 170626 ) dbgprint ( wvn, "about" ) ;
   if ( config_html_version  < 180806 ) dbgprint ( wvn, "config" ) ;
   if ( index_html_version   < 180102 ) dbgprint ( wvn, "index" ) ;
-  if ( mp3play_html_version < 170626 ) dbgprint ( wvn, "mp3play" ) ;
-  if ( defaultprefs_version < 180609 ) dbgprint ( wvn, "defaultprefs" ) ;
+  if ( mp3play_html_version < 180918 ) dbgprint ( wvn, "mp3play" ) ;
+  if ( defaultprefs_version < 180816 ) dbgprint ( wvn, "defaultprefs" ) ;
   // Print some memory and sketch info
   dbgprint ( "Starting ESP32-radio running on CPU %d at %d MHz.  Version %s.  Free memory %d",
              xPortGetCoreID(),
@@ -3258,7 +3445,10 @@ void setup()
   dbgprint ( dtyp, "DUMMYTFT" ) ;
 #endif
 #if defined ( LCD1602I2C )
-  dbgprint ( dtyp, "BLUETFT" ) ;
+  dbgprint ( dtyp, "LCD1602" ) ;
+#endif
+#if defined ( NEXTION )
+  dbgprint ( dtyp, "NEXTION" ) ;
 #endif
   maintask = xTaskGetCurrentTaskHandle() ;               // My taskhandle
   SPIsem = xSemaphoreCreateMutex(); ;                    // Semaphore for SPI bus
@@ -4157,7 +4347,6 @@ void chk_enc()
 //**************************************************************************************************
 void mp3loop()
 {
-  static uint8_t  tmpbuff[6000] ;                        // Input buffer for mp3 stream
   uint32_t        maxchunk ;                             // Max number of bytes to read
   int             res = 0 ;                              // Result reading from mp3 stream
   uint32_t        av = 0 ;                               // Available in stream
@@ -4166,7 +4355,6 @@ void mp3loop()
   uint32_t        qspace ;                               // Free space in data queue
 
   // Try to keep the Queue to playtask filled up by adding as much bytes as possible
-
   if ( datamode & ( INIT | HEADER | DATA |               // Test op playing
                     METADATA | PLAYLISTINIT |
                     PLAYLISTHEADER |
@@ -4260,7 +4448,8 @@ void mp3loop()
       if ( av == 0 )                                     // End of mp3 data?
       {
         datamode = STOPREQD ;                            // End of local mp3-file detected
-        nodeID = selectnextSDnode ( SD_currentnode, +1 ) ; // Select the next file on SD
+        nodeID = selectnextSDnode ( SD_currentnode,
+                                    +1 ) ;               // Select the next file on SD
         host = getSDfilename ( nodeID ) ;
         hostreq = true ;                                 // Request this host
       }
@@ -4333,25 +4522,32 @@ void mp3loop()
 //**************************************************************************************************
 void loop()
 {
-  mp3loop() ;                                               // Do mp3 related actions
-  if ( updatereq )                                          // Software update requested?
+  mp3loop() ;                                       // Do mp3 related actions
+  if ( updatereq )                                  // Software update requested?
   {
-    update_software() ;                                     // Yes, handle it
-    resetreq = true ;                                       // And reset
+    if ( displaytype == T_NEXTION )                 // NEXTION in use?
+    { 
+      update_software ( "lstmodn",                  // Yes, update NEXTION image from remote image
+                        UPDATEHOST, TFTFILE ) ;
+    }
+    update_software ( "lstmods",                    // Update sketch from remote file
+                      UPDATEHOST, BINFILE ) ;
+    resetreq = true ;                               // And reset
   }
-  if ( resetreq )                                           // Reset requested?
+  if ( resetreq )                                   // Reset requested?
   {
-    delay ( 1000 ) ;                                        // Yes, wait some time
-    ESP.restart() ;                                         // Reboot
+    delay ( 1000 ) ;                                // Yes, wait some time
+    ESP.restart() ;                                 // Reboot
   }
-  scanserial() ;                                            // Handle serial input
-  scandigital() ;                                           // Scan digital inputs
-  scanIR() ;                                                // See if IR input
-  ArduinoOTA.handle() ;                                     // Check for OTA
-  mp3loop() ;                                               // Do more mp3 related actions
+  scanserial() ;                                    // Handle serial input
+  scanserial2() ;                                   // Handle serial input from NEXTION (if active)
+  scandigital() ;                                   // Scan digital inputs
+  scanIR() ;                                        // See if IR input
+  ArduinoOTA.handle() ;                             // Check for OTA
+  mp3loop() ;                                       // Do more mp3 related actions
   handlehttpreply() ;
-  cmdclient = cmdserver.available() ;                       // Check Input from client?
-  if ( cmdclient )                                          // Client connected?
+  cmdclient = cmdserver.available() ;               // Check Input from client?
+  if ( cmdclient )                                  // Client connected?
   {
     dbgprint ( "Command client available" ) ;
     handlehttp() ;
@@ -4359,12 +4555,12 @@ void loop()
   // Handle MQTT.
   if ( mqtt_on )
   {
-    mqttclient.loop() ;                                     // Handling of MQTT connection
+    mqttclient.loop() ;                             // Handling of MQTT connection
   }
-  handleSaveReq() ;                                         // See if time to save settings
-  handleIpPub() ;                                           // See if time to publish IP
-  handleVolPub() ;                                          // See if time to publish volume
-  chk_enc() ;                                               // Check rotary encoder functions
+  handleSaveReq() ;                                 // See if time to save settings
+  handleIpPub() ;                                   // See if time to publish IP
+  handleVolPub() ;                                  // See if time to publish volume
+  chk_enc() ;                                       // Check rotary encoder functions
 }
 
 
@@ -5022,17 +5218,35 @@ const char* analyzeCmd ( const char* par, const char* val )
   }
   else if ( argument.indexOf ( "preset" ) >= 0 )      // (UP/DOWN)Preset station?
   {
-    if ( relative )                                   // Relative argument?
+    // If MP3 player is active: change track
+    if ( localfile &&
+         ( ( datamode & DATA ) != 0 ) &&              // MP# player active?
+         relative )
     {
-      ini_block.newpreset += ivalue ;                 // Yes, adjust currentpreset
+      datamode = STOPREQD ;                           // Force stop MP3 player
+      tmpstr = selectnextSDnode ( SD_currentnode,
+                                  ivalue ) ;          // Select the next or previous file on SD
+      host = getSDfilename ( tmpstr ) ;
+      hostreq = true ;                                // Request this host
+      sprintf ( reply, "Playing %s",                  // Reply new filename
+                host.c_str() ) ;
     }
     else
     {
-      ini_block.newpreset = ivalue ;                  // Otherwise set station
-      playlist_num = 0 ;                              // Absolute, reset playlist
+      if ( relative )                                 // Relative argument?
+      {
+        ini_block.newpreset += ivalue ;               // Yes, adjust currentpreset
+      }
+      else
+      {
+        ini_block.newpreset = ivalue ;                // Otherwise set station
+        playlist_num = 0 ;                            // Absolute, reset playlist
+      }
+      datamode = STOPREQD ;                           // Force stop MP3 player
+      currentpreset = -1 ;                            // Make sure current is different
+      sprintf ( reply, "Preset is now %d",            // Reply new preset
+                ini_block.newpreset ) ;
     }
-    sprintf ( reply, "Preset is now %d",              // Reply new preset
-              ini_block.newpreset ) ;
   }
   else if ( argument == "stop" )                      // (un)Stop requested?
   {
@@ -5223,112 +5437,8 @@ String httpheader ( String contentstype )
 
 //**************************************************************************************************
 //* Function that are called from spftask.                                                         *
+//* Note that some device dependent function are place in the *.h files.                           *
 //**************************************************************************************************
-
-//**************************************************************************************************
-//                                      D I S P L A Y B A T T E R Y                                *
-//**************************************************************************************************
-// Show the current battery charge level on the screen.                                            *
-// It will overwrite the top divider.                                                              *
-// No action if bat0/bat100 not defined in the preferences.                                        *
-//**************************************************************************************************
-void displaybattery()
-{
-  if ( tft )
-  {
-    if ( ini_block.bat0 < ini_block.bat100 )              // Levels set in preferences?
-    {
-      static uint16_t oldpos = 0 ;                        // Previous charge level
-      uint16_t        ypos ;                              // Position on screen
-      uint16_t        v ;                                 // Constarinted ADC value
-      uint16_t        newpos ;                            // Current setting
-
-      v = constrain ( adcval, ini_block.bat0,             // Prevent out of scale
-                      ini_block.bat100 ) ;
-      newpos = map ( v, ini_block.bat0,                   // Compute length of green bar
-                     ini_block.bat100,
-                     0, dsp_getwidth() ) ;
-      if ( newpos != oldpos )                             // Value changed?
-      {
-        oldpos = newpos ;                                 // Remember for next compare
-        ypos = tftdata[1].y - 5 ;                         // Just before 1st divider
-        dsp_fillRect ( 0, ypos, newpos, 2, GREEN ) ;      // Paint green part
-        dsp_fillRect ( newpos, ypos,
-                       dsp_getwidth() - newpos,
-                       2, RED ) ;                          // Paint red part
-      }
-    }
-  }
-}
-
-
-//**************************************************************************************************
-//                                      D I S P L A Y V O L U M E                                  *
-//**************************************************************************************************
-// Show the current volume as an indicator on the screen.                                          *
-// The indicator is 2 pixels heigh.                                                                *
-//**************************************************************************************************
-void displayvolume()
-{
-  if ( tft )
-  {
-    static uint8_t oldvol = 0 ;                         // Previous volume
-    uint8_t        newvol ;                             // Current setting
-    uint16_t       pos ;                                // Positon of volume indicator
-
-    newvol = vs1053player->getVolume() ;                // Get current volume setting
-    if ( newvol != oldvol )                             // Volume changed?
-    {
-      oldvol = newvol ;                                 // Remember for next compare
-      pos = map ( newvol, 0, 100, 0, dsp_getwidth() ) ; // Compute position on TFT
-      dsp_fillRect ( 0, dsp_getheight() - 2,
-                     pos, 2, RED ) ;                    // Paint red part
-      dsp_fillRect ( pos, dsp_getheight() - 2,
-                     dsp_getwidth() - pos, 2, GREEN ) ; // Paint green part
-    }
-  }
-}
-
-
-//**************************************************************************************************
-//                                      D I S P L A Y T I M E                                      *
-//**************************************************************************************************
-// Show the time on the LCD at a fixed position in a specified color                               *
-// To prevent flickering, only the changed part of the timestring is displayed.                    *
-// An empty string will force a refresh on next call.                                              *
-// A character on the screen is 8 pixels high and 6 pixels wide.                                   *
-//**************************************************************************************************
-void displaytime ( const char* str, uint16_t color )
-{
-  static char oldstr[9] = "........" ;             // For compare
-  uint8_t     i ;                                  // Index in strings
-  uint16_t    pos = dsp_getwidth() + TIMEPOS ;     // X-position of character
-
-  if ( str[0] == '\0' )                            // Empty string?
-  {
-    for ( i = 0 ; i < 8 ; i++ )                    // Set oldstr to dots
-    {
-      oldstr[i] = '.' ;
-    }
-    return ;                                       // No actual display yet
-  }
-  if ( tft )                                       // TFT active?
-  {
-    dsp_setTextColor ( color ) ;                   // Set the requested color
-    for ( i = 0 ; i < 8 ; i++ )                    // Compare old and new
-    {
-      if ( str[i] != oldstr[i] )                   // Difference?
-      {
-        dsp_fillRect ( pos, 0, 6, 8, BLACK ) ;     // Clear the space for new character
-        dsp_setCursor ( pos, 0 ) ;                 // Prepare to show the info
-        dsp_print ( str[i] ) ;                     // Show the character
-        oldstr[i] = str[i] ;                       // Remember for next compare
-      }
-      pos += 6 ;                                   // Next position
-    }
-  }
-}
-
 
 //**************************************************************************************************
 //                                      D I S P L A Y I N F O                                      *
@@ -5353,7 +5463,7 @@ void displayinfo ( uint16_t inx )
     {
       dsp_fillRect ( 0, p->y - 4, width, 1, GREEN ) ;      // Yes, show divider above text
     }
-    uint16_t len = p->str.length() ;                       // Required length of buffer
+    len = p->str.length() ;                                // Required length of buffer
     if ( len++ )                                           // Check string length, set buffer length
     {
       char buf [ len ] ;                                   // Need some buffer space

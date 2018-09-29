@@ -1,6 +1,6 @@
 // Default preferences in raw data format for PROGMEM
 //
-#define defaultprefs_version 180609
+#define defaultprefs_version 1808016
 const char defprefs_txt[] PROGMEM = R"=====(
 # Example configuration
 # Programmable input pins:
@@ -61,6 +61,6 @@ pin_tft_dc = 2                                       # GPIO Pin number for TFT "
 pin_sd_cs = 21                                       # GPIO Pin number for SD card "CS"
 #
 pin_vs_cs = 5                                        # GPIO Pin number for VS1053 "CS"
-pin_vs_dcs = 16                                      # GPIO Pin number for VS1053 "DCS"
+pin_vs_dcs = 32                                      # GPIO Pin number for VS1053 "DCS"
 pin_vs_dreq = 4                                      # GPIO Pin number for VS1053 "DREQ"
 )=====" ;

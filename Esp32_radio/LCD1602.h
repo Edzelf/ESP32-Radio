@@ -70,7 +70,7 @@
 #define TFTSECS 4                                           // 4 sections, only 2 used
 scrseg_struct     tftdata[TFTSECS] =                        // Screen divided in 4 segments
 {
-  { false, WHITE,   0,  0, "" },                            // 1 top line
+  { false, WHITE,   0,  0, "" },                            // 1 top line (dummy)
   { false, WHITE,   0,  0, "" },                            // 8 lines in the middle
   { false, WHITE,   0,  0, "" },                            // 4 lines at the bottom
   { false, WHITE,   0,  0, "" }                             // 4 lines at the bottom for rotary encoder
@@ -103,10 +103,18 @@ LCD1602* tft = NULL ;
 
 bool dsp_begin()
 {
-  dbgprint ( "Init LCD %d %d", ini_block.tft_sda_pin,
-             ini_block.tft_scl_pin ) ; 
-  tft = new LCD1602 ( ini_block.tft_sda_pin,
-                      ini_block.tft_scl_pin ) ;         // Create an instant for TFT
+  dbgprint ( "Init LCD1602, I2C pins %d,%d", ini_block.tft_sda_pin,
+             ini_block.tft_scl_pin ) ;
+  if ( ( ini_block.tft_sda_pin >= 0 ) &&
+       ( ini_block.tft_scl_pin >= 0 ) )
+  {
+    tft = new LCD1602 ( ini_block.tft_sda_pin,
+                        ini_block.tft_scl_pin ) ;           // Create an instance for TFT
+  }
+  else
+  {
+    dbgprint ( "Init LCD1602 failed!" ) ;
+  }
   return ( tft != NULL ) ;
 }
 
@@ -291,7 +299,7 @@ LCD1602::LCD1602 ( uint8_t sda, uint8_t scl )
   {
     dbgprint ( "param_config error!" ) ;
   }
-  if ( i2c_driver_install ( I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0 ) != ESP_OK )
+  else if ( i2c_driver_install ( I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0 ) != ESP_OK )
   {
     dbgprint ( "driver_install error!" ) ;
   }
@@ -407,4 +415,31 @@ void dsp_update()
 }
 
 
+//**************************************************************************************************
+//                                      D I S P L A Y B A T T E R Y                                *
+//**************************************************************************************************
+// Dummy routine for this type of display.                                                         *
+//**************************************************************************************************
+void displaybattery()
+{
+}
 
+
+//**************************************************************************************************
+//                                      D I S P L A Y V O L U M E                                  *
+//**************************************************************************************************
+// Dummy routine for this type of display.                                                         *
+//**************************************************************************************************
+void displayvolume()
+{
+}
+
+
+//**************************************************************************************************
+//                                      D I S P L A Y T I M E                                      *
+//**************************************************************************************************
+// Dummy routine for this type of display.                                                         *
+//**************************************************************************************************
+void displaytime ( const char* str, uint16_t color )
+{
+}

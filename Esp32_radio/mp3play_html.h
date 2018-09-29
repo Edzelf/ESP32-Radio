@@ -1,6 +1,6 @@
 // index.html file in raw data format for PROGMEM
 //
-#define mp3play_html_version 170626
+#define mp3play_html_version 180918
 const char mp3play_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
@@ -27,14 +27,16 @@ const char mp3play_html[] PROGMEM = R"=====(
     <option value="-1">Select a track here</option>
    </select>
    <br><br>
-   <button class="button" onclick="httpGet('mp3track=0')">RANDOM</button>
+   <button class="button" onclick="httpGet('downpreset=1', true)">PREV</button>
+   <button class="button" onclick="httpGet('mp3track=0', true)">RANDOM</button>
+   <button class="button" onclick="httpGet('uppreset=1', true)">NEXT</button>
    <br><br>
    <br>
    <input type="text" width="600px" size="120" id="resultstr" placeholder="Waiting for a command...."><br>
    <br><br>
   </center>
   <script>
-   function httpGet ( theReq )
+   function httpGet ( theReq, fReset )
    {
     var theUrl = "/?" + theReq + "&version=" + Math.random() ;
     var xhr = new XMLHttpRequest() ;
@@ -46,13 +48,17 @@ const char mp3play_html[] PROGMEM = R"=====(
     }
     xhr.open ( "GET", theUrl ) ;
     xhr.send() ;
+    if ( fReset )
+    {
+      seltrack.value = -1 ;
+    }
    }
 
    function trackreq ( presctrl )
    {
     if ( presctrl.value != "-1" )
     {
-      httpGet ( "mp3track=" + presctrl.value ) ;
+      httpGet ( "mp3track=" + presctrl.value, false ) ;
     }
    }
 
