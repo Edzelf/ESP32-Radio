@@ -139,11 +139,12 @@
 // 06-08-2018, ES: Correction negative time offset, OTA through remote host.
 // 16-08-2018, ES: Added Nextion support.
 // 18-09-2018, ES: "uppreset" and "downpreset" for MP3 player.
+// 04-10-2018, ES: Fixed compile error OLED 64x128 display
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Fri, 28 Sep 2018 14:12:32 GMT"
+#define VERSION     "Thu, 14 Oct 2018 07:22:32 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
