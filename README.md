@@ -35,6 +35,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 09-oct-2018, Bug fix xSemaphoreTake.
 - 04-oct-2018, Fixed compile error OLED 64x128 display.
 - 28-sep-2018, Support for NEXTION display.
 - 06-aug-2018, Added playlistposition for MQTT.  Correction negative time offset. OTA update through remote host.
