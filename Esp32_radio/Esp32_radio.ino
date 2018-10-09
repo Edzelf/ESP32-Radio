@@ -139,12 +139,13 @@
 // 06-08-2018, ES: Correction negative time offset, OTA through remote host.
 // 16-08-2018, ES: Added Nextion support.
 // 18-09-2018, ES: "uppreset" and "downpreset" for MP3 player.
-// 04-10-2018, ES: Fixed compile error OLED 64x128 display
+// 04-10-2018, ES: Fixed compile error OLED 64x128 display.
+// 09-10-2018, ES: Bug fix xSemaphoreTake.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Thu, 14 Oct 2018 07:22:32 GMT"
+#define VERSION     "Thu, 04 Oct 2018 07:22:32 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -152,12 +153,12 @@
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
 // Define (just one) type of display.  See documentation.
-#define BLUETFT                      // Works also for RED TFT 128x160
+//#define BLUETFT                      // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
 //#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
 //#define ILI9341                      // ILI9341 240*320
-//#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
+#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
 //
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -1205,7 +1206,7 @@ void claimSPI ( const char* p )
   const        TickType_t ctry = 10 ;                       // Time to wait for semaphore
   uint32_t     count = 0 ;                                  // Wait time in ticks
 
-  while ( xSemaphoreTake ( SPIsem, ctry ) != pdTRUE  ) ;    // Claim SPI bus
+  while ( xSemaphoreTake ( SPIsem, ctry ) != pdTRUE  )      // Claim SPI bus
   {
     if ( count++ > 10 )
     {
