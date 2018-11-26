@@ -141,6 +141,7 @@
 // 18-09-2018, ES: "uppreset" and "downpreset" for MP3 player.
 // 04-10-2018, ES: Fixed compile error OLED 64x128 display.
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
+// 26-11-2018, DK: Bug fix output enable
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -966,7 +967,7 @@ void VS1053::setTone ( uint8_t *rtone )                 // Set bass/treble (4 ni
 void VS1053::startSong()
 {
   sdi_send_fillers ( 10 ) ;
-  output_enable ( true ) ;                              // Enable amplifier through shutdown pin(s)
+  output_enable ( curvol != 0 ) ;                              // Enable amplifier through shutdown pin(s), but only when Volume setting isn't zero
 }
 
 bool VS1053::playChunk ( uint8_t* data, size_t len )
@@ -5682,4 +5683,3 @@ void spftask ( void * parameter )
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
-
