@@ -2,6 +2,7 @@
 // Initialize the preferences op ESP32-radio.  They can be edited later by the webinterface. *
 //********************************************************************************************
 // 27-04-2017, ES: First set-up, derived from preferences example sketch.                    *
+// 26-11-2018, ES: Get rid of warnings.                                                      *
 //********************************************************************************************
 
 #include <Preferences.h>
@@ -19,8 +20,6 @@ Preferences preferences ;         // Instance of Preferences
 //******************************************************************************************
 void setup()
 {
-  String       str ;
-  
   Serial.begin ( 115200 ) ;
   Serial.println() ;
   preferences.begin ( NAME, false ) ;                 // Open for read/write
@@ -30,22 +29,22 @@ void setup()
   preferences.putString ( "gpio_12",  "upvolume = 2" ) ;
   preferences.putString ( "gpio_13",  "downvolume = 2" ) ;
 
-  preferences.putString ( "mqttbroker",   "none" ) |
-  preferences.putString ( "mqttport",     "1883" ) |
-  preferences.putString ( "mqttuser",     "none" ) |
-  preferences.putString ( "mqttpasswd",   "none" ) |
-  preferences.putString ( "mqtttpreset",  "none" ) |
+  preferences.putString ( "mqttbroker",   "none" ) ;
+  preferences.putString ( "mqttport",     "1883" ) ;
+  preferences.putString ( "mqttuser",     "none" ) ;
+  preferences.putString ( "mqttpasswd",   "none" ) ;
+  preferences.putString ( "mqtttpreset",  "none" ) ;
   //
-  preferences.putString ( "wifi_00", "NETGEAR/xxxxxxx" ) |
-  preferences.putString ( "wifi_01", "ADSL/yyyyyyy" ) |
+  preferences.putString ( "wifi_00", "NETGEAR-11/DEADC0DE11" ) ;
+  preferences.putString ( "wifi_01", "ADSL-11/DEADC0DE11" ) ;
   //
-  preferences.putString ( "volume", "72" ) |
-  preferences.putString ( "toneha", "0" ) |
-  preferences.putString ( "tonehf", "0" ) |
-  preferences.putString ( "tonela", "0" ) |
-  preferences.putString ( "tonelf", "0" ) |
+  preferences.putString ( "volume", "72" ) ;
+  preferences.putString ( "toneha", "0" ) ;
+  preferences.putString ( "tonehf", "0" ) ;
+  preferences.putString ( "tonela", "0" ) ;
+  preferences.putString ( "tonelf", "0" ) ;
   //
-  preferences.putString ( "preset", "6" ) |
+  preferences.putString ( "preset", "6" ) ;
   preferences.putString ( "preset_00", "109.206.96.34:8100                       #  0 - NAXI LOVE RADIO, Belgrade, Serbia" ) ;
   preferences.putString ( "preset_01", "airspectrum.cdnstream1.com:8114/1648_128 #  1 - Easy Hits Florida 128k" ) ;
   preferences.putString ( "preset_02", "us2.internet-radio.com:8050              #  2 - CLASSIC ROCK MIA WWW.SHERADIO.COM" ) ;
