@@ -209,6 +209,11 @@
 #define otaclient mp3client                   // OTA uses mp3client for connection to host
 #define PIN_IR_DEBUG 21
 
+#define IR_READY 0 // FOR TESTING IR
+#define IR_OVERFLOW 1
+#define IR_FRAME_READ 2
+#define IR_FRAME_READING 3
+
 //**************************************************************************************************
 // Forward declaration and prototypes of various functions.                                        *
 //**************************************************************************************************
@@ -398,9 +403,12 @@ int               chunkcount = 0 ;                       // Counter for chunked 
 String            http_getcmd ;                          // Contents of last GET command
 String            http_rqfile ;                          // Requested file
 bool              http_reponse_flag = false ;            // Response required
-uint16_t          ir_value = 0 ;                         // IR code
-uint32_t          ir_0 = 550 ;                           // Average duration of an IR short pulse
-uint32_t          ir_1 = 1650 ;                          // Average duration of an IR long pulse
+static volatile uint16_t       ir_value = 0 ;                         // IR code
+static volatile uint32_t       ir_pulses[400];                        // FOR TESTING ir code interpretation
+static volatile uint8_t        ir_state = IR_READY;                   // FOR TESTING ir code interpretation
+static volatile uint32_t       ir_start_frame = 0;                    // FOR TESTING ir code interpretation
+static volatile uint32_t       ir_0 = 550 ;                           // Average duration of an IR short pulse
+static volatile uint32_t       ir_1 = 1650 ;                          // Average duration of an IR long pulse
 struct tm         timeinfo ;                             // Will be filled by NTP server
 bool              time_req = false ;                     // Set time requested
 bool              SD_okay = false ;                      // True if SD card in place and readable
@@ -1209,13 +1217,13 @@ void claimSPI ( const char* p )
 
   while ( xSemaphoreTake ( SPIsem, ctry ) != pdTRUE  )      // Claim SPI bus
   {
-    if ( count++ > 10 )
-    {
-      dbgprint ( "SPI semaphore not taken within %d ticks by CPU %d, id %s",
-                 count * ctry,
-                 xPortGetCoreID(),
-                 p ) ;
-    }
+//    if ( count++ > 10 )
+//    {
+//      dbgprint ( "SPI semaphore not taken within %d ticks by CPU %d, id %s",
+//                 count * ctry,
+//                 xPortGetCoreID(),
+//                 p ) ;
+//    }
   }
 }
 
@@ -1852,6 +1860,7 @@ void IRAM_ATTR isr_IR()
   sv uint32_t      t0 = 0 ;                          // To get the interval
   sv uint32_t      ir_locvalue = 0 ;                 // IR code
   sv int           ir_loccount = 0 ;                 // Length of code
+  sv uint16_t      ir_pulsecount = 0;                // FOR TESTING IR
   uint32_t         t1, intval ;                      // Current time and interval since last change
   uint32_t         mask_in = 2 ;                     // Mask input for conversion
   uint16_t         mask_out = 1 ;                    // Mask output for conversion
@@ -1860,6 +1869,22 @@ void IRAM_ATTR isr_IR()
   t1 = micros() ;                                    // Get current time
   intval = t1 - t0 ;                                 // Compute interval
   t0 = t1 ;                                          // Save for next compare
+
+  if ( ir_state == IR_FRAME_READING )                // FOR TESTING IR
+  {
+    ir_pulses[ ir_pulsecount++ ] = intval ;
+    ir_pulses[ ir_pulsecount ] = 0 ; // Mark last entry with 0
+    if ( ir_pulsecount == 399 ) {
+      ir_state = IR_OVERFLOW ;
+    }
+  }
+  else if ( ir_state == IR_READY ) 
+  {                      
+    ir_start_frame = t0 ;
+    ir_state = IR_FRAME_READING ;
+    ir_pulsecount = 0 ;
+  }
+  
   if ( ( intval > 300 ) && ( intval < 800 ) )        // Short pulse?
   {
     ir_locvalue = ir_locvalue << 1 ;                 // Shift in a "zero" bit
@@ -3135,6 +3160,23 @@ void scanIR()
     }
     ir_value = 0 ;                                          // Reset IR code received
   }
+
+  if ( ( ir_state == IR_FRAME_READING ) && ( (micros() - ir_start_frame ) > 100000 ) ) // FOR TESTING IR
+  {
+    ir_state = IR_FRAME_READ ;
+    uint16_t n = 0;
+    dbgprint ( "IR Frame Details:") ;
+    while ( ir_pulses[ n ] )
+    {
+      dbgprint( "Interval %3u : %5u", n, ir_pulses[ n ]);
+    }
+    ir_state = IR_READY ;
+  }
+  else if ( ir_state == IR_OVERFLOW )
+  {
+    dbgprint ( "IR Frame Overflow-Error!" ) ;
+    ir_state = IR_READY ;
+  }
 }
 
 
@@ -3689,6 +3731,7 @@ void setup()
     NULL,                                                 // parameter of the task
     1,                                                    // priority of the task
     &xspftask ) ;                                         // Task handle to keep track of created task
+  ir_pulses[0] = 0;                                       // FOR TESTING IR
 }
 
 
