@@ -214,6 +214,12 @@
 #define IR_FRAME_READ 2
 #define IR_FRAME_READING 3
 
+#define IR_IDLE 0
+#define IR_START 1
+#define IR_NORMAL 2
+#define IR_REPEAT 0xFFFF
+#define PIN_IR_DEBUG 21
+
 //**************************************************************************************************
 // Forward declaration and prototypes of various functions.                                        *
 //**************************************************************************************************
@@ -404,6 +410,8 @@ String            http_getcmd ;                          // Contents of last GET
 String            http_rqfile ;                          // Requested file
 bool              http_reponse_flag = false ;            // Response required
 static volatile uint16_t       ir_value = 0 ;                         // IR code
+static volatile bool           ir_repeat_flag = false ;               // FOR TESTING ir repeat code
+static volatile byte           this_line_was_reached = 0 ;            // FOR TESTING ir code interpretation
 static volatile uint32_t       ir_pulses[400];                        // FOR TESTING ir code interpretation
 static volatile uint8_t        ir_state = IR_READY;                   // FOR TESTING ir code interpretation
 static volatile uint32_t       ir_start_frame = 0;                    // FOR TESTING ir code interpretation
@@ -1847,6 +1855,15 @@ void IRAM_ATTR timer100()
 }
 
 
+void IRAM_ATTR morseDebug( int n )
+{
+  for (int i=0; i<n; i++)
+  {
+    (*((volatile uint32_t *) (0x3ff44000 + 0x8 ))) ^= 1 << PIN_IR_DEBUG ;
+    (*((volatile uint32_t *) (0x3ff44000 + 0xC))) ^= 1 << PIN_IR_DEBUG ;
+  }
+}
+
 //**************************************************************************************************
 //                                          I S R _ I R                                            *
 //**************************************************************************************************
@@ -1864,41 +1881,52 @@ void IRAM_ATTR isr_IR()
   uint32_t         t1, intval ;                      // Current time and interval since last change
   uint32_t         mask_in = 2 ;                     // Mask input for conversion
   uint16_t         mask_out = 1 ;                    // Mask output for conversion
+  sv int           ir_state = IR_IDLE ;              // To differentiate between normal and repeat codes
 
-  (*((volatile uint32_t *) (0x3ff44000 + 0x8 ))) ^= 1 << PIN_IR_DEBUG ;
   t1 = micros() ;                                    // Get current time
   intval = t1 - t0 ;                                 // Compute interval
   t0 = t1 ;                                          // Save for next compare
 
-  if ( ir_state == IR_FRAME_READING )                // FOR TESTING IR
+  morseDebug( 20 );
+
+  if ( ( intval > 8750 ) && ( intval < 9250 ) )      // 9 ms start burst?
   {
-    ir_pulses[ ir_pulsecount++ ] = intval ;
-    ir_pulses[ ir_pulsecount ] = 0 ; // Mark last entry with 0
-    if ( ir_pulsecount == 399 ) {
-      ir_state = IR_OVERFLOW ;
-    }
+    ir_state = IR_START ;
+    this_line_was_reached |= 0x01 ;
+    morseDebug( 3 );
   }
-  else if ( ir_state == IR_READY ) 
-  {                      
-    ir_start_frame = t0 ;
-    ir_state = IR_FRAME_READING ;
-    ir_pulsecount = 0 ;
+  else if ( ( intval > 4250 ) && ( intval > 4750 ) && ( ir_state == IR_START ) ) // 4,5 ms pause?
+  {
+    ir_state = IR_NORMAL ;                           // then normal code will follow
+    this_line_was_reached |= 0x02 ;
+    morseDebug( 4 );
   }
-  
-  if ( ( intval > 300 ) && ( intval < 800 ) )        // Short pulse?
+  else if ( ( intval > 2000 ) && ( intval < 2500 ) && ( ir_state == IR_START ) ) // 2,25 ms pause?
+  {
+    ir_repeat_flag = true ;                         // this is a repeat code
+    ir_state = IR_IDLE ;                           // ready for next input
+    morseDebug( 5 );
+  }
+  else if ( ( intval > 300 ) && ( intval < 800 ) && ( ir_state == IR_NORMAL) )   // Short pulse?
   {
     ir_locvalue = ir_locvalue << 1 ;                 // Shift in a "zero" bit
     ir_loccount++ ;                                  // Count number of received bits
     ir_0 = ( ir_0 * 3 + intval ) / 4 ;               // Compute average durartion of a short pulse
+    this_line_was_reached |= 0x04 ;
+    morseDebug( 1 );
   }
-  else if ( ( intval > 1400 ) && ( intval < 1900 ) ) // Long pulse?
+  else if ( ( intval > 1400 ) && ( intval < 1900 ) && ( ir_state == IR_NORMAL ) ) // Long pulse?
   {
     ir_locvalue = ( ir_locvalue << 1 ) + 1 ;         // Shift in a "one" bit
     ir_loccount++ ;                                  // Count number of received bits
     ir_1 = ( ir_1 * 3 + intval ) / 4 ;               // Compute average durartion of a short pulse
+    this_line_was_reached |= 0x08 ;
+    morseDebug( 2 );
   }
-  else if ( ir_loccount == 65 )                      // Value is correct after 65 level changes
+  else if ( ( ir_loccount == 65 ) && ( ir_state == IR_NORMAL ) ) // Value is correct after 65 level changes
   {
+    morseDebug( 6 );
+    this_line_was_reached |= 0x10 ;
     while ( mask_in )                                // Convert 32 bits to 16 bits
     {
       if ( ir_locvalue & mask_in )                   // Bit set in pattern?
@@ -1909,13 +1937,16 @@ void IRAM_ATTR isr_IR()
       mask_out <<= 1 ;                               // Shift output mask 1 position
     }
     ir_loccount = 0 ;                                // Ready for next input
+    ir_state = IR_IDLE ;
   }
-  else
+  else                                               // Illegal intervall length ?
   {
+    morseDebug(10);
+    this_line_was_reached |= 0x20 ;
     ir_locvalue = 0 ;                                // Reset decoding
     ir_loccount = 0 ;
+    ir_state = IR_IDLE ;
   }
-  (*((volatile uint32_t *) (0x3ff44000 + 0xC))) ^= 1 << PIN_IR_DEBUG ;
 }
 
 
@@ -3141,6 +3172,7 @@ void scanIR()
   char        mykey[20] ;                                   // For numerated key
   String      val ;                                         // Contents of preference entry
   const char* reply ;                                       // Result of analyzeCmd
+  static uint16_t lastCode ;                                // Store last value for repeat code interpretation
 
   if ( ir_value )                                           // Any input?
   {
@@ -3152,6 +3184,7 @@ void scanIR()
                  ir_value, val.c_str() ) ;
       reply = analyzeCmd ( val.c_str() ) ;                  // Analyze command and handle it
       dbgprint ( reply ) ;                                  // Result for debugging
+      lastCode = ir_value ;                                 // Store this value for repeat code interpretation
     }
     else
     {
@@ -3159,6 +3192,14 @@ void scanIR()
                  ir_value, ir_0, ir_1 ) ;
     }
     ir_value = 0 ;                                          // Reset IR code received
+  }
+
+  if ( ir_repeat_flag ) {
+      dbgprint ( "...IR Repeat" ) ;                         // It doesn't make sense to repeat all types of codes. Actually only volume+/-. Maybe also preset+/-, but then a longer pause would be needed.
+      dbgprint ( "   last code was:%04X", lastCode );
+      dbgprint ( "   line_reached code:%02X", this_line_was_reached );
+      ir_repeat_flag = false;                               // Reset ir_repeat_flag
+      this_line_was_reached = 0 ;
   }
 
   if ( ( ir_state == IR_FRAME_READING ) && ( (micros() - ir_start_frame ) > 100000 ) ) // FOR TESTING IR
@@ -3513,6 +3554,9 @@ void setup()
   pi = esp_partition_find ( ESP_PARTITION_TYPE_DATA,     // Get partition iterator for
                             ESP_PARTITION_SUBTYPE_ANY,   // the NVS partition
                             partname ) ;
+
+  morseDebug( 10 );
+
   if ( pi )
   {
     nvs = esp_partition_get ( pi ) ;                     // Get partition struct
@@ -3553,6 +3597,7 @@ void setup()
     }
     dbgprint ( "GPIO%d is %s", pinnr, p ) ;
   }
+
   readprogbuttons() ;                                    // Program the free input pins
   SPI.begin ( ini_block.spi_sck_pin,                     // Init VSPI bus with default or modified pins
               ini_block.spi_miso_pin,
