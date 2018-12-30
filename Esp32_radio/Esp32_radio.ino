@@ -399,11 +399,11 @@ int               chunkcount = 0 ;                       // Counter for chunked 
 String            http_getcmd ;                          // Contents of last GET command
 String            http_rqfile ;                          // Requested file
 bool              http_reponse_flag = false ;            // Response required
-static volatile uint16_t       ir_value = 0 ;                         // IR code
-static volatile bool           ir_repeat_flag = false ;               // FOR TESTING ir repeat code
-static volatile uint8_t        ir_state = IR_READY ;                  // FOR TESTING ir code interpretation
-static volatile uint32_t       ir_0 = 550 ;                           // Average duration of an IR short pulse
-static volatile uint32_t       ir_1 = 1650 ;                          // Average duration of an IR long pulse
+static volatile uint16_t       ir_value = 0 ;            // IR code
+static volatile bool           ir_repeat_flag = false ;  // this gets true when ir repeat code is received
+static volatile uint8_t        ir_state = IR_READY ;     // for ir code interpretation
+static volatile uint32_t       ir_0 = 550 ;              // Average duration of an IR short pulse
+static volatile uint32_t       ir_1 = 1650 ;             // Average duration of an IR long pulse
 struct tm         timeinfo ;                             // Will be filled by NTP server
 bool              time_req = false ;                     // Set time requested
 bool              SD_okay = false ;                      // True if SD card in place and readable
@@ -1854,7 +1854,6 @@ void IRAM_ATTR isr_IR()
   sv uint32_t      t0 = 0 ;                          // To get the interval
   sv uint32_t      ir_locvalue = 0 ;                 // IR code
   sv int           ir_loccount = 0 ;                 // Length of code
-  sv uint16_t      ir_pulsecount = 0;                // FOR TESTING IR
   uint32_t         t1, intval ;                      // Current time and interval since last change
   uint32_t         mask_in = 2 ;                     // Mask input for conversion
   uint16_t         mask_out = 1 ;                    // Mask output for conversion
@@ -3134,31 +3133,63 @@ void scanIR()
   String      val ;                                         // Contents of preference entry
   const char* reply ;                                       // Result of analyzeCmd
   static uint16_t lastCode ;                                // Store last value for repeat code interpretation
+  static int16_t repeatDelay ;                              // Stores the delay until the command gets repeated
+  static uint32_t nextRepeat ;                              // Stores the time for next repeat in millis
+
+  if ( ir_repeat_flag && repeatDelay )                      // It doesn't make sense to repeat all types of codes. Actually only volume+/-. Maybe also preset+/-, but then a longer pause would be needed.
+      if ( millis() > nextRepeat )
+      {
+        dbgprint ( "    now is time for next repeat (%d)", millis() );
+        dbgprint ( "    last code was:%04X", lastCode );
+        ir_value = lastCode ;                              // We inject the last code, which will lead to a new setting of nextRepeat later
+      }
+
+      ir_repeat_flag = false;                               // Reset ir_repeat_flag
+  }
 
   if ( ir_value )                                           // Any input?
   {
     sprintf ( mykey, "ir_%04X", ir_value ) ;                // Form key in preferences
     if ( nvssearch ( mykey ) )
     {
-      val = nvsgetstr ( mykey ) ;                           // Get the contents
-      dbgprint ( "IR code %04X received. Will execute %s",
-                 ir_value, val.c_str() ) ;
+      val = nvsgetstr ( mykey ) ;                           // Get the content
+
+      if ( val.indexOf('/') != -1 )                        // Does the command contain a '/' ?
+      {
+        if ( ( val.indexOf('#') == -1 ) || ( val.indexOf('#') > val.indexOf('/') ) ) // '/' is not in the comment section
+        {
+          repeatDelay = val.substring( val.indexOf('/') + 1 ).toInt() ; // '/' delimits the repeat delay (in ms) if any
+          if ( repeatDelay < 0 )
+          {
+            dbgprint ( "Error in IR command. Repeat delay can't be negative, set to zero: %s", val.c_str() );
+            repeatDelay = 0 ;
+          }
+          val = val.substring( 0, val.indexOf('/') ) ;        // Now that we know the repeat delay we trim it from the string
+        }
+        else
+        {
+          repeatDelay = 0 ;
+        }
+      }
+      else
+      {
+        repeatDelay = 0 ;                                  // This command does not get repeated
+      }
+
+      dbgprint ( "IR code %04X received. Will execute %s and repeat in %d ms if button is held longer.",
+                 ir_value, val.c_str(), repeatDelay ) ;
       reply = analyzeCmd ( val.c_str() ) ;                  // Analyze command and handle it
       dbgprint ( reply ) ;                                  // Result for debugging
+      nextRepeat = millis() + repeatDelay ;
       lastCode = ir_value ;                                 // Store this value for repeat code interpretation
     }
     else
     {
       dbgprint ( "IR code %04X received, but not found in preferences!  Timing %d/%d",
                  ir_value, ir_0, ir_1 ) ;
+      repeatDelay = 0 ;                                     // Deactivate repeat for unknown code
     }
     ir_value = 0 ;                                          // Reset IR code received
-  }
-
-  if ( ir_repeat_flag ) {
-      dbgprint ( "...IR Repeat" ) ;                         // It doesn't make sense to repeat all types of codes. Actually only volume+/-. Maybe also preset+/-, but then a longer pause would be needed.
-      dbgprint ( "   last code was:%04X", lastCode );
-      ir_repeat_flag = false;                               // Reset ir_repeat_flag
   }
 }
 
