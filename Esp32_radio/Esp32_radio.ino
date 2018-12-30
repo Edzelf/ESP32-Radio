@@ -3138,6 +3138,7 @@ void scanIR()
   static uint32_t nextRepeat ;                              // Stores the time for next repeat in millis
 
   if ( ir_repeat_flag && repeatDelay )                      // It doesn't make sense to repeat all types of codes. Actually only volume+/-. Maybe also preset+/-, but then a longer pause would be needed.
+  {
       if ( millis() > nextRepeat )
       {
         dbgprint ( "    now is time for next repeat (%d)", millis() );
