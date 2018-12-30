@@ -141,6 +141,7 @@
 // 18-09-2018, ES: "uppreset" and "downpreset" for MP3 player.
 // 04-10-2018, ES: Fixed compile error OLED 64x128 display.
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
+// 30-12-2018, DK: Added support for NEC style IR repeat codes
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
