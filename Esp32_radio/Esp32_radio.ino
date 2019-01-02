@@ -653,7 +653,8 @@ class VS1053
     int8_t        shutdown_pin ;                   // Pin where the shutdown line is connected
     int8_t        shutdownx_pin ;                  // Pin where the shutdown (inversed) line is connected
     uint8_t       curvol ;                         // Current volume setting 0..100%
-    bool          mute         = false ;      // Current mute state
+    bool          mute         = false ;           // Current mute state
+    bool          playing      = false ;           // Current playback state
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
     const uint8_t SCI_MODE          = 0x0 ;
@@ -905,6 +906,7 @@ void VS1053::begin()
     pinMode ( shutdownx_pin,   OUTPUT ) ;
   }
   output_enable ( false ) ;                            // Disable amplifier through shutdown pin(s)
+  playing = false ;
   delay ( 100 ) ;
   // Init SPI in slow mode ( 0.2 MHz )
   VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
@@ -966,7 +968,7 @@ void VS1053::setVolume ( uint8_t vol )
     value = map ( vol, 0, 100, 0xF8, 0x00 ) ;           // 0..100% to one channel
     value = ( value << 8 ) | value ;
     write_register ( SCI_VOL, value ) ;                 // Volume left and right
-    output_enable ( vol != 0 && !mute ) ;               // Enable/disable amplifier through shutdown pin(s)
+    output_enable ( vol != 0 && !mute && playing ) ;    // Enable/disable amplifier through shutdown pin(s)
   }
 }
 
@@ -986,6 +988,7 @@ void VS1053::setTone ( uint8_t *rtone )                 // Set bass/treble (4 ni
 void VS1053::startSong()
 {
   sdi_send_fillers ( 10 ) ;
+  playing = true ;
   output_enable ( !mute ) ;                        // Enable amplifier through shutdown pin(s) unless muted
 }
 
@@ -1001,6 +1004,7 @@ void VS1053::stopSong()
 
   sdi_send_fillers ( 2052 ) ;
   output_enable ( false ) ;                             // Disable amplifier through shutdown pin(s)
+  playing = false ;
   delay ( 10 ) ;
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
   for ( i = 0 ; i < 200 ; i++ )
@@ -1023,6 +1027,7 @@ void VS1053::softReset()
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_RESET ) ) ;
   delay ( 10 ) ;
   await_data_request() ;
+  playing = false ;
 }
 
 void VS1053::printDetails ( const char *header )
@@ -4291,7 +4296,7 @@ void chk_enc()
         host = getSDfilename ( "0" ) ;                        // Get random track
         hostreq = true ;                                      // Request this host
       }
-      vs1053player->setMute( false ) ;                   // Be sure muteing is off
+      vs1053player->setMute( false ) ;                        // Be sure muteing is off
     }
   }
   if ( rotationcount == 0 )                                   // Any rotation?
@@ -5225,7 +5230,7 @@ const char* analyzeCmd ( const char* par, const char* val )
     {
       ini_block.reqvol = 100 ;                        // Limit to normal values
     }
-    vs1053player->setMute( false ) ;             // Stop possibly muting
+    vs1053player->setMute( false ) ;                  // Stop possible muting
     sprintf ( reply, "Volume is now %d",              // Reply new volume
               ini_block.reqvol ) ;
   }
