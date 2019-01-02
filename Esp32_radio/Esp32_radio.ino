@@ -139,7 +139,7 @@
 // 06-08-2018, ES: Correction negative time offset, OTA through remote host.
 // 16-08-2018, ES: Added Nextion support.
 // 18-09-2018, ES: "uppreset" and "downpreset" for MP3 player.
-// 04-10-2018, ES: Fixed compile error OLED 64x128 display.
+// 04-10-2018, ES: Fixed compile illParamOLED 64x128 display.
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
 // 30-12-2018, DK: Added Min/Max volume setting
 //
@@ -5153,6 +5153,7 @@ const char* analyzeCmd ( const char* par, const char* val )
   bool               relative ;                       // Relative argument (+ or -)
   String             tmpstr ;                         // Temporary for value
   uint32_t           av ;                             // Available in stream/file
+  bool               illParam= false ;                  // Set this to true to mark an error in the command string
 
   blset ( true ) ;                                    // Enable backlight of TFT
   strcpy ( reply, "Command accepted" ) ;              // Default reply
@@ -5424,14 +5425,32 @@ const char* analyzeCmd ( const char* par, const char* val )
   {
     if ( argument.indexOf ( "max" ) == 4 )            // Max value?
     {
-      ini_block.maxvol = ivalue ;                     // Yes, set it
+      if ( ivalue >= 0 && ivalue <= 100 )
+      {
+        ini_block.maxvol = ivalue ;                   // Yes, set it
+      }
+      else
+      {
+        sprintf ( reply, "Value %d for vol_max is out of bounds (0-100)", ivalue );
+      }
     }
     else if ( argument.indexOf ( "min" ) == 4 )         // Min value?
     {
-      ini_block.minvol = ivalue ;                       // Yes, set it
+      if ( ivalue >= 0 && ivalue <= 100 )
+      {
+        ini_block.minvol = ivalue ;                   // Yes, set it
+      }
+      else
+      {
+        sprintf ( reply, "Value %d for vol_min is out of bounds (0-100)", ivalue );
+      }
     }
   }
   else
+  {
+    illParam = true ;
+  }
+  if ( illParam )
   {
     sprintf ( reply, "%s called with illegal parameter: %s",
               NAME, argument.c_str() ) ;
