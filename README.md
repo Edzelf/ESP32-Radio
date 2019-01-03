@@ -31,6 +31,7 @@ Features:
 - Can play iHeartRadio stations.
 - Displays time of day on TFT.
 - Optional display remaining battery capacity on screen.
+- PCB available (see doc).
 
 See documentation in doc/pdf-file.
 
