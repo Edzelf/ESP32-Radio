@@ -141,6 +141,7 @@
 // 18-09-2018, ES: "uppreset" and "downpreset" for MP3 player.
 // 04-10-2018, ES: Fixed compile error OLED 64x128 display.
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
+// 30-12-2018, DK: Added Min/Max volume setting
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -259,6 +260,8 @@ struct ini_struct
   String         mqttuser ;                           // User for MQTT authentication
   String         mqttpasswd ;                         // Password for MQTT authentication
   uint8_t        reqvol ;                             // Requested volume
+  uint8_t        minvol ;                             // Minimum volume if > 0
+  uint8_t        maxvol ;                             // Maximum volume if < 100
   uint8_t        rtone[4] ;                           // Requested bass/treble settings
   int8_t         newpreset ;                          // Requested preset
   String         clk_server ;                         // Server to be used for time of day clock
@@ -357,7 +360,7 @@ SemaphoreHandle_t SPIsem = NULL ;                        // For exclusive SPI us
 hw_timer_t*       timer = NULL ;                         // For timer
 char              timetxt[9] ;                           // Converted timeinfo
 char              cmd[130] ;                             // Command from MQTT or Serial
-uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream 
+uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream
 QueueHandle_t     dataqueue ;                            // Queue for mp3 datastream
 QueueHandle_t     spfqueue ;                             // Queue for special functions
 qdata_struct      outchunk ;                             // Data to queue
@@ -943,6 +946,9 @@ void VS1053::setVolume ( uint8_t vol )
   if ( vol != curvol )
   {
     curvol = vol ;                                      // Save for later use
+    //dbgprint("...setVolume %d (min %d/max %d)", vol, ini_block.minvol, ini_block.maxvol );
+    if ( vol ) vol = map ( vol, 0, 100, ini_block.minvol, ini_block.maxvol ) ; // First mapping to limit min/max volume, but keep 0
+    //dbgprint(".......mapped to %d", vol);
     value = map ( vol, 0, 100, 0xF8, 0x00 ) ;           // 0..100% to one channel
     value = ( value << 8 ) | value ;
     write_register ( SCI_VOL, value ) ;                 // Volume left and right
@@ -2343,7 +2349,7 @@ bool connectwifi()
   }
   tftlog ( pfs ) ;                                      // Show IP
   delay ( 3000 ) ;                                      // Allow user to read this
-  tftlog ( "\f" ) ;                                     // Select new page if NEXTION 
+  tftlog ( "\f" ) ;                                     // Select new page if NEXTION
   return ( localAP == false ) ;                         // Return result of connection
 }
 
@@ -2402,7 +2408,7 @@ bool do_nextion_update ( uint32_t clength )
       }
       k = otaclient.read ( tmpbuff, k ) ;                      // Read a number of bytes from the stream
       dbgprint ( "TFT file, read %d bytes", k ) ;
-      nxtserial->write ( tmpbuff, k ) ;     
+      nxtserial->write ( tmpbuff, k ) ;
       while ( !nxtserial->available() )                        // Any input seen?
       {
         delay ( 20 ) ;
@@ -2433,7 +2439,7 @@ bool do_nextion_update ( uint32_t clength )
 bool do_software_update ( uint32_t clength )
 {
   bool res = false ;                                          // Update result
-  
+
   if ( Update.begin ( clength ) )                             // Update possible?
   {
     dbgprint ( "Begin OTA update, length is %d",
@@ -2485,7 +2491,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
   String      line ;                                            // Input header line
   String      lstmod = "" ;                                     // Last modified timestamp in NVS
   String      newlstmod ;                                       // Last modified from host
-  
+
   updatereq = false ;                                           // Clear update flag
   otastart() ;                                                  // Show something on screen
   stop_mp3client () ;                                           // Stop input stream
@@ -2523,7 +2529,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
       break ;                                                   // Yes, get the OTA started
     }
     // Check if the HTTP Response is 200.  Any other response is an error.
-    if ( line.startsWith ( "HTTP/1.1" ) )                       // 
+    if ( line.startsWith ( "HTTP/1.1" ) )                       //
     {
       if ( line.indexOf ( " 200 " ) < 0 )
       {
@@ -2542,7 +2548,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
   {
     dbgprint ( "No new version available" ) ;                   // No, show reason
     otaclient.flush() ;
-    return ;    
+    return ;
   }
   if ( clength > 0 )
   {
@@ -2815,7 +2821,7 @@ String readprefs ( bool output )
               String ( "/*******" ) ;
       }
       cmd = String ( "" ) ;                                 // Do not analyze this
-      
+
     }
     else if ( strstr ( key, "mqttpasswd"  ) )               // Is it a MQTT password?
     {
@@ -3007,7 +3013,7 @@ void scanserial2()
           dbgprint ( "NEXTION command seen %02X %s",
                      cmd[0], cmd + 1 ) ;
           if ( cmd[0] == 0x70 )                    // Button pressed?
-          { 
+          {
             reply = analyzeCmd ( cmd + 1 ) ;       // Analyze command and handle it
             dbgprint ( reply ) ;                   // Result for debugging
           }
@@ -3480,6 +3486,8 @@ void setup()
   ini_block.clk_dst = 1 ;                                // DST is +1 hour
   ini_block.bat0 = 0 ;                                   // Battery ADC levels not yet defined
   ini_block.bat100 = 0 ;
+  ini_block.minvol = 0 ;                                 // No minimum volume defined
+  ini_block.maxvol = 100 ;                               // Maximum volume defaults to full
   readIOprefs() ;                                        // Read pins used for SPI, TFT, VS1053, IR,
   // Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
@@ -4528,7 +4536,7 @@ void loop()
   if ( updatereq )                                  // Software update requested?
   {
     if ( displaytype == T_NEXTION )                 // NEXTION in use?
-    { 
+    {
       update_software ( "lstmodn",                  // Yes, update NEXTION image from remote image
                         UPDATEHOST, TFTFILE ) ;
     }
@@ -5145,6 +5153,7 @@ const char* analyzeCmd ( const char* par, const char* val )
   bool               relative ;                       // Relative argument (+ or -)
   String             tmpstr ;                         // Temporary for value
   uint32_t           av ;                             // Available in stream/file
+  bool               illParam= false ;                // Set this to true to mark an error in the command string
 
   blset ( true ) ;                                    // Enable backlight of TFT
   strcpy ( reply, "Command accepted" ) ;              // Default reply
@@ -5412,7 +5421,36 @@ const char* analyzeCmd ( const char* par, const char* val )
       ini_block.bat0 = ivalue ;                       // Yes, set it
     }
   }
+  else if ( argument.startsWith ( "vol_" ) )           // Volume limiting value?
+  {
+    if ( argument.indexOf ( "max" ) == 4 )            // Max value?
+    {
+      if ( ivalue >= 0 && ivalue <= 100 )
+      {
+        ini_block.maxvol = ivalue ;                   // Yes, set it
+      }
+      else
+      {
+        sprintf ( reply, "Value %d for vol_max is out of bounds (0-100)", ivalue );
+      }
+    }
+    else if ( argument.indexOf ( "min" ) == 4 )         // Min value?
+    {
+      if ( ivalue >= 0 && ivalue <= 100 )
+      {
+        ini_block.minvol = ivalue ;                   // Yes, set it
+      }
+      else
+      {
+        sprintf ( reply, "Value %d for vol_min is out of bounds (0-100)", ivalue );
+      }
+    }
+  }
   else
+  {
+    illParam = true ;
+  }
+  if ( illParam )
   {
     sprintf ( reply, "%s called with illegal parameter: %s",
               NAME, argument.c_str() ) ;
@@ -5682,4 +5720,3 @@ void spftask ( void * parameter )
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
-
