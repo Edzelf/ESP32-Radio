@@ -141,6 +141,7 @@
 // 18-09-2018, ES: "uppreset" and "downpreset" for MP3 player.
 // 04-10-2018, ES: Fixed compile error OLED 64x128 display.
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
+// 02-01-2019, DK: Changes in shutdown pin control to make amp shutdown more reliable. Thanks to Pavulon87
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -357,7 +358,7 @@ SemaphoreHandle_t SPIsem = NULL ;                        // For exclusive SPI us
 hw_timer_t*       timer = NULL ;                         // For timer
 char              timetxt[9] ;                           // Converted timeinfo
 char              cmd[130] ;                             // Command from MQTT or Serial
-uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream 
+uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream
 QueueHandle_t     dataqueue ;                            // Queue for mp3 datastream
 QueueHandle_t     spfqueue ;                             // Queue for special functions
 qdata_struct      outchunk ;                             // Data to queue
@@ -380,7 +381,6 @@ String            host ;                                 // The URL to connect t
 String            playlist ;                             // The URL of the specified playlist
 bool              hostreq = false ;                      // Request for new host
 bool              reqtone = false ;                      // New tone setting requested
-bool              muteflag = false ;                     // Mute output
 bool              resetreq = false ;                     // Request to reset the ESP32
 bool              updatereq = false ;                    // Request to update software from remote host
 bool              NetworkFound = false ;                 // True if WiFi network connected
@@ -653,6 +653,8 @@ class VS1053
     int8_t        shutdown_pin ;                   // Pin where the shutdown line is connected
     int8_t        shutdownx_pin ;                  // Pin where the shutdown (inversed) line is connected
     uint8_t       curvol ;                         // Current volume setting 0..100%
+    bool          mute         = false ;           // Current mute state
+    bool          playing      = false ;           // Current playback state
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
     const uint8_t SCI_MODE          = 0x0 ;
@@ -740,6 +742,12 @@ class VS1053
     { // higher is louder.
       return curvol ;
     }
+    void     setMute ( bool _mute ) ;                    // Set the current mute state (has nothing to do with VS1053)
+    inline bool getMute() const                          // Get the current mute state (has nothing to do with VS1053)
+    {
+      return mute ;
+    }
+    void     toggleMute() ;                              // Toggle the current mute state
     void     printDetails ( const char *header ) ;       // Print config details to serial output
     void     softReset() ;                               // Do a soft reset
     bool     testComm ( const char *header ) ;           // Test communication with module
@@ -898,6 +906,7 @@ void VS1053::begin()
     pinMode ( shutdownx_pin,   OUTPUT ) ;
   }
   output_enable ( false ) ;                            // Disable amplifier through shutdown pin(s)
+  playing = false ;
   delay ( 100 ) ;
   // Init SPI in slow mode ( 0.2 MHz )
   VS1053_SPI = SPISettings ( 200000, MSBFIRST, SPI_MODE0 ) ;
@@ -933,6 +942,19 @@ void VS1053::begin()
   }
 }
 
+// This following function should not use the SPI Bus!
+void VS1053::setMute (bool _mute)
+{
+  mute = _mute ;
+  output_enable ( !mute ) ;
+}
+
+// This following function should not use the SPI Bus!
+void VS1053::toggleMute()
+{
+  setMute ( !getMute() );
+}
+
 void VS1053::setVolume ( uint8_t vol )
 {
   // Set volume.  Both left and right.
@@ -946,7 +968,7 @@ void VS1053::setVolume ( uint8_t vol )
     value = map ( vol, 0, 100, 0xF8, 0x00 ) ;           // 0..100% to one channel
     value = ( value << 8 ) | value ;
     write_register ( SCI_VOL, value ) ;                 // Volume left and right
-    output_enable ( vol != 0 ) ;                        // Enable/disable amplifier through shutdown pin(s)
+    output_enable ( vol != 0 && !mute && playing ) ;    // Enable/disable amplifier through shutdown pin(s)
   }
 }
 
@@ -966,7 +988,8 @@ void VS1053::setTone ( uint8_t *rtone )                 // Set bass/treble (4 ni
 void VS1053::startSong()
 {
   sdi_send_fillers ( 10 ) ;
-  output_enable ( true ) ;                              // Enable amplifier through shutdown pin(s)
+  playing = true ;
+  output_enable ( !mute ) ;                        // Enable amplifier through shutdown pin(s) unless muted
 }
 
 bool VS1053::playChunk ( uint8_t* data, size_t len )
@@ -981,6 +1004,7 @@ void VS1053::stopSong()
 
   sdi_send_fillers ( 2052 ) ;
   output_enable ( false ) ;                             // Disable amplifier through shutdown pin(s)
+  playing = false ;
   delay ( 10 ) ;
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
   for ( i = 0 ; i < 200 ; i++ )
@@ -1003,6 +1027,7 @@ void VS1053::softReset()
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_RESET ) ) ;
   delay ( 10 ) ;
   await_data_request() ;
+  playing = false ;
 }
 
 void VS1053::printDetails ( const char *header )
@@ -1024,6 +1049,7 @@ void VS1053::printDetails ( const char *header )
   }
 }
 
+// This following function should not use the SPI Bus!
 void  VS1053::output_enable ( bool ena )               // Enable amplifier through shutdown pin(s)
 {
   if ( shutdown_pin >= 0 )                             // Shutdown in use?
@@ -2343,7 +2369,7 @@ bool connectwifi()
   }
   tftlog ( pfs ) ;                                      // Show IP
   delay ( 3000 ) ;                                      // Allow user to read this
-  tftlog ( "\f" ) ;                                     // Select new page if NEXTION 
+  tftlog ( "\f" ) ;                                     // Select new page if NEXTION
   return ( localAP == false ) ;                         // Return result of connection
 }
 
@@ -2402,7 +2428,7 @@ bool do_nextion_update ( uint32_t clength )
       }
       k = otaclient.read ( tmpbuff, k ) ;                      // Read a number of bytes from the stream
       dbgprint ( "TFT file, read %d bytes", k ) ;
-      nxtserial->write ( tmpbuff, k ) ;     
+      nxtserial->write ( tmpbuff, k ) ;
       while ( !nxtserial->available() )                        // Any input seen?
       {
         delay ( 20 ) ;
@@ -2433,7 +2459,7 @@ bool do_nextion_update ( uint32_t clength )
 bool do_software_update ( uint32_t clength )
 {
   bool res = false ;                                          // Update result
-  
+
   if ( Update.begin ( clength ) )                             // Update possible?
   {
     dbgprint ( "Begin OTA update, length is %d",
@@ -2485,7 +2511,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
   String      line ;                                            // Input header line
   String      lstmod = "" ;                                     // Last modified timestamp in NVS
   String      newlstmod ;                                       // Last modified from host
-  
+
   updatereq = false ;                                           // Clear update flag
   otastart() ;                                                  // Show something on screen
   stop_mp3client () ;                                           // Stop input stream
@@ -2523,7 +2549,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
       break ;                                                   // Yes, get the OTA started
     }
     // Check if the HTTP Response is 200.  Any other response is an error.
-    if ( line.startsWith ( "HTTP/1.1" ) )                       // 
+    if ( line.startsWith ( "HTTP/1.1" ) )                       //
     {
       if ( line.indexOf ( " 200 " ) < 0 )
       {
@@ -2542,7 +2568,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
   {
     dbgprint ( "No new version available" ) ;                   // No, show reason
     otaclient.flush() ;
-    return ;    
+    return ;
   }
   if ( clength > 0 )
   {
@@ -2815,7 +2841,7 @@ String readprefs ( bool output )
               String ( "/*******" ) ;
       }
       cmd = String ( "" ) ;                                 // Do not analyze this
-      
+
     }
     else if ( strstr ( key, "mqttpasswd"  ) )               // Is it a MQTT password?
     {
@@ -3007,7 +3033,7 @@ void scanserial2()
           dbgprint ( "NEXTION command seen %02X %s",
                      cmd[0], cmd + 1 ) ;
           if ( cmd[0] == 0x70 )                    // Button pressed?
-          { 
+          {
             reply = analyzeCmd ( cmd + 1 ) ;       // Analyze command and handle it
             dbgprint ( reply ) ;                   // Result for debugging
           }
@@ -4230,7 +4256,7 @@ void chk_enc()
     switch ( enc_menu_mode )                                  // Which mode (VOLUME, PRESET, TRACK)?
     {
       case VOLUME :
-        if ( muteflag )
+        if ( vs1053player->getMute()  )
         {
           tftset ( 3, "" ) ;                                  // Clear text
         }
@@ -4238,7 +4264,7 @@ void chk_enc()
         {
           tftset ( 3, "Mute" ) ;
         }
-        muteflag = !muteflag ;                                // Mute/unmute
+        vs1053player->toggleMute() ;                          // Mute/unmute
         break ;
       case PRESET :
         currentpreset = -1 ;                                  // Make sure current is different
@@ -4270,7 +4296,7 @@ void chk_enc()
         host = getSDfilename ( "0" ) ;                        // Get random track
         hostreq = true ;                                      // Request this host
       }
-      muteflag = false ;                                      // Be sure muteing is off
+      vs1053player->setMute( false ) ;                        // Be sure muteing is off
     }
   }
   if ( rotationcount == 0 )                                   // Any rotation?
@@ -4293,7 +4319,7 @@ void chk_enc()
       {
         ini_block.reqvol += rotationcount ;
       }
-      muteflag = false ;                                      // Mute off
+      vs1053player->setMute( false );                         // Mute off
       break ;
     case PRESET :
       if ( ( enc_preset + rotationcount ) < 0 )               // Negative not allowed
@@ -4528,7 +4554,7 @@ void loop()
   if ( updatereq )                                  // Software update requested?
   {
     if ( displaytype == T_NEXTION )                 // NEXTION in use?
-    { 
+    {
       update_software ( "lstmodn",                  // Yes, update NEXTION image from remote image
                         UPDATEHOST, TFTFILE ) ;
     }
@@ -5204,13 +5230,13 @@ const char* analyzeCmd ( const char* par, const char* val )
     {
       ini_block.reqvol = 100 ;                        // Limit to normal values
     }
-    muteflag = false ;                                // Stop possibly muting
+    vs1053player->setMute( false ) ;                  // Stop possible muting
     sprintf ( reply, "Volume is now %d",              // Reply new volume
               ini_block.reqvol ) ;
   }
   else if ( argument == "mute" )                      // Mute/unmute request
   {
-    muteflag = !muteflag ;                            // Request volume to zero/normal
+    vs1053player->toggleMute() ;
   }
   else if ( argument.indexOf ( "ir_" ) >= 0 )         // Ir setting?
   { // Do not handle here
@@ -5588,8 +5614,7 @@ void playtask ( void * parameter )
           playingstat = 0 ;                                         // Status for MQTT
           mqttpub.trigger ( MQTT_PLAYING ) ;                        // Request publishing to MQTT
           claimSPI ( "stopsong" ) ;                                 // Claim SPI bus
-          vs1053player->setVolume ( 0 ) ;                           // Mute
-          vs1053player->stopSong() ;                                // STOP, stop player
+          vs1053player->stopSong() ;                                // STOP, stop player, also mutes
           releaseSPI() ;                                            // Release SPI bus
           vTaskDelay ( 500 / portTICK_PERIOD_MS ) ;                 // Pause for a short time
           break ;
@@ -5625,14 +5650,9 @@ void handle_spec()
     releaseSPI() ;                                            // Yes, release SPI bus
   }
   claimSPI ( "hspec" ) ;                                      // Claim SPI bus
-  if ( muteflag )                                             // Mute or not?
-  {
-    vs1053player->setVolume ( 0 ) ;                           // Mute
-  }
-  else
-  {
-    vs1053player->setVolume ( ini_block.reqvol ) ;            // Unmute
-  }
+
+  vs1053player->setVolume ( ini_block.reqvol ) ;              // Update volume to requested volume, this should not affect mute status
+
   if ( reqtone )                                              // Request to change tone?
   {
     reqtone = false ;
@@ -5682,4 +5702,3 @@ void spftask ( void * parameter )
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
-
