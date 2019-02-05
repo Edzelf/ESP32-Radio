@@ -141,11 +141,12 @@
 // 18-09-2018, ES: "uppreset" and "downpreset" for MP3 player.
 // 04-10-2018, ES: Fixed compile error OLED 64x128 display.
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
+// 05-01-2019, ES: Fine tune datarate.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Thu, 04 Oct 2018 07:22:32 GMT"
+#define VERSION     "Tue, 05 Jan 2019 15:48:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -153,12 +154,12 @@
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
 // Define (just one) type of display.  See documentation.
-//#define BLUETFT                      // Works also for RED TFT 128x160
+#define BLUETFT                      // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
 //#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
 //#define ILI9341                      // ILI9341 240*320
-#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
+//#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
 //
 #include <nvs.h>
 #include <PubSubClient.h>
@@ -747,6 +748,8 @@ class VS1053
     {
       return ( digitalRead ( dreq_pin ) == HIGH ) ;
     }
+    void     AdjustRate ( long ppm2 ) ;                  // Fine tune the datarate
+
 } ;
 
 //**************************************************************************************************
@@ -873,7 +876,7 @@ bool VS1053::testComm ( const char *header )
     r2 = read_register ( SCI_VOL ) ;                    // Read back a second time
     if  ( r1 != r2 || i != r1 || i != r2 )              // Check for 2 equal reads
     {
-      dbgprint ( "VS1053 error retry SB:%04X R1:%04X R2:%04X", i, r1, r2 ) ;
+      dbgprint ( "VS1053 SPI error. SB:%04X R1:%04X R2:%04X", i, r1, r2 ) ;
       cnt++ ;
       delay ( 10 ) ;
     }
@@ -1034,6 +1037,19 @@ void  VS1053::output_enable ( bool ena )               // Enable amplifier throu
   {
     digitalWrite ( shutdownx_pin, ena ) ;              // Shut down or enable audio output
   }
+}
+
+
+void VS1053::AdjustRate ( long ppm2 )                  // Fine tune the data rate 
+{
+  write_register ( SCI_WRAMADDR, 0x1e07 ) ;
+  write_register ( SCI_WRAM,     ppm2 ) ;
+  write_register ( SCI_WRAM,     ppm2 >> 16 ) ;
+  // oldClock4KHz = 0 forces  adjustment calculation when rate checked.
+  write_register ( SCI_WRAMADDR, 0x5b1c ) ;
+  write_register ( SCI_WRAM,     0 ) ;
+  // Write to AUDATA or CLOCKF checks rate and recalculates adjustment.
+  write_register ( SCI_AUDATA,   read_register ( SCI_AUDATA ) ) ;
 }
 
 
@@ -5237,15 +5253,16 @@ const char* analyzeCmd ( const char* par, const char* val )
     {
       if ( relative )                                 // Relative argument?
       {
+        currentpreset = ini_block.newpreset ;         // Remember currentpreset
         ini_block.newpreset += ivalue ;               // Yes, adjust currentpreset
       }
       else
       {
         ini_block.newpreset = ivalue ;                // Otherwise set station
         playlist_num = 0 ;                            // Absolute, reset playlist
+        currentpreset = -1 ;                          // Make sure current is different
       }
       datamode = STOPREQD ;                           // Force stop MP3 player
-      currentpreset = -1 ;                            // Make sure current is different
       sprintf ( reply, "Preset is now %d",            // Reply new preset
                 ini_block.newpreset ) ;
     }
@@ -5353,6 +5370,10 @@ const char* analyzeCmd ( const char* par, const char* val )
     reqtone = true ;                                  // Set change request
     sprintf ( reply, "Parameter for bass/treble %s set to %d",
               argument.c_str(), ivalue ) ;
+  }
+  else if ( argument == "rate" )                      // Rate command?
+  {
+    vs1053player->AdjustRate ( ivalue ) ;             // Yes, adjust
   }
   else if ( argument.startsWith ( "mqtt" ) )          // Parameter fo MQTT?
   {
@@ -5613,7 +5634,7 @@ void handle_spec()
   // Do some special function if necessary
   if ( dsp_usesSPI() )                                        // Does display uses SPI?
   {
-    claimSPI ( "hspec" ) ;                                    // Yes, claim SPI bus
+    claimSPI ( "hspectft" ) ;                                 // Yes, claim SPI bus
   }
   if ( tft )                                                  // Need to update TFT?
   {
