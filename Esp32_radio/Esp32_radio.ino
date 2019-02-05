@@ -142,11 +142,12 @@
 // 04-10-2018, ES: Fixed compile error OLED 64x128 display.
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
 // 05-01-2019, ES: Fine tune datarate.
+// 05-01-2019, ES: Basic http authentication. (just one user)
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Tue, 05 Jan 2019 15:48:00 GMT"
+#define VERSION     "Tue, 05 Jan 2019 19:48:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -178,7 +179,7 @@
 #include <esp_partition.h>
 #include <driver/adc.h>
 #include <Update.h>
-
+#include <base64.h>
 // Number of entries in the queue
 #define QSIZ 400
 // Debug buffer size
@@ -2101,6 +2102,7 @@ bool connecttohost()
   uint16_t    port = 80 ;                           // Port number for host
   String      extension = "/" ;                     // May be like "/mp3" in "skonto.ls.lv:8002/mp3"
   String      hostwoext = host ;                    // Host without extension and portnumber
+  String      auth  ;                               // For basic authentication
 
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
@@ -2137,7 +2139,13 @@ bool connecttohost()
   if ( mp3client.connect ( hostwoext.c_str(), port ) )
   {
     dbgprint ( "Connected to server" ) ;
-    // This will send the request to the server. Request metadata.
+    auth = nvsgetstr ( "basicauth" ) ;              // Use basic authentication?
+    if ( auth != "" )                               // Should be user:passwd
+    { 
+       auth = base64::encode ( auth.c_str() ) ;     // Encode
+       auth = String ( "Authorization: Basic " ) +
+              auth + String ( "\r\n" ) ;
+    }
     mp3client.print ( String ( "GET " ) +
                       extension +
                       String ( " HTTP/1.1\r\n" ) +
@@ -2145,6 +2153,7 @@ bool connecttohost()
                       hostwoext +
                       String ( "\r\n" ) +
                       String ( "Icy-MetaData:1\r\n" ) +
+                      auth +
                       String ( "Connection: close\r\n\r\n" ) ) ;
     return true ;
   }
