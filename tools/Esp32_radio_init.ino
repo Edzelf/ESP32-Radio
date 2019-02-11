@@ -2,7 +2,7 @@
 // Initialize the preferences op ESP32-radio.  They can be edited later by the webinterface. *
 //********************************************************************************************
 // 27-04-2017, ES: First set-up, derived from preferences example sketch.                    *
-// 08-12-2017, ES: names of I/O pins changed.                                                *
+// 11-02-2019, ES: names of I/O pins changed.                                                *
 //********************************************************************************************
 
 #include <Preferences.h>
@@ -68,9 +68,9 @@ void setup()
   preferences.putString ( "ir_40BF",     "upvolume = 2" ) ;
   preferences.putString ( "ir_C03F",     "downvolume = 2" ) ;
   //
-  preferences.putString ( "vs_cs",       "5                                      # GPIO Pin number for VS1053 CS" ) ;
-  preferences.putString ( "vs_dcs",      "16                                     # GPIO Pin number for VS1053 DCS" ) ;
-  preferences.putString ( "vs_dreq",     "4                                      # GPIO Pin number for VS1053 DREQ" ) ;
+  preferences.putString ( "pin_vs_cs",   "5                                      # GPIO Pin number for VS1053 CS" ) ;
+  preferences.putString ( "pin_vs_dcs",  "16                                     # GPIO Pin number for VS1053 DCS" ) ;
+  preferences.putString ( "pin_vs_dreq", "4                                      # GPIO Pin number for VS1053 DREQ" ) ;
   //
   preferences.putString ( "pin_enc_clk", "25                                     # GPIO Pin number for rotary encoder CLK" ) ;
   preferences.putString ( "pin_enc_dt",  "26                                     # GPIO Pin number for rotary encoder DT" ) ;
