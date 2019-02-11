@@ -1,4 +1,4 @@
-//***************************************************************************************************
+c//***************************************************************************************************
 //*  ESP32_Radio -- Webradio receiver for ESP32, VS1053 MP3 module and optional display.            *
 //*                 By Ed Smallenburg.                                                              *
 //***************************************************************************************************
@@ -143,6 +143,7 @@
 // 09-10-2018, ES: Bug fix xSemaphoreTake.
 // 05-01-2019, ES: Fine tune datarate.
 // 05-01-2019, ES: Basic http authentication. (just one user)
+// 11-02-2019, ES: MQTT topic and subtopic size enlarged.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -596,7 +597,7 @@ void mqttpubc::trigger ( uint8_t item )                    // Trigger publishig 
 void mqttpubc::publishtopic()
 {
   int         i = 0 ;                                         // Loop control
-  char        topic[40] ;                                     // Topic to send
+  char        topic[80] ;                                     // Topic to send
   const char* payload ;                                       // Points to payload
   char        intvar[10] ;                                    // Space for integer parameter
   while ( amqttpub[i].topic )
@@ -2884,7 +2885,7 @@ bool mqttreconnect()
   static uint32_t retrytime = 0 ;                         // Limit reconnect interval
   bool            res = false ;                           // Connect result
   char            clientid[20] ;                          // Client ID
-  char            subtopic[20] ;                          // Topic to subscribe
+  char            subtopic[60] ;                          // Topic to subscribe
 
   if ( ( millis() - retrytime ) < 5000 )                  // Don't try to frequently
   {
