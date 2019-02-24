@@ -1,4 +1,4 @@
-c//***************************************************************************************************
+//***************************************************************************************************
 //*  ESP32_Radio -- Webradio receiver for ESP32, VS1053 MP3 module and optional display.            *
 //*                 By Ed Smallenburg.                                                              *
 //***************************************************************************************************
@@ -1305,6 +1305,61 @@ void tftset ( uint16_t inx, String& str )
 
 
 //**************************************************************************************************
+//                                      U T F 1 6 U T F 8                                          *
+//**************************************************************************************************
+// In Place conversion UTF16-string to UTF-8.                                                      *
+//**************************************************************************************************
+void utf16utf8 ( char* s, uint32_t len, bool bigend )
+{
+  int i, cp = 0 ;
+  uint8_t msb ;                                         // most significant byte
+  uint8_t lsb ;                                         // least significant byte
+  for ( i = 0; i < len; i+=2 )
+  {
+    if ( bigend )
+    {
+      msb = s[i] ;                                      // Big-endian - msb first
+      lsb = s[i + 1] ;                                  // lsb second
+    }
+    else
+    {
+      msb = s[i + 1] ;                                  // Little-endian - msb second
+      lsb = s[i] ;                                      // lsb first
+    }
+    if ( msb == 0x00 )                                  // Regular latin chars
+    {
+      s[cp++] = lsb ;                                   // Simple strip msb
+    }
+    else if ( msb == 0x04 && lsb == 0x01 )              // Russian IO
+    {
+      s[cp++] = 0xD0 ;
+      s[cp++] = 0x81 ;
+    }
+    else if ( msb == 0x04 && lsb == 0x51 )              // Russian io
+    {
+      s[cp++] = 0xD1 ;
+      s[cp++] = 0x91 ;
+    }
+    else if ( msb == 0x04 && lsb >= 0x10 && lsb <= 0x3F ) // Russian A - pe
+    {
+      s[cp++] = 0xD0 ;
+      s[cp++] = lsb + 0x80 ;
+    }
+    else if ( msb == 0x04 && lsb >= 0x40 && lsb <= 0x4F ) // Russian er - ya
+    {
+      s[cp++] = 0xD1 ;
+      s[cp++] = lsb + 0x40 ;
+    }
+    else
+    {
+      s[cp++] = 0x3F ;                                  // Use '?' otherwise
+    }
+  }
+  s[cp] = '\0' ;                                        // Terminated $00
+}
+
+
+//**************************************************************************************************
 //                                      U T F 8 A S C I I                                          *
 //**************************************************************************************************
 // UTF8-Decoder: convert UTF8-string to extended ASCII.                                            *
@@ -1331,10 +1386,20 @@ byte utf8ascii ( byte ascii )
         break ;
       case 0xC3: res = lut_C3[ascii - 128] ;
         break ;
-      case 0x82: if ( ascii == 0xAC )
-        {
-          res = 'E' ;                 // Special case Euro-symbol
-        }
+      case 0x82: if ( ascii == 0xAC ) res = 'E' ;                 // Special case Euro-symbol
+        break ;
+      case 0xD0:
+      {
+        if ( ascii == 0x81 ) res = 0xA8 ;   // Russian IO
+        else if ( ascii >= 0x90 && ascii <= 0xBF ) res = ascii + 0x30 ;
+        break ;        
+      }
+      case 0xD1:
+      {
+        if ( ascii == 0x91 ) res = 0xB8 ;   // Russian io
+        else if ( ascii >= 0x80 && ascii <= 0x8F ) res = ascii + 0x70 ;
+        break ;        
+      }
     }
     c1 = ascii ;                      // Remember actual character
   }
@@ -2194,7 +2259,7 @@ void handle_ID3 ( String &path )
   struct ID3head_t                                          // First part of ID3 info
   {
     char    fid[3] ;                                        // Should be filled with "ID3"
-    uint8_t majV, minV ;                                    // Major and minor version
+    uint8_t majV, revV ;                                    // Major and revision version
     uint8_t hflags ;                                        // Headerflags
     uint8_t ttagsize[4] ;                                   // Total tag size
   } ID3head ;
@@ -2210,7 +2275,12 @@ void handle_ID3 ( String &path )
   } ID3tag ;
   uint8_t  tmpbuf[4] ;                                      // Scratch buffer
   uint8_t  tenc ;                                           // Text encoding
-  String   albttl = String() ;                              // Album and title
+  String   album = String() ;                               // Album
+  String   title = String() ;                               // Title
+  String   artist = String() ;                              // Artist
+  String   year = String() ;                                // Year
+  bool bigend ;                                             // Big-Endian frame encoding
+  uint8_t textoffset ;                                      // Begin text
 
   tftset ( 2, "Playing from local file" ) ;                 // Assume no ID3
   p = (char*)path.c_str() + 1 ;                             // Point to filename
@@ -2219,8 +2289,13 @@ void handle_ID3 ( String &path )
   mp3file.read ( (uint8_t*)&ID3head, sizeof(ID3head) ) ;    // Read first part of ID3 info
   if ( strncmp ( ID3head.fid, "ID3", 3 ) == 0 )
   {
-    sttg = ssconv ( ID3head.ttagsize ) ;                    // Convert tagsize
+    sttg = ssconv ( ID3head.ttagsize ) ;                    // Convert total tagsize
     dbgprint ( "Found ID3 info" ) ;
+    if ( ID3head.majV == 4 && ID3head.hflags & 0x10)        // Footer present?
+    {
+      // TODO: Add footer logic 
+    }
+
     if ( ID3head.hflags & 0x40 )                            // Extended header?
     {
       stx = ssconv ( exthsiz ) ;                            // Yes, get size of extended header
@@ -2232,7 +2307,7 @@ void handle_ID3 ( String &path )
     while ( sttg > 10 )                                     // Now handle the tags
     {
       sttg -= mp3file.read ( (uint8_t*)&ID3tag,
-                             sizeof(ID3tag) ) ;             // Read first part of a tag
+                             sizeof(ID3tag) ) ;             // Read tag header
       if ( ID3tag.tagid[0] == 0 )                           // Reached the end of the list?
       {
         break ;                                             // Yes, quit the loop
@@ -2248,38 +2323,66 @@ void handle_ID3 ( String &path )
         sttg -= mp3file.read ( tmpbuf, 1 ) ;               // Yes, ignore 1 byte
         stg-- ;                                            // Reduce tagsize by 1
       }
-      if ( stg > ( sizeof(metalinebf) + 2 ) )               // Room for tag?
+      if ( stg > ( sizeof(metalinebf) + 2 ) )               // Room for frame?
       {
         break ;                                             // No, skip this and further tags
       }
       sttg -= mp3file.read ( (uint8_t*)metalinebf,
-                             stg ) ;                        // Read tag contents
-      metalinebf[stg] = '\0' ;                              // Add delimeter
-      tenc = metalinebf[0] ;                                // First byte is encoding type
-      if ( tenc == '\0' )                                   // Debug all tags with encoding 0
+                             stg ) ;                        // Read frame contents
+      if ( ID3tag.tagid[0] == 'T' )                         // Text frame
       {
-        dbgprint ( "ID3 %s = %s", ID3tag.tagid,
-                   metalinebf + 1 ) ;
-      }
-      if ( ( strncmp ( ID3tag.tagid, "TALB", 4 ) == 0 ) ||  // Album title
-           ( strncmp ( ID3tag.tagid, "TPE1", 4 ) == 0 ) )   // or artist?
-      {
-        albttl += String ( metalinebf + 1 ) ;               // Yes, add to string
-        if ( displaytype == T_NEXTION )                     // NEXTION display?
+        tenc = metalinebf[0] ;
+        textoffset = 1 ;
+        if ( tenc == 0x00 )                                 // ISO-8859-1
         {
-          albttl += String ( "\\r" ) ;                      // Add code for newline (2 characters)
+          metalinebf[stg] = '\0' ;                          // Terminated with $00
+          dbgprint( "ID3 (ISO-8859-1) %s = %s", ID3tag.tagid,
+                   metalinebf + textoffset ) ;              // Debug all frames with encoding 0
         }
-        else
+        else if ( tenc == 0x01 )                            // UTF-16 with BOM
         {
-          albttl += String ( "\n" ) ;                       // Add newline (1 character)
+          textoffset = 3 ;
+          if ( metalinebf[1] == 0xFF && metalinebf[2] == 0xFE ) // Check endianness
+            bigend = false ;
+          else
+            bigend = true ;
+          utf16utf8( metalinebf + textoffset, stg - textoffset, bigend ) ; // Convert UTF-16 to UTF-8
+          dbgprint( "ID3 (UTF-16 w BOM) %s = %s", ID3tag.tagid,
+                   metalinebf + textoffset ) ;
         }
-      }
-      if ( strncmp ( ID3tag.tagid, "TIT2", 4 ) == 0 )       // Songtitle?
-      {
-        tftset ( 2, metalinebf + 1 ) ;                      // Yes, show title
+        else if ( tenc == 0x02 && ID3head.majV == 4 )       // UTF-16BE without BOM
+        {
+          utf16utf8( metalinebf + textoffset, stg - textoffset, bigend ) ; // Convert UTF-16 to UTF-8
+          dbgprint( "ID3 (UTF-16 wo BOM) %s = %s", ID3tag.tagid,
+                   metalinebf + textoffset ) ;
+        }
+        else if ( tenc == 0x03 && ID3head.majV == 4 )       // UTF-8
+        {
+          metalinebf[stg] = '\0' ;
+          dbgprint( "ID3 (UTF-8) %s = %s", ID3tag.tagid,
+                   metalinebf + textoffset ) ;
+        }
+        if ( strncmp ( ID3tag.tagid, "TIT2", 4 ) == 0 )       // Songtitle?
+          title = String ( metalinebf + textoffset ) ;
+        else if ( strncmp ( ID3tag.tagid, "TALB", 4 ) == 0 )       // Album title
+          album = String ( metalinebf + textoffset ) ;
+        else if ( strncmp ( ID3tag.tagid, "TPE1", 4 ) == 0 )       // Artist
+          artist = String ( metalinebf + textoffset ) ;
+        else if ( strncmp ( ID3tag.tagid, "TYER", 4 ) == 0 )       // Year
+          year = String ( metalinebf + textoffset ) ;
       }
     }
-    tftset ( 1, albttl ) ;                                  // Show album and title
+    artist += String ( " - " ) + title;
+    if ( displaytype == T_NEXTION )                     // NEXTION display?
+      artist += String ( "\\r" ) ;                      // Add code for newline (2 characters)
+    else
+      artist += String ( "\n" ) ;                       // Add newline (1 character)
+    artist += album + String ( "(" ) + year + String ( ")" );
+    tftset ( 1, artist ) ;                                  // Show album and title
+    artist = "" ;
+    album = "" ;
+    title = "" ;
+    year = "" ;
   }
   mp3file.close() ;                                         // Close the file
   mp3file = SD.open ( path ) ;                              // And open the file again
@@ -5713,4 +5816,3 @@ void spftask ( void * parameter )
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
-
