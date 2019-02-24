@@ -2352,7 +2352,7 @@ void handle_ID3 ( String &path )
         }
         else if ( tenc == 0x02 && ID3head.majV == 4 )       // UTF-16BE without BOM
         {
-          utf16utf8( metalinebf + textoffset, stg - textoffset, bigend ) ; // Convert UTF-16 to UTF-8
+          utf16utf8( metalinebf + textoffset, stg - textoffset, true ) ; // Convert UTF-16 to UTF-8
           dbgprint( "ID3 (UTF-16 wo BOM) %s = %s", ID3tag.tagid,
                    metalinebf + textoffset ) ;
         }
