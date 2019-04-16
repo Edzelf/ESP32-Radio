@@ -2499,6 +2499,8 @@ bool do_software_update ( uint32_t clength )
   return res ;
 }
 
+// forward reference
+void scan_content_length ( const char* metalinebf );
 
 //**************************************************************************************************
 //                                        U P D A T E _ S O F T W A R E                            *
