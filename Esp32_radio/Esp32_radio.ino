@@ -144,11 +144,12 @@
 // 05-01-2019, ES: Fine tune datarate.
 // 05-01-2019, ES: Basic http authentication. (just one user)
 // 11-02-2019, ES: MQTT topic and subtopic size enlarged.
+// 24-04-2019, ES: Do not lock SPI during gettime().  Calling gettime may take a long time.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Tue, 05 Jan 2019 19:48:00 GMT"
+#define VERSION     "Wed, 24 Apr 2019 08:20:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -156,7 +157,7 @@
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
 // Define (just one) type of display.  See documentation.
-#define BLUETFT                      // Works also for RED TFT 128x160
+#define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
 //#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
@@ -185,8 +186,9 @@
 #define QSIZ 400
 // Debug buffer size
 #define DEBUG_BUFFER_SIZE 150
+#define NVSBUFSIZE 150
 // Access point name if connection to WiFi network fails.  Also the hostname for WiFi and OTA.
-// Not that the password of an AP must be at least as long as 8 characters.
+// Note that the password of an AP must be at least as long as 8 characters.
 // Also used for other naming.
 #define NAME "ESP32Radio"
 // Maximum number of MQTT reconnects before give-up
@@ -320,7 +322,7 @@ struct nvs_page                                       // For nvs entries
 
 struct keyname_t                                      // For keys in NVS
 {
-  char      Key[16] ;                                 // Mac length is 15 plus delimeter
+  char      Key[16] ;                                 // Max length is 15 plus delimeter
 } ;
 
 //**************************************************************************************************
@@ -399,7 +401,7 @@ bool              chunked = false ;                      // Station provides chu
 int               chunkcount = 0 ;                       // Counter for chunked transfer
 String            http_getcmd ;                          // Contents of last GET command
 String            http_rqfile ;                          // Requested file
-bool              http_reponse_flag = false ;            // Response required
+bool              http_response_flag = false ;           // Response required
 uint16_t          ir_value = 0 ;                         // IR code
 uint32_t          ir_0 = 550 ;                           // Average duration of an IR short pulse
 uint32_t          ir_1 = 1650 ;                          // Average duration of an IR long pulse
@@ -1946,8 +1948,6 @@ void IRAM_ATTR isr_enc_switch()
   }
   oldtime = newtime ;                                      // For next compare
 }
-
-
 
 
 //**************************************************************************************************
@@ -3593,16 +3593,17 @@ void setup()
       }
     }
   }
-  mk_lsan() ;                                            // Make al list of acceptable networks
-  // in preferences.
+  mk_lsan() ;                                            // Make a list of acceptable networks
+                                                         // in preferences.
   WiFi.mode ( WIFI_STA ) ;                               // This ESP is a station
   WiFi.persistent ( false ) ;                            // Do not save SSID and password
   WiFi.disconnect() ;                                    // After restart router could still
   delay ( 100 ) ;                                        // keep old connection
-  listNetworks() ;                                       // Search for WiFi networks
+  listNetworks() ;                                       // Find WiFi networks
   readprefs ( false ) ;                                  // Read preferences
-  tcpip_adapter_set_hostname ( TCPIP_ADAPTER_IF_STA, NAME ) ;
-  vs1053player->begin() ;                                 // Initialize VS1053 player
+  tcpip_adapter_set_hostname ( TCPIP_ADAPTER_IF_STA,
+                               NAME ) ;
+  vs1053player->begin() ;                                // Initialize VS1053 player
   delay(10);
   p = dbgprint ( "Connect to WiFi" ) ;                   // Show progress
   tftlog ( p ) ;                                         // On TFT too
@@ -3835,9 +3836,9 @@ void handlehttpreply()
   String        sndstr = "" ;                               // String to send
   int           n ;                                         // Number of files on SD card
 
-  if ( http_reponse_flag )
+  if ( http_response_flag )
   {
-    http_reponse_flag = false ;
+    http_response_flag = false ;
     if ( cmdclient.connected() )
     {
       if ( http_rqfile.length() == 0 &&                     // An empty "GET"?
@@ -3946,7 +3947,7 @@ void handlehttp()
       // that's the end of the client HTTP request, so send a response:
       if ( currentLine.length() == 0 )
       {
-        http_reponse_flag = reqseen ;                        // Response required or not
+        http_response_flag = reqseen ;                       // Response required or not
         break ;
       }
       else
@@ -5655,6 +5656,10 @@ void handle_spec()
   {
     releaseSPI() ;                                            // Yes, release SPI bus
   }
+  if ( time_req && NetworkFound )                             // Time to refresh time?
+  {
+    gettime() ;                                               // Yes, get the current time
+  }
   claimSPI ( "hspec" ) ;                                      // Claim SPI bus
   if ( muteflag )                                             // Mute or not?
   {
@@ -5674,7 +5679,6 @@ void handle_spec()
     time_req = false ;                                        // Yes, clear request
     if ( NetworkFound  )                                      // Time available?
     {
-      gettime() ;                                             // Yes, get the current time
       displaytime ( timetxt ) ;                               // Write to TFT screen
       displayvolume() ;                                       // Show volume on display
       displaybattery() ;                                      // Show battery charge on display
@@ -5713,4 +5717,3 @@ void spftask ( void * parameter )
   }
   //vTaskDelete ( NULL ) ;                                          // Will never arrive here
 }
-
