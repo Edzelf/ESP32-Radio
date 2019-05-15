@@ -145,6 +145,7 @@
 // 05-01-2019, ES: Basic http authentication. (just one user)
 // 11-02-2019, ES: MQTT topic and subtopic size enlarged.
 // 24-04-2019, ES: Do not lock SPI during gettime().  Calling gettime may take a long time.
+// 15-05-2019, ES: MAX number of presets as a defined constant.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -191,6 +192,8 @@
 // Note that the password of an AP must be at least as long as 8 characters.
 // Also used for other naming.
 #define NAME "ESP32Radio"
+// Max number of presets in preferences
+#define MAXPRESETS 200
 // Maximum number of MQTT reconnects before give-up
 #define MAXMQTTCONNECTS 5
 // Adjust size of buffer to the longest expected string for nvsgetstr
@@ -265,7 +268,7 @@ struct ini_struct
   String         mqttpasswd ;                         // Password for MQTT authentication
   uint8_t        reqvol ;                             // Requested volume
   uint8_t        rtone[4] ;                           // Requested bass/treble settings
-  int8_t         newpreset ;                          // Requested preset
+  int16_t        newpreset ;                          // Requested preset
   String         clk_server ;                         // Server to be used for time of day clock
   int8_t         clk_offset ;                         // Offset in hours with respect to UTC
   int8_t         clk_dst ;                            // Number of hours shift during DST
@@ -380,7 +383,7 @@ String            ipaddress ;                            // Own IP-address
 int               bitrate ;                              // Bitrate in kb/sec
 int               mbitrate ;                             // Measured bitrate
 int               metaint = 0 ;                          // Number of databytes between metadata
-int8_t            currentpreset = -1 ;                   // Preset station playing
+int16_t           currentpreset = -1 ;                   // Preset station playing
 String            host ;                                 // The URL to connect to or file to play
 String            playlist ;                             // The URL of the specified playlist
 bool              hostreq = false ;                      // Request for new host
@@ -2600,21 +2603,27 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
 //**************************************************************************************************
 // Read the mp3 host from the preferences specified by the parameter.                              *
 // The host will be returned.                                                                      *
+// We search for "preset_x" or "preset_xx" or "preset_xxx".										   *
 //**************************************************************************************************
-String readhostfrompref ( int8_t preset )
+String readhostfrompref ( int16_t preset )
 {
-  char           tkey[12] ;                            // Key as an array of chars
+  char           tkey[12] ;                            // Key as an array of char
 
-  sprintf ( tkey, "preset_%02d", preset ) ;            // Form the search key
-  if ( nvssearch ( tkey ) )                            // Does it exists?
+  sprintf ( tkey, "preset_%d", preset ) ;              // Form the search key
+  if ( !nvssearch ( tkey ) )                           // Does _x[x[x]] exists?
   {
-    // Get the contents
-    return nvsgetstr ( tkey ) ;                        // Get the station (or empty sring)
+    sprintf ( tkey, "preset_%03d", preset ) ;          // Form new search key
+    if ( !nvssearch ( tkey ) )                         // Does _xxx exists?
+    {
+      sprintf ( tkey, "preset_%02d", preset ) ;        // Form new search key
+    }
+    if ( !nvssearch ( tkey ) )                         // Does _xx exists?
+    {
+      return String ( "" ) ;                           // Not found
+    }
   }
-  else
-  {
-    return String ( "" ) ;                             // Not found
-  }
+  // Get the contents
+  return nvsgetstr ( tkey ) ;                          // Get the station (or empty sring)
 }
 
 
@@ -2631,11 +2640,11 @@ String readhostfrompref()
 
   while ( ( contents = readhostfrompref ( ini_block.newpreset ) ) == "" )
   {
-    if ( ++ maxtry > 99 )
+    if ( ++maxtry >= MAXPRESETS )
     {
       return "" ;
     }
-    if ( ++ini_block.newpreset > 99 )                   // Next or wrap to 0
+    if ( ++ini_block.newpreset >= MAXPRESETS )          // Next or wrap to 0
     {
       ini_block.newpreset = 0 ;
     }
@@ -3244,16 +3253,14 @@ void getsettings()
   String              val ;                              // Result to send
   String              statstr ;                          // Station string
   int                 inx ;                              // Position of search char in line
-  int                 i ;                                // Loop control, preset number
+  int16_t             i ;                                // Loop control, preset number
   char                tkey[12] ;                         // Key for preset preference
 
-  for ( i = 0 ; i < 100 ; i++ )                          // Max 99 presets
+  for ( i = 0 ; i < MAXPRESETS ; i++ )                   // Max number of presets
   {
-    sprintf ( tkey, "preset_%02d", i ) ;                 // Preset plus number
-    if ( nvssearch ( tkey ) )                            // Does it exists?
+    statstr = readhostfrompref ( i ) ;   				 // Get the preset from NVS
+    if ( statstr != "" )								 // Preset available?
     {
-      // Get the contents
-      statstr = nvsgetstr ( tkey ) ;                     // Get the station
       // Show just comment if available.  Otherwise the preset itself.
       inx = statstr.indexOf ( "#" ) ;                    // Get position of "#"
       if ( inx > 0 )                                     // Hash sign present?
@@ -3874,6 +3881,7 @@ void handlehttpreply()
           else if ( http_getcmd.startsWith ("saveprefs") )  // Is is a "Save preferences"
           {
             writeprefs() ;                                  // Yes, handle it
+            sndstr += String ( "Config saved" ) ;           // Give reply
           }
           else if ( http_getcmd.startsWith ( "mp3list" ) )  // Is is a "Get SD MP3 tracklist"?
           {
@@ -5129,7 +5137,7 @@ const char* analyzeCmd ( const char* str )
 // "wifi_00" and "preset_00" may appear more than once, like wifi_01, wifi_02, etc.                *
 // Examples with available parameters:                                                             *
 //   preset     = 12                        // Select start preset to connect to                   *
-//   preset_00  = <mp3 stream>              // Specify station for a preset 00-99 *)               *
+//   preset_00  = <mp3 stream>              // Specify station for a preset 00-max *)              *
 //   volume     = 95                        // Percentage between 0 and 100                        *
 //   upvolume   = 2                         // Add percentage to current volume                    *
 //   downvolume = 2                         // Subtract percentage from current volume             *
