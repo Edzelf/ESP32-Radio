@@ -150,7 +150,7 @@
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Wed, 24 Apr 2019 08:20:00 GMT"
+#define VERSION     "Wed, 15 May 2019 15:20:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -3254,12 +3254,11 @@ void getsettings()
   String              statstr ;                          // Station string
   int                 inx ;                              // Position of search char in line
   int16_t             i ;                                // Loop control, preset number
-  char                tkey[12] ;                         // Key for preset preference
 
   for ( i = 0 ; i < MAXPRESETS ; i++ )                   // Max number of presets
   {
-    statstr = readhostfrompref ( i ) ;   				 // Get the preset from NVS
-    if ( statstr != "" )								 // Preset available?
+    statstr = readhostfrompref ( i ) ;   				         // Get the preset from NVS
+    if ( statstr != "" )								                 // Preset available?
     {
       // Show just comment if available.  Otherwise the preset itself.
       inx = statstr.indexOf ( "#" ) ;                    // Get position of "#"
@@ -3268,7 +3267,8 @@ void getsettings()
         statstr.remove ( 0, inx + 1 ) ;                  // Yes, remove non-comment part
       }
       chomp ( statstr ) ;                                // Remove garbage from description
-      val += String ( tkey ) +
+      dbgprint ( "statstr is %s", statstr.c_str() ) ;
+      val += String ( "preset_x" ) +
              String ( "=" ) +
              statstr +
              String ( "\n" ) ;                           // Add delimeter
