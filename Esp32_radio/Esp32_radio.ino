@@ -150,7 +150,7 @@
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Wed, 15 May 2019 15:20:00 GMT"
+#define VERSION     "Thu, 16 May 2019 12:10:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -3268,7 +3268,8 @@ void getsettings()
       }
       chomp ( statstr ) ;                                // Remove garbage from description
       dbgprint ( "statstr is %s", statstr.c_str() ) ;
-      val += String ( "preset_x" ) +
+      val += String ( "preset_" ) +
+             String ( i ) +
              String ( "=" ) +
              statstr +
              String ( "\n" ) ;                           // Add delimeter
