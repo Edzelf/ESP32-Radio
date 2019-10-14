@@ -37,10 +37,10 @@ void setup()
   preferences.putString ( "mqttpasswd",   "none" ) ;
   preferences.putString ( "mqttprefix",   "none" ) ;
   //
-  preferences.putString ( "wifi_00",     "NETGEAR-11/xxxxxx" ) ;
+  preferences.putString ( "wifi_00",     "gozal_2.4/asdffdsa" ) ;
   preferences.putString ( "wifi_01",     "SSID2/YYYYYY" ) ;
   //
-  preferences.putString ( "volume",      "72" ) ;
+  preferences.putString ( "volume",      "95" ) ;
   preferences.putString ( "toneha",      "0" ) ;
   preferences.putString ( "tonehf",      "0" ) ;
   preferences.putString ( "tonela",      "0" ) ;
@@ -94,4 +94,3 @@ void loop()
   Serial.println ( "ESP32_radio_init completed..." ) ;
   delay ( 10000 ) ;
 }
-

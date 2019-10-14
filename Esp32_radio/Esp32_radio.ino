@@ -47,6 +47,10 @@
 //
 // Wiring. Note that this is just an example.  Pins (except 18,19 and 23 of the SPI interface)
 // can be configured in the config page of the web interface.
+//
+// Note 2: make sure to remember the pins you have set in the ESP32_radion_init file, it can be confusing; 
+// to assemble the part vie the table below, but set set other pins via the ESP32_radio_init.ino
+//
 // ESP32dev Signal  Wired to LCD        Wired to VS1053      SDCARD   Wired to the rest
 // -------- ------  --------------      -------------------  ------   ---------------
 // GPIO32           -                   pin 1 XDCS            -       -
@@ -158,11 +162,11 @@
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
 // Define (just one) type of display.  See documentation.
-#define BLUETFT                        // Works also for RED TFT 128x160
+//#define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
 //#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
-//#define ILI9341                      // ILI9341 240*320
+#define ILI9341                      // ILI9341 240*320
 //#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
 //
 #include <nvs.h>
@@ -4598,7 +4602,7 @@ void loop()
   handleSaveReq() ;                                 // See if time to save settings
   handleIpPub() ;                                   // See if time to publish IP
   handleVolPub() ;                                  // See if time to publish volume
-  chk_enc() ;                                       // Check rotary encoder functions
+  //chk_enc() ;                                       // Check rotary encoder functions
 }
 
 
