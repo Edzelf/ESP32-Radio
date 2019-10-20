@@ -53,12 +53,12 @@
 //
 // ESP32dev Signal  Wired to LCD        Wired to VS1053      SDCARD   Wired to the rest
 // -------- ------  --------------      -------------------  ------   ---------------
-// GPIO32           -                   pin 1 XDCS            -       -
+// GPIO32           -                   -                     -       -
 // GPIO5            -                   pin 2 XCS             -       -
 // GPIO4            -                   pin 4 DREQ            -       -
 // GPIO2            pin 3 D/C or A0     -                     -       -
 // GPIO22           -                   -                     CS      -
-// GPIO16   RXD2    -                   -                     -       TX of NEXTION (if in use)
+// GPIO16   RXD2    -                   pin 1 XDCS            -       TX of NEXTION (if in use)
 // GPIO17   TXD2    -                   -                     -       RX of NEXTION (if in use)
 // GPIO18   SCK     pin 5 CLK or SCK    pin 5 SCK             CLK     -
 // GPIO19   MISO    -                   pin 7 MISO            MISO    -
@@ -295,6 +295,7 @@ struct ini_struct
   int8_t         spi_sck_pin ;                        // GPIO connected to SPI SCK pin
   int8_t         spi_miso_pin ;                       // GPIO connected to SPI MISO pin
   int8_t         spi_mosi_pin ;                       // GPIO connected to SPI MOSI pin
+  int8_t         pin_rtry_sw  ;                       // GPIO connected to the rotary switch (for changing statioons)
   uint16_t       bat0 ;                               // ADC value for 0 percent battery charge
   uint16_t       bat100 ;                             // ADC value for 100 percent battery charge
 } ;
@@ -352,6 +353,9 @@ enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,        // State for datastream
                 } ;
 
 // Global variables
+bool              check_rotary_switch = true;
+int               prev_rotary_switch_position = -1;                 // position of the rotary swich, for changing station
+
 int               DEBUG = 1 ;                            // Debug on/off
 int               numSsid ;                              // Number of available WiFi networks
 WiFiMulti         wifiMulti ;                            // Possible WiFi networks
@@ -1807,6 +1811,8 @@ void IRAM_ATTR timer100()
   }
   if ( ( count10sec % 10 ) == 0 )                 // One second over?
   {
+    check_rotary_switch = true;
+    
     scaniocount = scanios ;                       // TEST*TEST*TEST
     scanios = 0 ;
     if ( ++timeinfo.tm_sec >= 60 )                // Yes, update number of seconds
@@ -2114,7 +2120,7 @@ bool connecttohost()
 
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
-  tftset ( 0, "ESP32-Radio" ) ;                     // Set screen segment text top line
+  tftset ( 0, "RadioMAMA" ) ;                     // Set screen segment text top line
   displaytime ( "" ) ;                              // Clear time on TFT screen
   datamode = INIT ;                                 // Start default in metamode
   chunked = false ;                                 // Assume not chunked
@@ -2772,6 +2778,7 @@ void readIOprefs()
     int8_t      pdefault ;                                // Default pin
   };
   struct iosetting klist[] = {                            // List of I/O related keys
+    { "pin_rtry_sw",   &ini_block.pin_rtry_sw,      -1 },
     { "pin_ir",        &ini_block.ir_pin,           -1 },
     { "pin_enc_clk",   &ini_block.enc_clk_pin,      -1 },
     { "pin_enc_dt",    &ini_block.enc_dt_pin,       -1 },
@@ -3544,6 +3551,13 @@ void setup()
                               ini_block.vs_dreq_pin,
                               ini_block.vs_shutdown_pin,
                               ini_block.vs_shutdownx_pin ) ;
+ 
+  if (ini_block.pin_rtry_sw >=0)                         // My adding, for station switching.
+  {
+    dbgprint ( "Enable pin %d for Rotary Switch",
+               ini_block.pin_rtry_sw ) ;
+    pinMode ( ini_block.pin_rtry_sw, INPUT ) ;           // Pin for IR receiver VS1838B
+  }
   if ( ini_block.ir_pin >= 0 )
   {
     dbgprint ( "Enable pin %d for IR",
@@ -4379,6 +4393,36 @@ void chk_enc()
   rotationcount = 0 ;                                         // Reset
 }
 
+//**************************************************************************************************
+//                                           CHK_ROTARY_SWITCH                                     *
+//**************************************************************************************************
+// See if rotary switch is activated and perform its functions.                                   *
+//**************************************************************************************************
+void chk_rotary_switch()
+{
+  char        selected_channel[20] ;                                   // selected_channelkey
+  int         imput_mapped_to_12_values ;
+  int32_t     analog_input_32;
+
+  if (ini_block.pin_rtry_sw > -1)
+  { 
+    analog_input_32 = analogRead(ini_block.pin_rtry_sw);
+    
+    imput_mapped_to_12_values = map(analog_input_32, 0, 4095, 1, 6); 
+    
+    if (imput_mapped_to_12_values != prev_rotary_switch_position){ // Channel is changed by rotary switch
+      //dbgprint ( "analog_input_32 %d",analog_input_32) ;
+      //dbgprint ( "imput_mapped_to_12_values %d",imput_mapped_to_12_values) ;
+      prev_rotary_switch_position = imput_mapped_to_12_values;                                      
+      ini_block.newpreset = imput_mapped_to_12_values;                                                    // Update current preset
+      sprintf ( selected_channel, "selected chanel: %d", prev_rotary_switch_position ) ;                  
+      tftset ( 3, selected_channel ) ;
+      
+      return;
+    }
+  }
+  return;
+}
 
 //**************************************************************************************************
 //                                           M P 3 L O O P                                         *
@@ -4603,6 +4647,13 @@ void loop()
   handleIpPub() ;                                   // See if time to publish IP
   handleVolPub() ;                                  // See if time to publish volume
   //chk_enc() ;                                       // Check rotary encoder functions
+  
+  if (check_rotary_switch == true){                 // check every 1 sec
+    //dbgprint ( "Checking rotary switch" ) ;
+    check_rotary_switch = false;
+    chk_rotary_switch();  
+  }
+  
 }
 
 

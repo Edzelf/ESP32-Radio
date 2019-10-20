@@ -26,7 +26,7 @@ scrseg_struct     tftdata[TFTSECS] =                        // Screen divided in
   { false, WHITE,   0,  8, "" },                            // 1 top line
   { false, CYAN,   20, 64, "" },                            // 8 lines in the middle
   { false, YELLOW, 90, 32, "" },                            // 4 lines at the bottom
-  { false, GREEN,  90, 32, "" }                             // 4 lines at the bottom for rotary encoder
+  { false, GREEN,  200, 32, "" }                             // 4 lines at the bottom for rotary encoder
 } ;
 
 
@@ -159,5 +159,3 @@ void displaytime ( const char* str, uint16_t color )
     }
   }
 }
-
-

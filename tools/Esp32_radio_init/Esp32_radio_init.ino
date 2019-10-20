@@ -30,7 +30,7 @@ void setup()
   preferences.putString ( "gpio_00",  "uppreset = 1" ) ;
   preferences.putString ( "gpio_12",  "upvolume = 2" ) ;
   preferences.putString ( "gpio_13",  "downvolume = 2" ) ;
-
+  
   preferences.putString ( "mqttbroker",   "none" ) ;
   preferences.putString ( "mqttport",     "1883" ) ;
   preferences.putString ( "mqttuser",     "none" ) ;
@@ -46,22 +46,25 @@ void setup()
   preferences.putString ( "tonela",      "0" ) ;
   preferences.putString ( "tonelf",      "0" ) ;
   //
-  preferences.putString ( "preset",      "6" ) ;
-  preferences.putString ( "preset_00",   "109.206.96.34:8100                       #  0 - NAXI LOVE RADIO, Belgrade, Serbia" ) ;
-  preferences.putString ( "preset_01",   "airspectrum.cdnstream1.com:8114/1648_128 #  1 - Easy Hits Florida 128k" ) ;
-  preferences.putString ( "preset_02",   "us2.internet-radio.com:8050              #  2 - CLASSIC ROCK MIA WWW.SHERADIO.COM" ) ;
-  preferences.putString ( "preset_03",   "airspectrum.cdnstream1.com:8000/1261_192 #  3 - Magic Oldies Florida" ) ;
-  preferences.putString ( "preset_04",   "airspectrum.cdnstream1.com:8008/1604_128 #  4 - Magic 60s Florida 60s Classic Rock" ) ;
-  preferences.putString ( "preset_05",   "us1.internet-radio.com:8105              #  5 - Classic Rock Florida - SHE Radio" ) ;
-  preferences.putString ( "preset_06",   "icecast.omroep.nl:80/radio1-bb-mp3       #  6 - Radio 1, NL" ) ;
-  preferences.putString ( "preset_07",   "205.164.62.15:10032                      #  7 - 1.FM - GAIA, 64k" ) ;
-  preferences.putString ( "preset_08",   "skonto.ls.lv:8002/mp3                    #  8 - Skonto 128k" ) ;
-  preferences.putString ( "preset_09",   "94.23.66.155:8106                        #  9 - *ILR CHILL and GROOVE" ) ;
-  preferences.putString ( "preset_10",   "ihr/IHR_IEDM                             # 10 - iHeartRadio IHR_IEDM" ) ;
-  preferences.putString ( "preset_11",   "ihr/IHR_TRAN                             # 11 - iHeartRadio IHR_TRAN" ) ;
+  preferences.putString ( "preset",      "1" ) ;
+  // glzwizzlv.bynetcdn.com/glglz_mp3?awCollectionId=misc
+  // http://glzwizzlv.bynetcdn.com/glglz_mp3?awCollectionId=misc&awEpisodeId=glglz
+  preferences.putString ( "preset_01",   "glzwizzlv.bynetcdn.com/glglz_mp3?awCollectionId=misc                       #  1 - Glz, galey_tzahal" ) ;
+  //preferences.putString ( "preset_00",   "109.206.96.34:8100                       #  0 - NAXI LOVE RADIO, Belgrade, Serbia" ) ;
+  preferences.putString ( "preset_02",   "airspectrum.cdnstream1.com:8114/1648_128 #  2 - Easy Hits Florida 128k" ) ;
+  preferences.putString ( "preset_03",   "us2.internet-radio.com:8050              #  3 - CLASSIC ROCK MIA WWW.SHERADIO.COM" ) ;
+  preferences.putString ( "preset_04",   "airspectrum.cdnstream1.com:8000/1261_192 #  4 - Magic Oldies Florida" ) ;
+  preferences.putString ( "preset_05",   "airspectrum.cdnstream1.com:8008/1604_128 #  5 - Magic 60s Florida 60s Classic Rock" ) ;
+  preferences.putString ( "preset_06",   "us1.internet-radio.com:8105              #  6 - Classic Rock Florida - SHE Radio" ) ;
+  preferences.putString ( "preset_07",   "icecast.omroep.nl:80/radio1-bb-mp3       #  7 - Radio 1, NL" ) ;
+  preferences.putString ( "preset_08",   "205.164.62.15:10032                      #  8 - 1.FM - GAIA, 64k" ) ;
+  preferences.putString ( "preset_09",   "skonto.ls.lv:8002/mp3                    #  9 - Skonto 128k" ) ;
+  preferences.putString ( "preset_10",   "94.23.66.155:8106                        #  10 - *ILR CHILL and GROOVE" ) ;
+  preferences.putString ( "preset_11",   "ihr/IHR_IEDM                             # 11- iHeartRadio IHR_IEDM" ) ;
+  preferences.putString ( "preset_12",   "ihr/IHR_TRAN                             # 12 - iHeartRadio IHR_TRAN" ) ;
   //
   preferences.putString ( "clk_server",  "pool.ntp.org" ) ;        // Setting for Time Of Day clock on TFT
-  preferences.putString ( "clk_offset",  "1" ) ;
+  preferences.putString ( "clk_offset",  "2" ) ;
   preferences.putString ( "clk_dst",     "1" ) ;
   //
   preferences.putString ( "pin_ir",      "35                                     # GPIO Pin number for IR receiver VS1838B" ) ;
@@ -81,6 +84,10 @@ void setup()
   //
   preferences.putString ( "pin_sd_cs",   "21                                     # GPIO Pin number for SD card CS" ) ;
 
+
+  // my adding - for my sotary_switch
+  preferences.putString ( "pin_rtry_sw",  "34                                    # Rotary switch for station switch" ) ;
+  
   preferences.end() ;
   delay ( 1000 ) ;
 }
