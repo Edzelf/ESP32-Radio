@@ -37,7 +37,7 @@ void setup()
   preferences.putString ( "mqttpasswd",   "none" ) ;
   preferences.putString ( "mqttprefix",   "none" ) ;
   //
-  preferences.putString ( "wifi_00",     "gozal_2.4/asdffdsa" ) ;
+  preferences.putString ( "wifi_00",     "SSID1/YYYYYY" ) ;
   preferences.putString ( "wifi_01",     "SSID2/YYYYYY" ) ;
   //
   preferences.putString ( "volume",      "95" ) ;
