@@ -4408,14 +4408,15 @@ void chk_rotary_switch()
   { 
     analog_input_32 = analogRead(ini_block.pin_rtry_sw);
     
-    imput_mapped_to_12_values = map(analog_input_32, 0, 4095, 1, 6); 
+    imput_mapped_to_12_values = map(analog_input_32, 1, 4095, 1, 6); 
     
     if (imput_mapped_to_12_values != prev_rotary_switch_position){ // Channel is changed by rotary switch
       //dbgprint ( "analog_input_32 %d",analog_input_32) ;
       //dbgprint ( "imput_mapped_to_12_values %d",imput_mapped_to_12_values) ;
-      prev_rotary_switch_position = imput_mapped_to_12_values;                                      
+      
+      prev_rotary_switch_position = imput_mapped_to_12_values;                                            // save new value
       ini_block.newpreset = imput_mapped_to_12_values;                                                    // Update current preset
-      sprintf ( selected_channel, "selected chanel: %d", prev_rotary_switch_position ) ;                  
+      sprintf ( selected_channel, "Selected chanel: %d", prev_rotary_switch_position ) ;                  
       tftset ( 3, selected_channel ) ;
       
       return;
