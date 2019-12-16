@@ -146,11 +146,12 @@
 // 11-02-2019, ES: MQTT topic and subtopic size enlarged.
 // 24-04-2019, ES: Do not lock SPI during gettime().  Calling gettime may take a long time.
 // 15-05-2019, ES: MAX number of presets as a defined constant.
+// 16-12-2019, ES: Modify of claimSPI() function for debugability.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Thu, 16 May 2019 12:10:00 GMT"
+#define VERSION     "Thu, 16 Dec 2019 09:07:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -1223,11 +1224,14 @@ void nvschkey ( const char* oldk, const char* newk )
 //                                      C L A I M S P I                                            *
 //**************************************************************************************************
 // Claim the SPI bus.  Uses FreeRTOS semaphores.                                                   *
+// If the semaphore cannot be claimed within the time-out period, the function continues without   *
+// claiming the semaphore.  This is incorrect but allows debugging.                                *
 //**************************************************************************************************
 void claimSPI ( const char* p )
 {
-  const        TickType_t ctry = 10 ;                       // Time to wait for semaphore
-  uint32_t     count = 0 ;                                  // Wait time in ticks
+  const              TickType_t ctry = 10 ;                 // Time to wait for semaphore
+  uint32_t           count = 0 ;                            // Wait time in ticks
+  static const char* old_id = "none" ;                      // ID that holds the bus
 
   while ( xSemaphoreTake ( SPIsem, ctry ) != pdTRUE  )      // Claim SPI bus
   {
@@ -1237,8 +1241,14 @@ void claimSPI ( const char* p )
                  count * ctry,
                  xPortGetCoreID(),
                  p ) ;
+      dbgprint ( "Semaphore is claimed by %s", old_id ) ;
+    }
+    if ( count >= 100 )
+    {
+      return ;                                               // Continue without semaphore
     }
   }
+  old_id = p ;                                               // Remember ID holding the semaphore
 }
 
 
@@ -2143,12 +2153,15 @@ bool connecttohost()
   if ( mp3client.connect ( hostwoext.c_str(), port ) )
   {
     dbgprint ( "Connected to server" ) ;
-    auth = nvsgetstr ( "basicauth" ) ;              // Use basic authentication?
-    if ( auth != "" )                               // Should be user:passwd
-    { 
-       auth = base64::encode ( auth.c_str() ) ;     // Encode
-       auth = String ( "Authorization: Basic " ) +
-              auth + String ( "\r\n" ) ;
+    if ( nvssearch ( "basicauth" ) )                // Does "basicauth" exists?
+    {
+      auth = nvsgetstr ( "basicauth" ) ;            // Use basic authentication?
+      if ( auth != "" )                             // Should be user:passwd
+      { 
+         auth = base64::encode ( auth.c_str() ) ;   // Encode
+         auth = String ( "Authorization: Basic " ) +
+                auth + String ( "\r\n" ) ;
+      }
     }
     mp3client.print ( String ( "GET " ) +
                       extension +
