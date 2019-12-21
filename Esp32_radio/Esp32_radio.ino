@@ -147,11 +147,12 @@
 // 24-04-2019, ES: Do not lock SPI during gettime().  Calling gettime may take a long time.
 // 15-05-2019, ES: MAX number of presets as a defined constant.
 // 16-12-2019, ES: Modify of claimSPI() function for debugability.
+// 21-12-2019, ES: Check chip version.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Thu, 16 Dec 2019 09:07:00 GMT"
+#define VERSION     "Sat, 21 Dec 2019 09:30:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -665,6 +666,7 @@ class VS1053
     const uint8_t vs1053_chunk_size = 32 ;
     // SCI Register
     const uint8_t SCI_MODE          = 0x0 ;
+    const uint8_t SCI_STATUS        = 0x1 ;
     const uint8_t SCI_BASS          = 0x2 ;
     const uint8_t SCI_CLOCKF        = 0x3 ;
     const uint8_t SCI_AUDATA        = 0x5 ;
@@ -857,10 +859,12 @@ bool VS1053::testComm ( const char *header )
   // If DREQ is low, there is problably no VS1053 connected.  Pull the line HIGH
   // in order to prevent an endless loop waiting for this signal.  The rest of the
   // software will still work, but readbacks from VS1053 will fail.
-  int       i ;                                         // Loop control
-  uint16_t  r1, r2, cnt = 0 ;
-  uint16_t  delta = 300 ;                               // 3 for fast SPI
-
+  int            i ;                                    // Loop control
+  uint16_t       r1, r2, cnt = 0 ;
+  uint16_t       delta = 300 ;                          // 3 for fast SPI
+  const uint16_t vstype[] = { 1001, 1011, 1002, 1003,   // Possible chip versions
+                              1053, 1033, 0000, 1103 } ;
+  
   dbgprint ( header ) ;                                 // Show a header
   if ( !digitalRead ( dreq_pin ) )
   {
@@ -890,6 +894,15 @@ bool VS1053::testComm ( const char *header )
     }
   }
   okay = ( cnt == 0 ) ;                                 // True if working correctly
+  // Further testing: is it the right chip?
+  r1 = ( read_register ( SCI_STATUS ) >> 4 ) & 0x7 ;    // Read status to get the version
+  if ( r1 !=  4 )                                       // Version 4 is a genuine VS1053
+  {
+    dbgprint ( "This is not a VS1053, "                 // Report the wrong chip
+               "but a VS%d instead!",
+               vstype[r1] ) ;
+    okay = false ;
+  }
   return ( okay ) ;                                     // Return the result
 }
 
@@ -994,14 +1007,14 @@ void VS1053::stopSong()
   output_enable ( false ) ;                             // Disable amplifier through shutdown pin(s)
   delay ( 10 ) ;
   write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_CANCEL ) ) ;
-  for ( i = 0 ; i < 200 ; i++ )
+  for ( i = 0 ; i < 20 ; i++ )
   {
     sdi_send_fillers ( 32 ) ;
-    modereg = read_register ( SCI_MODE ) ;  // Read status
-    if ( ( modereg & _BV ( SM_CANCEL ) ) == 0 )
+    modereg = read_register ( SCI_MODE ) ;              // Read mode status
+    if ( ( modereg & _BV ( SM_CANCEL ) ) == 0 )         // SM_CANCEL will be cleared when finished
     {
       sdi_send_fillers ( 2052 ) ;
-      //dbgprint ( "Song stopped correctly after %d msec", i * 10 ) ;
+      dbgprint ( "Song stopped correctly after %d msec", i * 10 ) ;
       return ;
     }
     delay ( 10 ) ;
