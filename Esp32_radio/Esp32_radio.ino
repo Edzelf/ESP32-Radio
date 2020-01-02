@@ -444,6 +444,8 @@ sv bool           longclick = false ;                    // True if longclick de
 enum enc_menu_t { VOLUME, PRESET, TRACK } ;              // State for rotary encoder menu
 enc_menu_t        enc_menu_mode = VOLUME ;               // Default is VOLUME mode
 
+int VolumeStep = 5;                                      // Step for changing Volume by Rotary Encoder
+
 //
 struct progpin_struct                                    // For programmable input pins
 {
@@ -4343,17 +4345,17 @@ void chk_enc()
   switch ( enc_menu_mode )                                    // Which mode (VOLUME, PRESET, TRACK)?
   {
     case VOLUME :
-      if ( ( ini_block.reqvol + rotationcount ) < 0 )         // Limit volume
+      if ( ( ini_block.reqvol + (rotationcount * VolumeStep)) < 0 )         // Limit volume
       {
         ini_block.reqvol = 0 ;                                // Limit to normal values
       }
-      else if ( ( ini_block.reqvol + rotationcount ) > 100 )
+      else if ( ( ini_block.reqvol + (rotationcount * VolumeStep) ) > 100 )
       {
         ini_block.reqvol = 100 ;                              // Limit to normal values
       }
       else
       {
-        ini_block.reqvol += rotationcount ;
+        ini_block.reqvol += rotationcount * VolumeStep;
       }
       muteflag = false ;                                      // Mute off
       break ;
