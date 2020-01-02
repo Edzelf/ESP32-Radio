@@ -63,6 +63,7 @@ bool dsp_begin()
   return ( tft != NULL ) ;
 }
 
+int VolumeBarHeight = 5;
 
 //**************************************************************************************************
 //                                      D I S P L A Y B A T T E R Y                                *
@@ -120,10 +121,10 @@ void displayvolume()
     {
       oldvol = newvol ;                                 // Remember for next compare
       pos = map ( newvol, 0, 100, 0, dsp_getwidth() ) ; // Compute position on TFT
-      dsp_fillRect ( 0, dsp_getheight() - 2,
-                     pos, 2, RED ) ;                    // Paint red part
-      dsp_fillRect ( pos, dsp_getheight() - 2,
-                     dsp_getwidth() - pos, 2, GREEN ) ; // Paint green part
+      dsp_fillRect ( 0, dsp_getheight() - VolumeBarHeight,
+                     pos, VolumeBarHeight, RED ) ;                    // Paint red part
+      dsp_fillRect ( pos, dsp_getheight() - VolumeBarHeight,
+                     dsp_getwidth() - pos, VolumeBarHeight, GREEN ) ; // Paint green part
     }
   }
 }
@@ -167,4 +168,3 @@ void displaytime ( const char* str, uint16_t color )
     }
   }
 }
-
