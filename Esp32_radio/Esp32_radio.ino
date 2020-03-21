@@ -238,7 +238,7 @@ void        playtask ( void * parameter ) ;       // Task to play the stream
 void        spftask ( void * parameter ) ;        // Task for special functions
 void        gettime() ;
 void        reservepin ( int8_t rpinnr ) ;
-
+void        scan_content_length ( const char* metalinebf );
 
 //**************************************************************************************************
 // Several structs.                                                                                *
