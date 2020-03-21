@@ -1,5 +1,9 @@
 for PlatformIO
 
+Delete Esp32_radio.ino file when used in the PlatformIO.
+
+Delete Esp32_radio.cpp file when used in the ArduinoIDE.
+
 errors in ArduinoOTA when compiling? just download lib from https://github.com/espressif/arduino-esp32/tree/master/libraries/ArduinoOTA 
 and place it in -.pio\libdeps\nodemcu-32s\ArduinoOTA
 
