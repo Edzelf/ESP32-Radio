@@ -2,6 +2,8 @@ for PlatformIO
 
 errors in ArduinoOTA when compiling? just download lib from https://github.com/espressif/arduino-esp32/tree/master/libraries/ArduinoOTA 
 and place it in -.pio\libdeps\nodemcu-32s\ArduinoOTA
+
+
 ---
 # ESP32-Radio
 Internet radio based on ESP32, VS1053 and a TFT screen.  Will compile in Arduino IDE.
