@@ -1,4 +1,3 @@
-//***************************************************************************************************
 //*  ESP32_Radio -- Webradio receiver for ESP32, VS1053 MP3 module and optional display.            *
 //*                 By Ed Smallenburg.                                                              *
 //***************************************************************************************************
@@ -148,11 +147,12 @@
 // 15-05-2019, ES: MAX number of presets as a defined constant.
 // 16-12-2019, ES: Modify of claimSPI() function for debugability.
 // 21-12-2019, ES: Check chip version.
+// 23-03-2020, ES: Allow playlists on SD card.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Sat, 21 Dec 2019 09:30:00 GMT"
+#define VERSION     "Mon, 23 Mar 2020 16:10:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -1248,7 +1248,7 @@ void claimSPI ( const char* p )
 
   while ( xSemaphoreTake ( SPIsem, ctry ) != pdTRUE  )      // Claim SPI bus
   {
-    if ( count++ > 10 )
+    if ( count++ > 25 )
     {
       dbgprint ( "SPI semaphore not taken within %d ticks by CPU %d, id %s",
                  count * ctry,
@@ -1545,11 +1545,12 @@ String getSDfilename ( String nodeID )
       claimSPI ( "sdopenxt" ) ;                            // Claim SPI bus
       file = root.openNextFile() ;                         // Get next directory entry
       releaseSPI() ;                                       // Release SPI bus
-      delay ( 10 ) ;                                       // Allow playtask
+      delay ( 5 ) ;                                        // Allow playtask
     }
     p = file.name() ;                                      // Points to directory- or file name
   }
   res = String ( "localhost" ) + String ( p ) ;            // Format result
+  dbgprint ( "Selected file is %s", res.c_str() ) ;        // Show result
   return res ;                                             // Return full station spec
 }
 
@@ -1593,7 +1594,7 @@ int listsdtracks ( const char * dirname, int level = 0, bool send = true )
     }
   }
   oldfcount = fcount ;                                  // To see if files found in this directory
-  //dbgprint ( "SD directory is %s", dirname ) ;        // Show current directory
+  dbgprint ( "SD directory is %s", dirname ) ;          // Show current directory
   ldirname = strlen ( dirname ) ;                       // Length of dirname to remove from filename
   claimSPI ( "sdopen2" ) ;                              // Claim SPI bus
   root = SD.open ( dirname ) ;                          // Open the current directory level
@@ -1657,6 +1658,10 @@ int listsdtracks ( const char * dirname, int level = 0, bool send = true )
           cmdclient.print ( SD_outbuf ) ;               // Yes, send it
           SD_outbuf = String() ;                        // Clear buffer
         }
+      }
+      else if ( filename.endsWith ( ".m3u" ) )          // Is it an .m3u file?
+      {
+        dbgprint ( "Playlist %s", file.name() ) ;       // Yes, show
       }
     }
     if ( send )
@@ -2242,9 +2247,13 @@ void handle_ID3 ( String &path )
   String   albttl = String() ;                              // Album and title
 
   tftset ( 2, "Playing from local file" ) ;                 // Assume no ID3
-  p = (char*)path.c_str() + 1 ;                             // Point to filename
+  p = (char*)path.c_str() + 1 ;                             // Point to filename (after the slash)
   showstreamtitle ( p, true ) ;                             // Show the filename as title (middle part)
   mp3file = SD.open ( path ) ;                              // Open the file
+  if ( path.endsWith ( ".mu3" ) )                           // Is it a playlist?
+  {
+    return ;                                                // Yes, no ID's, but leave file open
+  }
   mp3file.read ( (uint8_t*)&ID3head, sizeof(ID3head) ) ;    // Read first part of ID3 info
   if ( strncmp ( ID3head.fid, "ID3", 3 ) == 0 )
   {
@@ -2324,18 +2333,39 @@ bool connecttofile()
 {
   String path ;                                           // Full file spec
 
+  stop_mp3client() ;                                      // Disconnect if still connected
   tftset ( 0, "ESP32 MP3 Player" ) ;                      // Set screen segment top line
   displaytime ( "" ) ;                                    // Clear time on TFT screen
+  datamode = DATA ;                                       // Assume to start in datamode
+  if ( host.endsWith ( ".m3u" ) )                         // Is it an m3u playlist?
+  {
+    playlist = host ;                                     // Save copy of playlist URL
+    datamode = PLAYLISTINIT ;                             // Yes, start in PLAYLIST mode
+    if ( playlist_num == 0 )                              // First entry to play?
+    {
+      playlist_num = 1 ;                                  // Yes, set index
+    }
+    dbgprint ( "Playlist request, entry %d", playlist_num ) ;
+  }
+  if ( mp3file )
+  {
+    while ( mp3file.available() )
+    {
+      mp3file.read() ;
+    }
+    dbgprint ( "Closed SD file" ) ;                       // TEST*TEST*TEST
+    mp3file.close() ;                                     // Be sure to close current file
+  }
   path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
   claimSPI ( "sdopen3" ) ;                                // Claim SPI bus
   handle_ID3 ( path ) ;                                   // See if there are ID3 tags in this file
-  mp3filelength = mp3file.available() ;                   // Get length
   releaseSPI() ;                                          // Release SPI bus
   if ( !mp3file )
   {
     dbgprint ( "Error opening file %s", path.c_str() ) ;  // No luck
     return false ;
   }
+  mp3filelength = mp3file.available() ;                   // Get length
   mqttpub.trigger ( MQTT_STREAMTITLE ) ;                  // Request publishing to MQTT
   icyname = "" ;                                          // No icy name yet
   chunked = false ;                                       // File not chunked
@@ -2629,7 +2659,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
 //**************************************************************************************************
 // Read the mp3 host from the preferences specified by the parameter.                              *
 // The host will be returned.                                                                      *
-// We search for "preset_x" or "preset_xx" or "preset_xxx".										   *
+// We search for "preset_x" or "preset_xx" or "preset_xxx".                       *
 //**************************************************************************************************
 String readhostfrompref ( int16_t preset )
 {
@@ -3283,8 +3313,8 @@ void getsettings()
 
   for ( i = 0 ; i < MAXPRESETS ; i++ )                   // Max number of presets
   {
-    statstr = readhostfrompref ( i ) ;   				         // Get the preset from NVS
-    if ( statstr != "" )								                 // Preset available?
+    statstr = readhostfrompref ( i ) ;                   // Get the preset from NVS
+    if ( statstr != "" )                                 // Preset available?
     {
       // Show just comment if available.  Otherwise the preset itself.
       inx = statstr.indexOf ( "#" ) ;                    // Get position of "#"
@@ -4462,15 +4492,15 @@ void mp3loop()
       {
         res = mp3client.read ( tmpbuff, maxchunk ) ;     // Read a number of bytes from the stream
       }
-      else
+    }
+    if ( maxchunk == 0 )
+    {
+      if ( datamode == PLAYLISTDATA )                  // End of playlist
       {
-        if ( datamode == PLAYLISTDATA )                  // End of playlist
-        {
-          playlist_num = 0 ;                             // And reset
-          dbgprint ( "End of playlist seen" ) ;
-          datamode = STOPPED ;
-          ini_block.newpreset++ ;                        // Go to next preset
-        }
+        playlist_num = 0 ;                             // And reset
+        dbgprint ( "End of playlist seen" ) ;
+        datamode = STOPPED ;
+        ini_block.newpreset++ ;                        // Go to next preset
       }
     }
     for ( int i = 0 ; i < res ; i++ )
@@ -4512,9 +4542,18 @@ void mp3loop()
       if ( av == 0 )                                     // End of mp3 data?
       {
         datamode = STOPREQD ;                            // End of local mp3-file detected
-        nodeID = selectnextSDnode ( SD_currentnode,
-                                    +1 ) ;               // Select the next file on SD
-        host = getSDfilename ( nodeID ) ;
+        if ( playlist_num )                              // Playing from playlist?
+        {
+          playlist_num++ ;                               // Yes, goto next item in playlist
+          datamode = PLAYLISTINIT ;
+          host = playlist ;
+        }
+        else
+        {
+          nodeID = selectnextSDnode ( SD_currentnode,
+                                      +1 ) ;             // Select the next file on SD
+          host = getSDfilename ( nodeID ) ;
+        }
         hostreq = true ;                                 // Request this host
       }
     }
@@ -4561,9 +4600,9 @@ void mp3loop()
     localfile = ( host.indexOf ( "localhost/" ) >= 0 ) ;
     if ( localfile )                                      // Play file from localhost?
     {
-      if ( connecttofile() )                              // Yes, open mp3-file
+      if ( ! connecttofile() )                            // Yes, open mp3-file
       {
-        datamode = DATA ;                                 // Start in DATA mode
+        datamode = STOPPED ;                              // Start in DATA mode
       }
     }
     else
@@ -4881,7 +4920,11 @@ void handlebyte_ch ( uint8_t b )
     // Sometimes this will only contain a single line
     metalinebfx = 0 ;                                  // Prepare for new line
     LFcount = 0 ;                                      // For detection end of header
-    datamode = PLAYLISTHEADER ;                        // Handle playlist data
+    datamode = PLAYLISTHEADER ;                        // Handle playlist header
+    if ( localfile )                                   // SD-card mode?
+    {
+      datamode = PLAYLISTDATA ;                        // Yes, no header here
+    }
     playlistcnt = 1 ;                                  // Reset for compare
     totalcount = 0 ;                                   // Reset totalcount
     clength = 0xFFFFFFFF ;                             // Content-length unknown
@@ -4985,7 +5028,21 @@ void handlebyte_ch ( uint8_t b )
         {
           host = metaline ;                            // Yes, set new host
         }
-        connecttohost() ;                              // Connect to it
+        if ( localfile )                               // SD card mode?
+        {
+          if ( ! metaline.startsWith ( "localhost" ) ) // Prepend "localhost" if missing
+          {
+            host = String ( "localhost/" ) + metaline ;
+          }
+          if ( ! connecttofile() )                     // Yes, connect to file
+          {
+            datamode = STOPPED ;                       // Error, stop!
+          }
+        }
+        else
+        {
+          connecttohost() ;                           // Connect to stream host
+        }
       }
       metalinebfx = 0 ;                                // Prepare for next line
       host = playlist ;                                // Back to the .m3u host
