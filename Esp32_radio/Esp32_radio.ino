@@ -149,11 +149,12 @@
 // 16-12-2019, ES: Modify of claimSPI() function for debugability.
 // 21-12-2019, ES: Check chip version.
 // 23-03-2020, ES: Allow playlists on SD card.
+// 25-03-2020, ES: End of playlist: start over.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Mon, 23 Mar 2020 16:10:00 GMT"
+#define VERSION     "Mon, 25 Mar 2020 10:45:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -452,7 +453,7 @@ struct progpin_struct                                    // For programmable inp
   bool           reserved ;                              // Reserved for connected devices
   bool           avail ;                                 // Pin is available for a command
   String         command ;                               // Command to execute when activated
-  // Example: "uppreset=1"
+                                                         // Example: "uppreset=1"
   bool           cur ;                                   // Current state, true = HIGH, false = LOW
 } ;
 
@@ -2391,7 +2392,7 @@ bool connectwifi()
 
   WifiInfo_t winfo ;                                    // Entry from wifilist
 
-  WiFi.disconnect() ;                                   // After restart the router could
+  WiFi.disconnect(true) ;                               // After restart the router could
   WiFi.softAPdisconnect(true) ;                         // still keep the old connection
   if ( wifilist.size()  )                               // Any AP defined?
   {
@@ -4496,12 +4497,12 @@ void mp3loop()
     }
     if ( maxchunk == 0 )
     {
-      if ( datamode == PLAYLISTDATA )                  // End of playlist
+      if ( datamode == PLAYLISTDATA )                    // End of playlist
       {
-        playlist_num = 0 ;                             // And reset
+        playlist_num = 1 ;                               // Yes, restart playlist
         dbgprint ( "End of playlist seen" ) ;
         datamode = STOPPED ;
-        ini_block.newpreset++ ;                        // Go to next preset
+        ini_block.newpreset++ ;                          // Go to next preset
       }
     }
     for ( int i = 0 ; i < res ; i++ )
@@ -5346,12 +5347,24 @@ const char* analyzeCmd ( const char* par, const char* val )
          relative )
     {
       datamode = STOPREQD ;                           // Force stop MP3 player
-      tmpstr = selectnextSDnode ( SD_currentnode,
-                                  ivalue ) ;          // Select the next or previous file on SD
-      host = getSDfilename ( tmpstr ) ;
+      if ( playlist_num )                             // In playlist mode?
+      {
+        playlist_num += ivalue ;                      // Set new entry number
+        if ( playlist_num <= 0 )                      // Limit number
+        {
+          playlist_num = 1 ;
+        }
+        host = playlist ;                             // Yes, prepare to read playlist
+      }
+      else
+      {
+        tmpstr = selectnextSDnode ( SD_currentnode,
+                                    ivalue ) ;        // Select the next or previous file on SD
+        host = getSDfilename ( tmpstr ) ;
+        sprintf ( reply, "Playing %s",                // Reply new filename
+                  host.c_str() ) ;
+      }
       hostreq = true ;                                // Request this host
-      sprintf ( reply, "Playing %s",                  // Reply new filename
-                host.c_str() ) ;
     }
     else
     {
