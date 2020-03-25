@@ -162,13 +162,14 @@
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
 // Define (just one) type of display.  See documentation.
-#define BLUETFT                        // Works also for RED TFT 128x160
+//#define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
 //#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
 //#define ILI9341                      // ILI9341 240*320
 //#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
-//
+#define ST7565                       // ST7565 128x64 B/W COG lcd module
+
 #include <nvs.h>
 #include <PubSubClient.h>
 #include <WiFiMulti.h>
@@ -240,7 +241,7 @@ void        playtask ( void * parameter ) ;       // Task to play the stream
 void        spftask ( void * parameter ) ;        // Task for special functions
 void        gettime() ;
 void        reservepin ( int8_t rpinnr ) ;
-
+void        scan_content_length ( const char* metalinebf );
 
 //**************************************************************************************************
 // Several structs.                                                                                *
@@ -343,7 +344,7 @@ struct keyname_t                                      // For keys in NVS
 
 enum display_t { T_UNDEFINED, T_BLUETFT, T_OLED,         // Various types of display
                  T_DUMMYTFT, T_LCD1602I2C, T_ILI9341,
-                 T_NEXTION } ;
+                 T_NEXTION, T_ST7565} ;
 
 enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,        // State for datastream
                   METADATA = 8, PLAYLISTINIT = 16,
@@ -1101,6 +1102,9 @@ VS1053* vs1053player ;
 #endif
 #ifdef NEXTION
 #include "NEXTION.h"                                     // For NEXTION display
+#endif
+#ifdef ST7565
+#include "ST7565.h"                                     // For ST7565 display
 #endif
 
 
@@ -3543,6 +3547,9 @@ void setup()
 #endif
 #if defined ( NEXTION )
   dbgprint ( dtyp, "NEXTION" ) ;
+#endif
+#if defined ( ST7565 )
+  dbgprint ( dtyp, "ST7565" ) ;
 #endif
   maintask = xTaskGetCurrentTaskHandle() ;               // My taskhandle
   SPIsem = xSemaphoreCreateMutex(); ;                    // Semaphore for SPI bus
