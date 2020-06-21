@@ -162,9 +162,10 @@
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
 // Define (just one) type of display.  See documentation.
-#define BLUETFT                        // Works also for RED TFT 128x160
+// #define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
-//#define DUMMYTFT                     // Dummy display
+// #define DUMMYTFT                     // Dummy display
+#define TM1637                       // 7 Segment Clock Element
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
 //#define ILI9341                      // ILI9341 240*320
 //#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
@@ -342,8 +343,9 @@ struct keyname_t                                      // For keys in NVS
 //**************************************************************************************************
 
 enum display_t { T_UNDEFINED, T_BLUETFT, T_OLED,         // Various types of display
-                 T_DUMMYTFT, T_LCD1602I2C, T_ILI9341,
-                 T_NEXTION } ;
+                 T_DUMMYTFT, T_TM1637, T_LCD1602I2C, T_ILI9341,
+                 T_NEXTION
+               } ;
 
 enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,        // State for datastream
                   METADATA = 8, PLAYLISTINIT = 16,
@@ -369,7 +371,7 @@ SemaphoreHandle_t SPIsem = NULL ;                        // For exclusive SPI us
 hw_timer_t*       timer = NULL ;                         // For timer
 char              timetxt[9] ;                           // Converted timeinfo
 char              cmd[130] ;                             // Command from MQTT or Serial
-uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream 
+uint8_t           tmpbuff[6000] ;                        // Input buffer for mp3 or data stream
 QueueHandle_t     dataqueue ;                            // Queue for mp3 datastream
 QueueHandle_t     spfqueue ;                             // Queue for special functions
 qdata_struct      outchunk ;                             // Data to queue
@@ -445,7 +447,9 @@ sv bool           tripleclick = false ;                  // True if triple click
 sv bool           longclick = false ;                    // True if longclick detected
 enum enc_menu_t { VOLUME, PRESET, TRACK } ;              // State for rotary encoder menu
 enc_menu_t        enc_menu_mode = VOLUME ;               // Default is VOLUME mode
-
+String clockdotstr = "" ;                                // State of the segment clock dots
+String clockbrightnesstr = "" ;                          // State of the segment clock brightness
+String overallstate = "" ;                               // Overall state (to report startup etc.)
 //
 struct progpin_struct                                    // For programmable input pins
 {
@@ -453,7 +457,7 @@ struct progpin_struct                                    // For programmable inp
   bool           reserved ;                              // Reserved for connected devices
   bool           avail ;                                 // Pin is available for a command
   String         command ;                               // Command to execute when activated
-                                                         // Example: "uppreset=1"
+  // Example: "uppreset=1"
   bool           cur ;                                   // Current state, true = HIGH, false = LOW
 } ;
 
@@ -550,7 +554,8 @@ touchpin_struct   touchpin[] =                           // Touch pins and progr
 //**************************************************************************************************
 // ID's for the items to publish to MQTT.  Is index in amqttpub[]
 enum { MQTT_IP,     MQTT_ICYNAME, MQTT_STREAMTITLE, MQTT_NOWPLAYING,
-       MQTT_PRESET, MQTT_VOLUME, MQTT_PLAYING, MQTT_PLAYLISTPOS
+       MQTT_PRESET, MQTT_VOLUME, MQTT_PLAYING, MQTT_PLAYLISTPOS,
+       MQTT_CLOCKDOTS, MQTT_CLOCKBRIGHTNESS, MQTT_STATE
      } ;
 enum { MQSTRING, MQINT8, MQINT16 } ;                     // Type of variable to publish
 
@@ -566,17 +571,20 @@ class mqttpubc                                           // For MQTT publishing
     // Publication topics for MQTT.  The topic will be pefixed by "PREFIX/", where PREFIX is replaced
     // by the the mqttprefix in the preferences.
   protected:
-    mqttpub_struct amqttpub[9] =                   // Definitions of various MQTT topic to publish
+    mqttpub_struct amqttpub[12] =                   // Definitions of various MQTT topic to publish
     { // Index is equal to enum above
-      { "ip",              MQSTRING, &ipaddress,        false }, // Definition for MQTT_IP
-      { "icy/name",        MQSTRING, &icyname,          false }, // Definition for MQTT_ICYNAME
-      { "icy/streamtitle", MQSTRING, &icystreamtitle,   false }, // Definition for MQTT_STREAMTITLE
-      { "nowplaying",      MQSTRING, &ipaddress,        false }, // Definition for MQTT_NOWPLAYING
-      { "preset" ,         MQINT8,   &currentpreset,    false }, // Definition for MQTT_PRESET
-      { "volume" ,         MQINT8,   &ini_block.reqvol, false }, // Definition for MQTT_VOLUME
-      { "playing",         MQINT8,   &playingstat,      false }, // Definition for MQTT_PLAYING
-      { "playlist/pos",    MQINT16,  &playlist_num,     false }, // Definition for MQTT_PLAYLISTPOS
-      { NULL,              0,        NULL,              false }  // End of definitions
+      { "ip",               MQSTRING, &ipaddress,         false }, // Definition for MQTT_IP
+      { "icy/name",         MQSTRING, &icyname,           false }, // Definition for MQTT_ICYNAME
+      { "icy/streamtitle",  MQSTRING, &icystreamtitle,    false }, // Definition for MQTT_STREAMTITLE
+      { "nowplaying",       MQSTRING, &ipaddress,         false }, // Definition for MQTT_NOWPLAYING
+      { "preset",           MQINT8,   &currentpreset,     false }, // Definition for MQTT_PRESET
+      { "volume",           MQINT8,   &ini_block.reqvol,  false }, // Definition for MQTT_VOLUME
+      { "playing",          MQINT8,   &playingstat,       false }, // Definition for MQTT_PLAYING
+      { "playlist/pos",     MQINT16,  &playlist_num,      false }, // Definition for MQTT_PLAYLISTPOS
+      { "clock/dots",       MQSTRING, &clockdotstr,       false }, // Definition for MQTT_CLOCKDOTS
+      { "clock/brightness", MQINT8,   &clockbrightnesstr, false }, // Definition for MQTT_CLOCKBRIGHTNESS
+      { "state",            MQSTRING, &overallstate,      false }, // Definition for MQTT_STATE
+      { NULL,               0,        NULL,               false }  // End of definitions
     } ;
   public:
     void          trigger ( uint8_t item ) ;                      // Trigger publishig for one item
@@ -865,8 +873,9 @@ bool VS1053::testComm ( const char *header )
   uint16_t       r1, r2, cnt = 0 ;
   uint16_t       delta = 300 ;                          // 3 for fast SPI
   const uint16_t vstype[] = { 1001, 1011, 1002, 1003,   // Possible chip versions
-                              1053, 1033, 0000, 1103 } ;
-  
+                              1053, 1033, 0000, 1103
+                            } ;
+
   dbgprint ( header ) ;                                 // Show a header
   if ( !digitalRead ( dreq_pin ) )
   {
@@ -1063,7 +1072,7 @@ void  VS1053::output_enable ( bool ena )               // Enable amplifier throu
 }
 
 
-void VS1053::AdjustRate ( long ppm2 )                  // Fine tune the data rate 
+void VS1053::AdjustRate ( long ppm2 )                  // Fine tune the data rate
 {
   write_register ( SCI_WRAMADDR, 0x1e07 ) ;
   write_register ( SCI_WRAM,     ppm2 ) ;
@@ -1098,6 +1107,9 @@ VS1053* vs1053player ;
 #endif
 #ifdef DUMMYTFT
 #include "Dummytft.h"                                    // For Dummy display
+#endif
+#ifdef TM1637
+#include "TM1637.h"                                    // For TM1637 display
 #endif
 #ifdef NEXTION
 #include "NEXTION.h"                                     // For NEXTION display
@@ -2177,10 +2189,10 @@ bool connecttohost()
     {
       auth = nvsgetstr ( "basicauth" ) ;            // Use basic authentication?
       if ( auth != "" )                             // Should be user:passwd
-      { 
-         auth = base64::encode ( auth.c_str() ) ;   // Encode
-         auth = String ( "Authorization: Basic " ) +
-                auth + String ( "\r\n" ) ;
+      {
+        auth = base64::encode ( auth.c_str() ) ;   // Encode
+        auth = String ( "Authorization: Basic " ) +
+               auth + String ( "\r\n" ) ;
       }
     }
     mp3client.print ( String ( "GET " ) +
@@ -2430,7 +2442,7 @@ bool connectwifi()
   }
   tftlog ( pfs ) ;                                      // Show IP
   delay ( 3000 ) ;                                      // Allow user to read this
-  tftlog ( "\f" ) ;                                     // Select new page if NEXTION 
+  tftlog ( "\f" ) ;                                     // Select new page if NEXTION
   return ( localAP == false ) ;                         // Return result of connection
 }
 
@@ -2489,7 +2501,7 @@ bool do_nextion_update ( uint32_t clength )
       }
       k = otaclient.read ( tmpbuff, k ) ;                      // Read a number of bytes from the stream
       dbgprint ( "TFT file, read %d bytes", k ) ;
-      nxtserial->write ( tmpbuff, k ) ;     
+      nxtserial->write ( tmpbuff, k ) ;
       while ( !nxtserial->available() )                        // Any input seen?
       {
         delay ( 20 ) ;
@@ -2520,7 +2532,7 @@ bool do_nextion_update ( uint32_t clength )
 bool do_software_update ( uint32_t clength )
 {
   bool res = false ;                                          // Update result
-  
+
   if ( Update.begin ( clength ) )                             // Update possible?
   {
     dbgprint ( "Begin OTA update, length is %d",
@@ -2572,13 +2584,13 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
   String      line ;                                            // Input header line
   String      lstmod = "" ;                                     // Last modified timestamp in NVS
   String      newlstmod ;                                       // Last modified from host
-  
+
   updatereq = false ;                                           // Clear update flag
   otastart() ;                                                  // Show something on screen
   stop_mp3client () ;                                           // Stop input stream
   lstmod = nvsgetstr ( lstmodkey ) ;                            // Get current last modified timestamp
   dbgprint ( "Connecting to %s for %s",
-              updatehost, binfile ) ;
+             updatehost, binfile ) ;
   if ( !otaclient.connect ( updatehost, 80 ) )                  // Connect to host
   {
     dbgprint ( "Connect to updatehost failed!" ) ;
@@ -2610,7 +2622,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
       break ;                                                   // Yes, get the OTA started
     }
     // Check if the HTTP Response is 200.  Any other response is an error.
-    if ( line.startsWith ( "HTTP/1.1" ) )                       // 
+    if ( line.startsWith ( "HTTP/1.1" ) )                       //
     {
       if ( line.indexOf ( " 200 " ) < 0 )
       {
@@ -2629,7 +2641,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
   {
     dbgprint ( "No new version available" ) ;                   // No, show reason
     otaclient.flush() ;
-    return ;    
+    return ;
   }
   if ( clength > 0 )
   {
@@ -2908,7 +2920,7 @@ String readprefs ( bool output )
               String ( "/*******" ) ;
       }
       cmd = String ( "" ) ;                                 // Do not analyze this
-      
+
     }
     else if ( strstr ( key, "mqttpasswd"  ) )               // Is it a MQTT password?
     {
@@ -3100,7 +3112,7 @@ void scanserial2()
           dbgprint ( "NEXTION command seen %02X %s",
                      cmd[0], cmd + 1 ) ;
           if ( cmd[0] == 0x70 )                    // Button pressed?
-          { 
+          {
             reply = analyzeCmd ( cmd + 1 ) ;       // Analyze command and handle it
             dbgprint ( reply ) ;                   // Result for debugging
           }
@@ -3538,6 +3550,10 @@ void setup()
 #if defined ( DUMMYTFT )
   dbgprint ( dtyp, "DUMMYTFT" ) ;
 #endif
+#if defined ( TM1637 )
+  dbgprint ( dtyp, "TM1637" ) ;
+  display.setBrightness(TMBRIGHT);                       // Set clock brightness
+#endif
 #if defined ( LCD1602I2C )
   dbgprint ( dtyp, "LCD1602" ) ;
 #endif
@@ -3660,7 +3676,7 @@ void setup()
     }
   }
   mk_lsan() ;                                            // Make a list of acceptable networks
-                                                         // in preferences.
+  // in preferences.
   WiFi.mode ( WIFI_STA ) ;                               // This ESP is a station
   WiFi.persistent ( false ) ;                            // Do not save SSID and password
   WiFi.disconnect() ;                                    // After restart router could still
@@ -3768,6 +3784,9 @@ void setup()
     NULL,                                                 // parameter of the task
     1,                                                    // priority of the task
     &xspftask ) ;                                         // Task handle to keep track of created task
+
+overallstate = "ESP32 Radio is up." ;
+mqttpub.trigger ( MQTT_STATE );
 }
 
 
@@ -4631,7 +4650,7 @@ void loop()
   if ( updatereq )                                  // Software update requested?
   {
     if ( displaytype == T_NEXTION )                 // NEXTION in use?
-    { 
+    {
       update_software ( "lstmodn",                  // Yes, update NEXTION image from remote image
                         UPDATEHOST, TFTFILE ) ;
     }
@@ -5333,6 +5352,29 @@ const char* analyzeCmd ( const char* par, const char* val )
   {
     muteflag = !muteflag ;                            // Request volume to zero/normal
   }
+  else if ( argument.indexOf ( "brightness" ) >= 0 )  // TM1637 brightness
+  { // set segment-display brightness
+    TMBRIGHT = ivalue;
+    display.setBrightness(ivalue);
+    sprintf ( reply, "Brightness is now %d",          // Reply new brightness
+              ivalue ) ;
+    clockbrightnesstr =  ivalue ;                    // MQTT payload
+    mqttpub.trigger ( MQTT_CLOCKBRIGHTNESS ) ;
+  }
+  else if ( argument.indexOf ( "dotson" ) >= 0 )     // TM1637 dots on
+  {
+    TMDOT = true;
+    clockdotstr = "on";
+    mqttpub.trigger ( MQTT_CLOCKDOTS ) ;
+  }
+  else if ( argument.indexOf ( "dotsoff" ) >= 0 )   // TM1637 dots off
+  {
+    TMDOT = false;
+    clockdotstr = "off";
+    mqttpub.trigger ( MQTT_CLOCKDOTS ) ;
+
+  }
+
   else if ( argument.indexOf ( "ir_" ) >= 0 )         // Ir setting?
   { // Do not handle here
   }
@@ -5396,6 +5438,14 @@ const char* analyzeCmd ( const char* par, const char* val )
     {
       hostreq = true ;                                // Request UNSTOP
     }
+  }
+  else if ( argument == "realresume" )                      // (un)Stop requested?
+  {
+    hostreq = true ;                                // Request UNSTOP
+  }
+  else if ( argument == "realstop" )                      // (un)Stop requested?
+  {
+    datamode = STOPREQD ;                           // Request STOP
   }
   else if ( ( value.length() > 0 ) &&
             ( ( argument == "mp3track" ) ||           // Select a track from SD card?
@@ -5625,10 +5675,11 @@ void displayinfo ( uint16_t inx )
 //**************************************************************************************************
 void gettime()
 {
+
   static int16_t delaycount = 0 ;                           // To reduce number of NTP requests
   static int16_t retrycount = 100 ;
 
-  if ( tft )                                                // TFT used?
+  if ( tft || TMSTATE )                                      // TFT or TM1637 used?
   {
     if ( timeinfo.tm_year )                                 // Legal time found?
     {
