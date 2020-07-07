@@ -5273,6 +5273,11 @@ const char* analyzeCmd ( const char* str )
 //   reset                                  // Restart the ESP32                                   *
 //   bat0       = 2318                      // ADC value for an empty battery                      *
 //   bat100     = 2916                      // ADC value for a fully charged battery               *
+//   brightness = <0..7>                    // Brighnetss of the TM1637 digits                     *
+//   dotson                                 // Turns the TM1637 colon on                           *
+//   dotsoff                                // Turns the TM1637 colon off                          *
+//   realstop                               // Stops playback (not a toggle)                       *
+//   realresume                             // Resumes playback (not a toggle)                     *
 //  Commands marked with "*)" are sensible during initialization only                              *
 //**************************************************************************************************
 const char* analyzeCmd ( const char* par, const char* val )
