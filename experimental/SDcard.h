@@ -15,13 +15,14 @@ String            SD_currentnode = "" ;                  // Node ID of song play
   #define selectnextSDnode(a,b)  String("")
   #define getSDfilename(a)       String("")
   #define listsdtracks(a,b,c)    0
-  #ifndef CH376
-    #define connecttofile()      false                   // Dummy connect to file
-  #endif
+  #define connecttofile_SD()      false                  // Dummy connect to file
 #else
 #include <FS.h>
 #include <SD.h>
 File              mp3file ;                              // File containing mp3 on SD card
+
+// forward declaration
+void        setdatamode ( datamode_t newmode ) ;
 
 //**************************************************************************************************
 //                                  S E L E C T N E X T S D N O D E                                *
@@ -86,7 +87,7 @@ String selectnextSDnode ( String curnod, int16_t delta )
 // Translate the nodeID of a track to the full filename that can be used as a station.             *
 // If nodeID is "0" choose a random nodeID.                                                        *
 //**************************************************************************************************
-String getSDfilename ( String nodeID )
+String getSDfilename ( String &nodeID )
 {
   String          res ;                                    // Function result
   File            root, file ;                             // Handle to root and directory entry
@@ -100,7 +101,6 @@ String getSDfilename ( String nodeID )
   SD_currentnode = nodeID ;                                // Save current node
   if ( nodeID == "0" )                                     // Empty parameter?
   {
-    dbgprint ( "getSDfilename random choice" ) ;
     rndnum = random ( SD_nodecount ) ;                     // Yes, choose a random node
     for ( i = 0 ; i < rndnum ; i++ )                       // Find the node ID
     {
@@ -386,16 +386,19 @@ bool connecttofile_SD()
   stop_mp3client() ;                                      // Disconnect if still connected
   tftset ( 0, "ESP32 MP3 Player" ) ;                      // Set screen segment top line
   displaytime ( "" ) ;                                    // Clear time on TFT screen
-  datamode = DATA ;                                       // Assume to start in datamode
   if ( host.endsWith ( ".m3u" ) )                         // Is it an m3u playlist?
   {
+    setdatamode ( DATA ) ;                                // Yes, start in PLAYLIST mode
     playlist = host ;                                     // Save copy of playlist URL
-    datamode = PLAYLISTINIT ;                             // Yes, start in PLAYLIST mode
     if ( playlist_num == 0 )                              // First entry to play?
     {
       playlist_num = 1 ;                                  // Yes, set index
     }
     dbgprint ( "Playlist request, entry %d", playlist_num ) ;
+  }
+  else
+  {
+    setdatamode ( DATA ) ;                                // Start in datamode 
   }
   if ( mp3file )
   {

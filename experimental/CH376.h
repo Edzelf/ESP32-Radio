@@ -3,25 +3,91 @@
 //
 int         USB_nodecount = 0 ;           // Number of nodes in SD_nodelist
 String      USB_nodelist ;
-bool        USB_dr ;                      // Drive ready
+bool        USB_okay = false ;            // True if USB drive ready
+String      USB_currentnode = "" ;        // Node ID of song playing ("0" if random)
+
+// forward declaration
+void        setdatamode ( datamode_t newmode ) ;
 
 #ifndef CH376
   #define setup_CH376()                   // Dummy initialize
   #define check_CH376()                   // Dummy check
-  #ifndef CH376
-    #define connecttofile()      false    // Dummy connect to file
-  #endif
+  #define connecttofile_USB()     false   // Dummy connect to file
+  #define getUSBfilename(a)       String("")
+  #define listusbtracks(a,b,c)    0
 #else
 #include <Ch376msc.h>                     // https://www.arduinolibraries.info/libraries/ch376msc
 Ch376msc* flashDrive = NULL ;             // Initialized by setup
+
+//**************************************************************************************************
+//                                      G E T U S B F I L E N A M E                                *
+//**************************************************************************************************
+// Translate the nodeID of a track to the full filename that can be used as a station.             *
+// If nodeID is "0" choose a random nodeID.                                                        *
+//**************************************************************************************************
+String getUSBfilename ( String &nodeID )
+{
+  String          res = "/" ;                              // Function result
+  String          file ;                                   // File- or directory name
+  uint16_t        n, i ;                                   // Current seqnr and counter in directory
+  int16_t         inx ;                                    // Position in nodeID
+  uint16_t        rndnum ;                                 // Random index in SD_nodelist
+  int             nodeinx = 0 ;                            // Points to node ID in SD_nodecount
+  int             nodeinx2 ;                               // Points to end of node ID in SD_nodecount
+
+  USB_currentnode = nodeID ;                               // Save current node
+  if ( nodeID == "0" )                                     // Empty parameter?
+  {
+    rndnum = random ( USB_nodecount ) ;                    // Yes, choose a random node
+    for ( i = 0 ; i < rndnum ; i++ )                       // Find the node ID
+    {
+      // Search to begin of the random node by skipping lines
+      nodeinx = USB_nodelist.indexOf ( "\n", nodeinx ) + 1 ;
+    }
+    nodeinx2 = USB_nodelist.indexOf ( "\n", nodeinx ) ;    // Find end of node ID
+    nodeID = USB_nodelist.substring ( nodeinx,
+                                     nodeinx2 ) ;          // Get node ID
+  }
+  dbgprint ( "getUSBfilename requested node ID is %s",     // Show requeste node ID
+             nodeID.c_str() ) ;
+  while ( ( n = nodeID.toInt() ) )                         // Next sequence in current level
+  {
+    inx = nodeID.indexOf ( "," ) ;                         // Find position of comma
+    if ( inx >= 0 )
+    {
+      nodeID = nodeID.substring ( inx + 1 ) ;              // Remove sequence in this level from nodeID
+    }
+    claimSPI ( "usbopen" ) ;                               // Claim SPI bus
+    flashDrive->closeFile() ;
+    flashDrive->resetFileList() ;
+    flashDrive->cd ( res.c_str(), false ) ;                // Dive into directory
+    for ( i = 1 ; i <=  n ; i++ )
+    {
+      flashDrive->listDir() ;                              // Get next directory entry
+    }
+    if ( ! res.endsWith ( "/" ) )                          // At root?
+    {
+      res += String ( "/" ) ;                              // No, add extra slash
+    }
+    file = flashDrive->getFileName() ;                     // Get filename
+    file.trim() ;                                          // Remove trailing spaces
+    res += file ;                                          // Points to directory- or file name
+    releaseSPI() ;                                         // Release SPIU claim
+  }
+  res = String ( "localhost" ) + res ;                     // Format result
+  dbgprint ( "Selected file is %s", res.c_str() ) ;        // Show result
+  return res ;                                             // Return full station spec
+}
+
 
 //**************************************************************************************************
 //                                  H A N D L E _ I D 3 _ U S B                                    *
 //**************************************************************************************************
 // Check file on USB drive for ID3 tags and use them to display some info.                         *
 // Extended headers are not parsed.                                                                *
+// SPI bus must be claimed before calling this function.                                           *
 //**************************************************************************************************
-void handle_ID3_USB ( String &path )
+void handle_ID3_USB ( String path )
 {
   char*  p ;                                                // Pointer to filename
   struct ID3head_t                                          // First part of ID3 info
@@ -133,9 +199,11 @@ void handle_ID3_USB ( String &path )
     tftset ( 1, albttl ) ;                                  // Show album and title
   }
   flashDrive->closeFile() ;                                 // Close the file
+  flashDrive->resetFileList() ;                             // You never know
   flashDrive->cd ( dir.c_str(), false ) ;                   // Change to this directory
   flashDrive->setFileName ( filename.c_str() ) ;            // Set filename
   flashDrive->openFile() ;                                  // And open the file again
+  dbgprint ( "End of ID3 info" ) ;
 }
 
 
@@ -152,16 +220,19 @@ bool connecttofile_USB()
   stop_mp3client() ;                                      // Disconnect if still connected
   tftset ( 0, "ESP32 MP3 Player" ) ;                      // Set screen segment top line
   displaytime ( "" ) ;                                    // Clear time on TFT screen
-  datamode = DATA ;                                       // Assume to start in datamode
   if ( host.endsWith ( ".m3u" ) )                         // Is it an m3u playlist?
   {
     playlist = host ;                                     // Save copy of playlist URL
-    datamode = PLAYLISTINIT ;                             // Yes, start in PLAYLIST mode
+    setdatamode ( PLAYLISTINIT ) ;                        // Yes, start in PLAYLIST mode
     if ( playlist_num == 0 )                              // First entry to play?
     {
       playlist_num = 1 ;                                  // Yes, set index
     }
     dbgprint ( "Playlist request, entry %d", playlist_num ) ;
+  }
+  else
+  {
+    setdatamode ( DATA ) ;                                // Start in datamode 
   }
   flashDrive->closeFile() ;                               // Sure to close previous file
   path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
@@ -210,14 +281,15 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
   uint8_t         res ;                                 // Result cd
   uint8_t         attr ;                                // File attribute
   
-  dbgprint ( "List dirname %s, level %d", dirname, level ) ;
+  //dbgprint ( "List dirname %s, level %d",
+  //           dirname, level ) ;
   if ( strcmp ( dirname, "/" ) == 0 )                   // Are we at the root directory?
   {
     fcount = 0 ;                                        // Yes, reset count
     memset ( USB_node, 0, sizeof(USB_node) ) ;          // And sequence counters
     USB_outbuf = String() ;                             // And output buffer
     USB_nodelist = String() ;                           // And nodelist
-    if ( !USB_dr )                                      // See if known card
+    if ( !USB_okay )                                    // See if drive ready
     {
       if ( send )
       {
@@ -227,57 +299,44 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
     }
   }
   oldfcount = fcount ;                                  // To see if files found in this directory
-  dbgprint ( "USB directory is <%s>", dirname ) ;       // Show current directory
+  //dbgprint ( "USB directory is <%s>", dirname ) ;     // Show current directory
   claimSPI ( "USB_1" ) ;                                // Claim SPI bus
   flashDrive->closeFile() ;
   flashDrive->resetFileList() ;
   res = flashDrive->cd ( dirname, false ) ;             // Dive into directory
   releaseSPI() ;                                        // Release SPI bus
-  //if ( !root || !root.isDirectory() )                 // Success?
-  //{
-  //  dbgprint ( "%s is not a directory or not root",     // No, print debug message
-  //             dirname ) ;
-  //  return fcount ;                                     // and return
-  //}
   while ( true )                                        // Find all (mp3) files
   {
     claimSPI ( "USB_2" ) ;                              // Claim SPI bus
-    if ( ( found = flashDrive->listDir() ) )            // Try to open next
-    {
-      attr = flashDrive->getFileAttrb() ;               // Get file attributes
-      filename = flashDrive->getFileName() ;            // File- or subdirectory name
-    }
-    else
-    {
-      attr = flashDrive->getFileAttrb() ;               // Get file attributes
-      filename = flashDrive->getFileName() ;            // File- or subdirectory name
-      dbgprint ( "ListDir fout, attr is 0x%X, filename is %s",
-                 attr, filename.c_str() ) ;
-      delay ( 1000 ) ;
-      found = true ; 
-    }
+    found = flashDrive->listDir() ;                     // Try to open next
+    attr = flashDrive->getFileAttrb() ;                 // Get file attributes
+    filename = flashDrive->getFileName() ;              // File- or subdirectory name
     releaseSPI() ;                                      // Release SPI bus
     if ( !found )
     {
       break ;                                           // End of list
     }
+    if ( attr & ( ATTR_HIDDEN | ATTR_SYSTEM ) )         // Skip hidden or system files/directories
+    {
+      continue ;
+    }
     USB_node[level]++ ;                                 // Set entry sequence of current level
     filename.trim() ;                                   // Remove trailing spaces
-    if ( attr == ATTR_DIRECTORY )                       // Is it a directory?
+    if ( attr & ATTR_DIRECTORY )                        // Is it a directory?
     {
       if ( filename.startsWith ( "." ) )                // Special entry?
       {
         continue ;                                      // Yes, skip it
       }
-      dbgprint ( "Directory %s found, attr = 0x%X",
-                 filename.c_str(),
-                 attr ) ;
+      //dbgprint ( "Directory %s found, attr = 0x%X",
+      //           filename.c_str(),
+      //           attr ) ;
       // ATTR_READ_ONLY = 0x01; //read-only file
-      // ATTR_HIDDEN = 0x02; //hidden file
-      // ATTR_SYSTEM = 0x04; //system file
+      // ATTR_HIDDEN    = 0x02; //hidden file
+      // ATTR_SYSTEM    = 0x04; //system file
       // ATTR_VOLUME_ID = 0x08; //Volume label
       // ATTR_DIRECTORY = 0x10; //subdirectory (folder)
-      // ATTR_ARCHIVE = 0x20; //archive (normal) file
+      // ATTR_ARCHIVE   = 0x20; //archive (normal) file
       if ( level < (USB_MAXDEPTH-1) )                   // Yes, dig deeper
       {
         if ( strlen ( dirname ) > 1 )                   // Are we in subdirectory?
@@ -288,24 +347,27 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
         listusbtracks ( filename.c_str(),               // Note: called recursively
                         level+1, send ) ;
         USB_node[level + 1] = 0 ;                       // Forget counter for one level up
-        dbgprint ( "Back to <%s>, level %d",
-                   dirname, level ) ;
+        //dbgprint ( "Back to <%s>, level %d",
+        //           dirname, level ) ;
         claimSPI ( "USB_3" ) ;                          // Claim SPI bus
         res = flashDrive->cd ( dirname, false ) ;       // Back to parent directory
-        dbgprint ( "Skip %d entries", USB_node[level] ) ;
+        //dbgprint ( "Skip %d entries",
+        //           USB_node[level] ) ;
         for ( i = USB_node[level] ; i > 0 ; i-- )       // Skip already handled entries
         {
-          if ( flashDrive->listDir() )                  // Skip next file entry
-          {
-            dbgprint ( "Skip <%s>", flashDrive->getFileName() ) ;
-          }
+          flashDrive->listDir() ;                       // Skip next directory/file entry
         }
         releaseSPI() ;                                  // Release SPI bus
       }
     }
     else
     {
-      dbgprint ( "Found file <%s>", filename.c_str() ) ;
+      if ( attr & ( ATTR_HIDDEN | ATTR_SYSTEM ) )
+      {
+        continue ;                                      // Skip hidden and system files
+      }
+      //dbgprint ( "Found file <%s>, attr is 0x02X",
+      //           filename.c_str(), attr ) ;
       if ( filename.endsWith ( "MP3" ) )                // It is a file, but is it an MP3?
       {
         fcount++ ;                                      // Yes, count total number of MP3 files
@@ -321,19 +383,21 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
         if ( send )                                     // Need to add to string for webinterface?
         {
           USB_outbuf += tmpstr +                        // Form line for mp3play_html page
+                        String ( "/" ) +                // Node/file separation
                         filename +                      // Filename
                         String ( "\n" ) ;
         }
         USB_nodelist += tmpstr + String ( "\n" ) ;      // Add to nodelist
-        dbgprint ( "Track: %s",                         // Show debug info
-                   flashDrive->getFileName() ) ;
+        dbgprint ( "Track: %s/%s",
+                   dirname,                             // Show debug info
+                   filename.c_str() ) ;
         if ( USB_outbuf.length() > 1000 )               // Buffer full?
         {
           cmdclient.print ( USB_outbuf ) ;              // Yes, send it
           USB_outbuf = String() ;                       // Clear buffer
         }
       }
-      else if ( filename.endsWith ( "m3u" ) )           // Is it an .m3u file?
+      else if ( filename.endsWith ( "M3U" ) )           // Is it an .m3u file?
       {
         dbgprint ( "Playlist %s", filename.c_str() ) ;  // Yes, show
       }
@@ -349,10 +413,11 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
   }
   if ( USB_outbuf.length() )                            // Flush buffer if not empty
   {
-    cmdclient.print ( USB_outbuf ) ;                    // Filled, send it
+    cmdclient.print ( USB_outbuf ) ;                  // Filled, send it
     USB_outbuf = String() ;                             // Continue with empty buffer
   }
-  dbgprint ( "Return from listtracks, count is %d", fcount ) ;
+  //dbgprint ( "Return from listusbtracks, count is %d",
+  //           fcount ) ;
   return fcount ;                                       // Return number of MP3s (sofar)
 }
 
@@ -368,7 +433,6 @@ void setup_CH376()
 {
   char *p ;                                                  // Last debug string
 
-  
   if ( ( ini_block.ch376_cs_pin == 0  ) &&                   // CH376 configured?
        ( ini_block.ch376_int_pin = 0 ) )
   {
@@ -382,8 +446,8 @@ void setup_CH376()
                                 ini_block.ch376_int_pin ) ;  // Create an instant for CH376
   }
   flashDrive->init() ;                                       // Init the interface
-  USB_dr = flashDrive->driveReady() ;                        // Check drive in USB port
-  if ( USB_dr )                                              // Report accordingly
+  USB_okay = flashDrive->driveReady() ;                      // Check drive in USB port
+  if ( USB_okay )                                            // Report accordingly
   {
     dbgprint ( "Flash drive ready" ) ;
   }
@@ -393,7 +457,11 @@ void setup_CH376()
     tftlog ( p ) ;                                           // Show error on TFT as well
     return ;
   }
+  dbgprint ( "Locate mp3 files on USB drive, may take a while..." ) ;
+  tftlog ( "Read USB drive" ) ;
   USB_nodecount = listusbtracks ( "/", 0, false ) ;          // Build nodelist
+  p = dbgprint ( "%d tracks on USD", USB_nodecount ) ;
+  tftlog ( p ) ;                                             // Show number of tracks on TFT
 }
 
 
@@ -432,7 +500,6 @@ int read_USBDRIVE ( uint8_t* buf, uint32_t len )
   int nr ;                                             // Number of bytes read
   int n  ;                                             // Number of bytes to read
 
-  dbgprint ( "read_USBDRIVE-2" ) ;
   while ( ! flashDrive->getEOF() )                     // Do not pass EOF
   {
     if ( len > 255 )                                   // At least 255 bytes to read?
@@ -443,15 +510,14 @@ int read_USBDRIVE ( uint8_t* buf, uint32_t len )
     {
       n = len ;
     }
-    dbgprint ( "readraw, %d bytes", n ) ;
-
     nr = flashDrive->readRaw ( buf, n ) ;              // Try to read
-    //if ( nr != n )                                     // Check result
+    //if ( nr != n )                                   // Check result
     //{
-      dbgprint ( "Read USB error, nr = %d, "
-                 "should be %d", nr, n ) ; 
+    //  dbgprint ( "Read USB error, nr = %d, "
+    //             "should be %d", nr, n ) ; 
     //}
-    numbytes += nr ;                                   // Count total
+    numbytes += n ;                                    // Count total
+    buf += n ;                                         // Move buffer pointer
     len = len - n ;                                    // Reduce rest to read
     if ( len == 0 )                                    // Done?
     {

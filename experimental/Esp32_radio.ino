@@ -150,12 +150,12 @@
 // 21-12-2019, ES: Check chip version.
 // 23-03-2020, ES: Allow playlists on SD card.
 // 25-03-2020, ES: End of playlist: start over.
-// 27-05-2020, ES: Add CH376 support.
+// 09-07-2020, ES: Add CH376 support.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Wed, 27 May 2020 10:45:00 GMT"
+#define VERSION     "Thu, 09 Jul 2020 10:45:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -164,7 +164,7 @@
 //
 // Define type of local filesystem.  See documentation.
 #define CH376                          // For CXH376 support (reading files from USB stick)
-#define SDCARD                         // For SD card support (reading files from SD card)
+//#define SDCARD                         // For SD card support (reading files from SD card)
 // Define (just one) type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
@@ -356,14 +356,14 @@ struct keyname_t                                      // For keys in NVS
 // Items in ini_block can be changed by commands from webserver/MQTT/Serial.                       *
 //**************************************************************************************************
 
-enum display_t { T_UNDEFINED, T_BLUETFT, T_OLED,         // Various types of display
+enum display_t { T_UNDEFINED, T_BLUETFT, T_OLED,             // Various types of display
                  T_DUMMYTFT, T_LCD1602I2C, T_ILI9341,
                  T_NEXTION } ;
 
-enum datamode_t { INIT = 1, HEADER = 2, DATA = 4,        // State for datastream
-                  METADATA = 8, PLAYLISTINIT = 16,
-                  PLAYLISTHEADER = 32, PLAYLISTDATA = 64,
-                  STOPREQD = 128, STOPPED = 256
+enum datamode_t { INIT = 0x1, HEADER = 0x2, DATA = 0x4,      // State for datastream
+                  METADATA = 0x8, PLAYLISTINIT = 0x10,
+                  PLAYLISTHEADER = 0x20, PLAYLISTDATA = 0x40,
+                  STOPREQD = 0x80, STOPPED = 0x100
                 } ;
 
 // Global variables
@@ -958,8 +958,7 @@ void VS1053::begin()
     write_register ( SCI_CLOCKF, 6 << 12 ) ;              // Normal clock settings
     // multiplyer 3.0 = 12.2 MHz
     //SPI Clock to 4 MHz. Now you can set high speed SPI clock.
-    //VS1053_SPI = SPISettings ( 5000000, MSBFIRST, SPI_MODE0 ) ;
-    VS1053_SPI = SPISettings ( 2000000, MSBFIRST, SPI_MODE0 ) ;
+    VS1053_SPI = SPISettings ( 5000000, MSBFIRST, SPI_MODE0 ) ;
     write_register ( SCI_MODE, _BV ( SM_SDINEW ) | _BV ( SM_LINE1 ) ) ;
     testComm ( "Fast SPI, Testing VS1053 read/write registers again..." ) ;
     delay ( 10 ) ;
@@ -1832,12 +1831,9 @@ bool connecttofile()
 {
   if ( usb_sd == USB )                                // File system depends on this switch
   {
-    connecttofile_USB() ;                             // Use USB
+    return connecttofile_USB() ;                      // Use USB
   }
-  else
-  {
-    connecttofile_SD() ;                              // Use SD
-  }
+  return connecttofile_SD() ;                         // Use SD
 }
 
 
@@ -1849,10 +1845,8 @@ bool connecttofile()
 //**************************************************************************************************
 int read_FS ( uint8_t* buf, uint32_t len )
 {
-  dbgprint ( "readFS %d bytes", len ) ;
   if ( usb_sd == USB )                                // File system depends on this switch
   {
-    dbgprint ( "read_USBDRIVE" ) ;
     return read_USBDRIVE ( buf, len ) ;               // Use USB
   }
   return read_SDCARD ( buf, len ) ;                   // Use SD
@@ -1956,6 +1950,19 @@ void showstreamtitle ( const char *ml, bool full )
 
 
 //**************************************************************************************************
+//                                    S E T D A T A M O D E                                        *
+//**************************************************************************************************
+// Change the datamode and show in debug.                                                          *
+//**************************************************************************************************
+void setdatamode ( datamode_t newmode )
+{
+  dbgprint ( "Change datamode from 0x%03X to 0x%03X",
+             (int)datamode, (int)newmode ) ;
+  datamode = newmode ;
+}
+
+
+//**************************************************************************************************
 //                                    S T O P _ M P 3 C L I E N T                                  *
 //**************************************************************************************************
 // Disconnect from the server.                                                                     *
@@ -1992,12 +1999,12 @@ bool connecttohost()
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
   tftset ( 0, "ESP32-Radio" ) ;                     // Set screen segment text top line
   displaytime ( "" ) ;                              // Clear time on TFT screen
-  datamode = INIT ;                                 // Start default in metamode
+  setdatamode ( INIT ) ;                            // Start default in metamode
   chunked = false ;                                 // Assume not chunked
   if ( host.endsWith ( ".m3u" ) )                   // Is it an m3u playlist?
   {
     playlist = host ;                               // Save copy of playlist URL
-    datamode = PLAYLISTINIT ;                       // Yes, start in PLAYLIST mode
+    setdatamode ( PLAYLISTINIT ) ;                  // Yes, start in PLAYLIST mode
     if ( playlist_num == 0 )                        // First entry to play?
     {
       playlist_num = 1 ;                            // Yes, set index
@@ -3330,10 +3337,11 @@ void setup()
   setup_SDCARD() ;                                       // Set-up SD card (if configured)
   mk_lsan() ;                                            // Make a list of acceptable networks
                                                          // in preferences.
-  WiFi.mode ( WIFI_STA ) ;                               // This ESP is a station
-  WiFi.persistent ( false ) ;                            // Do not save SSID and password
   WiFi.disconnect() ;                                    // After restart router could still
-  delay ( 100 ) ;                                        // keep old connection
+  delay ( 500 ) ;                                        // keep old connection
+  WiFi.mode ( WIFI_STA ) ;                               // This ESP is a station
+  delay ( 500 ) ;                                        // ??
+  WiFi.persistent ( false ) ;                            // Do not save SSID and password
   listNetworks() ;                                       // Find WiFi networks
   readprefs ( false ) ;                                  // Read preferences
   tcpip_adapter_set_hostname ( TCPIP_ADAPTER_IF_STA,
@@ -3599,7 +3607,7 @@ void handlehttpreply()
           {
             if ( datamode != STOPPED )                      // Still playing?
             {
-              datamode = STOPREQD ;                         // Stop playing
+              setdatamode (  STOPREQD ) ;                   // Stop playing
             }
             sndstr += readprefs ( true ) ;                  // Read and send
           }
@@ -3616,11 +3624,11 @@ void handlehttpreply()
           {
             if ( datamode != STOPPED )                      // Still playing?
             {
-              datamode = STOPREQD ;                         // Stop playing
+              setdatamode ( STOPREQD ) ;                    // Stop playing
             }
             cmdclient.print ( sndstr ) ;                    // Yes, send header
             n = listfstracks ( "/", 0, true ) ;             // Handle it
-            dbgprint ( "%d tracks found on SD card", n ) ;
+            dbgprint ( "%d tracks on local drive", n ) ;
             return ;                                        // Do not send empty line
           }
           else if ( http_getcmd.startsWith ( "settings" ) ) // Is is a "Get settings" (like presets and tone)?
@@ -3796,7 +3804,7 @@ String xmlgethost  ( String mount )
 
   stop_mp3client() ; // Stop any current wificlient connections.
   dbgprint ( "Connect to new iHeartRadio host: %s", mount.c_str() ) ;
-  datamode = INIT ;                                   // Start default in metamode
+  setdatamode ( INIT ) ;                            // Start default in metamode
   chunked = false ;                                   // Assume not chunked
   sprintf ( tmpstr, xmlget, mount.c_str() ) ;         // Create a GET commmand for the request
   dbgprint ( "%s", tmpstr ) ;
@@ -3920,6 +3928,24 @@ void handleVolPub()
 }
 
 
+//**************************************************************************************************
+//                                     G E T F S F I L E N A M E                                   *
+//**************************************************************************************************
+// Get filename for a node ID.  Search on SD or USB.                                               *
+//**************************************************************************************************
+String getFSfilename ( String &nodeID )
+{
+  if ( ( usb_sd == USB ) && USB_okay )                 // File system depends on this switch
+  {
+    return getUSBfilename ( nodeID ) ;                 // like "localhost/........"
+  }
+  else if ( ( usb_sd == SDCARD ) && SD_okay )
+  {
+    return getSDfilename ( nodeID ) ;                  // like "localhost/........"
+  }
+  return String ( "" ) ;                               // Not found
+}
+
 
 //**************************************************************************************************
 //                                           C H K _ E N C                                         *
@@ -3933,6 +3959,7 @@ void chk_enc()
   static String  enc_filename ;                               // Filename of selected track
   String         tmp ;                                        // Temporary string
   int16_t        inx ;                                        // Position in string
+  String         rt = "0" ;                                   // NodeID for random track
 
   if ( enc_menu_mode != VOLUME )                              // In default mode?
   {
@@ -3973,7 +4000,7 @@ void chk_enc()
       // Stop playing as reading filenames saturates SD I/O.
       if ( datamode != STOPPED )
       {
-        datamode = STOPREQD ;                                 // Request STOP
+        setdatamode ( STOPREQD ) ;                            // Request STOP
       }
     }
   }
@@ -4023,7 +4050,7 @@ void chk_enc()
     dbgprint ( "Long click") ;
     if ( datamode != STOPPED )
     {
-      datamode = STOPREQD ;                                   // Request STOP, do not touch logclick flag
+      setdatamode ( STOPREQD ) ;                              // Request STOP, do not touch logclick flag
     }
     else
     {
@@ -4031,7 +4058,8 @@ void chk_enc()
       dbgprint ( "Long click detected" ) ;
       if ( get_FS_nodecount() )                               // Tracks on FS?
       {
-        host = getSDfilename ( "0" ) ;                        // Get random track
+        dbgprint ( "getFSfilename random choice" ) ;
+        host = getFSfilename ( rt ) ;                         // Get random track
         hostreq = true ;                                      // Request this host
       }
       muteflag = false ;                                      // Be sure muteing is off
@@ -4087,7 +4115,7 @@ void chk_enc()
     case TRACK :
       enc_nodeID = selectnextSDnode ( enc_nodeID,
                                       rotationcount ) ;       // Select the next file on SD
-      enc_filename = getSDfilename ( enc_nodeID ) ;           // Set new filename
+      enc_filename = getFSfilename ( enc_nodeID ) ;           // Set new filename
       tmp = enc_filename ;                                    // Copy for display
       dbgprint ( "Select %s", tmp.c_str() ) ;
       while ( ( inx = tmp.indexOf ( "/" ) ) >= 0 )            // Search for last slash
@@ -4171,7 +4199,7 @@ void mp3loop()
       {
         playlist_num = 1 ;                               // Yes, restart playlist
         dbgprint ( "End of playlist seen" ) ;
-        datamode = STOPPED ;
+        setdatamode ( STOPPED ) ;
         ini_block.newpreset++ ;                          // Go to next preset
       }
     }
@@ -4204,7 +4232,7 @@ void mp3loop()
     outqp = outchunk.buf ;                               // and pointer
     queuefunc ( QSTOPSONG ) ;                            // Queue a request to stop the song
     metaint = 0 ;                                        // No metaint known now
-    datamode = STOPPED ;                                 // Yes, state becomes STOPPED
+    setdatamode ( STOPPED ) ;                            // Yes, state becomes STOPPED
     return ;
   }
   if ( localfile )                                       // Playing from SD?
@@ -4213,18 +4241,18 @@ void mp3loop()
     {
       if ( av == 0 )                                     // End of mp3 data?
       {
-        datamode = STOPREQD ;                            // End of local mp3-file detected
+        setdatamode ( STOPREQD ) ;                       // End of local mp3-file detected
         if ( playlist_num )                              // Playing from playlist?
         {
           playlist_num++ ;                               // Yes, goto next item in playlist
-          datamode = PLAYLISTINIT ;
+          setdatamode ( PLAYLISTINIT ) ;
           host = playlist ;
         }
         else
         {
           nodeID = selectnextSDnode ( SD_currentnode,
                                       +1 ) ;             // Select the next file on SD
-          host = getSDfilename ( nodeID ) ;
+          host = getFSfilename ( nodeID ) ;
         }
         hostreq = true ;                                 // Request this host
       }
@@ -4234,7 +4262,7 @@ void mp3loop()
   {
     if ( datamode != STOPPED )                           // Yes, still busy?
     {
-      datamode = STOPREQD ;                              // Yes, request STOP
+      setdatamode ( STOPREQD ) ;                         // Yes, request STOP
     }
     else
     {
@@ -4274,7 +4302,7 @@ void mp3loop()
     {
       if ( ! connecttofile() )                            // Yes, open mp3-file
       {
-        datamode = STOPPED ;                              // Start in DATA mode
+        setdatamode ( STOPPED ) ;                         // Start in DATA mode
       }
     }
     else
@@ -4444,7 +4472,7 @@ void handlebyte_ch ( uint8_t b )
     {
       if ( --datacount == 0 )                          // End of datablock?
       {
-        datamode = METADATA ;
+        setdatamode ( METADATA ) ;
         metalinebfx = -1 ;                             // Expecting first metabyte (counter)
       }
     }
@@ -4457,7 +4485,7 @@ void handlebyte_ch ( uint8_t b )
     LFcount = 0 ;                                      // For detection end of header
     bitrate = 0 ;                                      // Bitrate still unknown
     dbgprint ( "Switch to HEADER" ) ;
-    datamode = HEADER ;                                // Handle header
+    setdatamode ( HEADER ) ;                           // Handle header
     totalcount = 0 ;                                   // Reset totalcount
     metalinebfx = 0 ;                                  // No metadata yet
     metalinebf[0] = '\0' ;
@@ -4528,7 +4556,7 @@ void handlebyte_ch ( uint8_t b )
         dbgprint ( "Switch to DATA, bitrate is %d"     // Show bitrate
                    ", metaint is %d",                  // and metaint
                    bitrate, metaint ) ;
-        datamode = DATA ;                              // Expecting data now
+        setdatamode ( DATA ) ;                         // Expecting data now
         datacount = metaint ;                          // Number of bytes before first metadata
         queuefunc ( QSTARTSONG ) ;                     // Queue a request to start song
       }
@@ -4583,8 +4611,8 @@ void handlebyte_ch ( uint8_t b )
         metaint = 0 ;                                  // Probably no metadata
       }
       datacount = metaint ;                            // Reset data count
-      //bufcnt = 0 ;                                     // Reset buffer count
-      datamode = DATA ;                                // Expecting data
+      //bufcnt = 0 ;                                   // Reset buffer count
+      setdatamode ( DATA ) ;                           // Expecting data
     }
   }
   if ( datamode == PLAYLISTINIT )                      // Initialize for receive .m3u file
@@ -4593,10 +4621,13 @@ void handlebyte_ch ( uint8_t b )
     // Sometimes this will only contain a single line
     metalinebfx = 0 ;                                  // Prepare for new line
     LFcount = 0 ;                                      // For detection end of header
-    datamode = PLAYLISTHEADER ;                        // Handle playlist header
     if ( localfile )                                   // SD-card mode?
     {
-      datamode = PLAYLISTDATA ;                        // Yes, no header here
+      setdatamode ( PLAYLISTDATA ) ;                   // Yes, no header here
+    }
+    else
+    {
+      setdatamode ( PLAYLISTHEADER ) ;                 // Handle playlist header
     }
     playlistcnt = 1 ;                                  // Reset for compare
     totalcount = 0 ;                                   // Reset totalcount
@@ -4624,7 +4655,7 @@ void handlebyte_ch ( uint8_t b )
         dbgprint ( "Switch to PLAYLISTDATA, "          // For debug
                    "search for entry %d",
                    playlist_num ) ;
-        datamode = PLAYLISTDATA ;                      // Expecting data now
+        setdatamode ( PLAYLISTDATA ) ;                 // Expecting data now
         mqttpub.trigger ( MQTT_PLAYLISTPOS ) ;         // Playlistposition to MQTT
         return ;
       }
@@ -4709,7 +4740,7 @@ void handlebyte_ch ( uint8_t b )
           }
           if ( ! connecttofile() )                     // Yes, connect to file
           {
-            datamode = STOPPED ;                       // Error, stop!
+            setdatamode ( STOPPED ) ;                  // Error, stop!
           }
         }
         else
@@ -5017,7 +5048,7 @@ const char* analyzeCmd ( const char* par, const char* val )
          ( ( datamode & DATA ) != 0 ) &&              // MP# player active?
          relative )
     {
-      datamode = STOPREQD ;                           // Force stop MP3 player
+      setdatamode ( STOPREQD ) ;                      // Force stop MP3 player
       if ( playlist_num )                             // In playlist mode?
       {
         playlist_num += ivalue ;                      // Set new entry number
@@ -5031,7 +5062,7 @@ const char* analyzeCmd ( const char* par, const char* val )
       {
         tmpstr = selectnextSDnode ( SD_currentnode,
                                     ivalue ) ;        // Select the next or previous file on SD
-        host = getSDfilename ( tmpstr ) ;
+        host = getFSfilename ( tmpstr ) ;
         sprintf ( reply, "Playing %s",                // Reply new filename
                   host.c_str() ) ;
       }
@@ -5050,7 +5081,7 @@ const char* analyzeCmd ( const char* par, const char* val )
         playlist_num = 0 ;                            // Absolute, reset playlist
         currentpreset = -1 ;                          // Make sure current is different
       }
-      datamode = STOPREQD ;                           // Force stop MP3 player
+      setdatamode ( STOPREQD ) ;                      // Force stop MP3 player
       sprintf ( reply, "Preset is now %d",            // Reply new preset
                 ini_block.newpreset ) ;
     }
@@ -5061,7 +5092,7 @@ const char* analyzeCmd ( const char* par, const char* val )
                       PLAYLISTHEADER | PLAYLISTDATA ) )
 
     {
-      datamode = STOPREQD ;                           // Request STOP
+      setdatamode ( STOPREQD ) ;                      // Request STOP
     }
     else
     {
@@ -5074,17 +5105,17 @@ const char* analyzeCmd ( const char* par, const char* val )
   {
     if ( argument.startsWith ( "mp3" ) )              // MP3 track to search for
     {
-      if ( !SD_okay )                                 // SD card present?
+      value = getFSfilename ( value ) ;               // like "localhost/........"
+      if ( value.length() == 0 )                      // Found?
       {
-        strcpy ( reply, "Command not accepted!" ) ;   // Error reply
+        strcpy ( reply, "Command not accepted!" ) ;   // No, error reply
         return reply ;
       }
-      value = getSDfilename ( value ) ;               // like "localhost/........"
     }
     if ( datamode & ( HEADER | DATA | METADATA | PLAYLISTINIT |
                       PLAYLISTHEADER | PLAYLISTDATA ) )
     {
-      datamode = STOPREQD ;                           // Request STOP
+      setdatamode ( STOPREQD ) ;                      // Request STOP
     }
     host = value ;                                    // Save it for storage and selection later
     hostreq = true ;                                  // Force this station as new preset
@@ -5134,6 +5165,11 @@ const char* analyzeCmd ( const char* par, const char* val )
     dbgprint ( "ADC reading is %d", adcval ) ;
     dbgprint ( "scaniocount is %d", scaniocount ) ;
     dbgprint ( "Max. mp3_loop duration is %d", max_mp3loop_time ) ;
+    dbgprint ( "Datamode is %02X", (int)datamode ) ;
+    if ( localfile )
+    {
+      dbgprint ( "localfile is true" ) ;
+    }
     max_mp3loop_time = 0 ;                            // Start new check
   }
   // Commands for bass/treble control
