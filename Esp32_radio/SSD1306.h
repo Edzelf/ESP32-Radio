@@ -372,7 +372,6 @@ void SSD1306::fillRect ( uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t col
 //***********************************************************************************************
 SSD1306::SSD1306 ( uint8_t sda, uint8_t scl )
 {
-  esp_err_t        espRc ;
   i2c_cmd_handle_t cmd ;
 
   ssdbuf = (page_struct*) malloc ( 8 * sizeof(page_struct) ) ;  // Create buffer for screen
@@ -397,7 +396,7 @@ SSD1306::SSD1306 ( uint8_t sda, uint8_t scl )
   i2c_master_write_byte ( cmd, 255, true ) ;                      // to 255
   i2c_master_write_byte ( cmd, OLED_CMD_DISPLAY_ON, true ) ;
   i2c_master_stop ( cmd ) ;
-  espRc = i2c_master_cmd_begin ( I2C_NUM_0, cmd, 10 / portTICK_PERIOD_MS ) ;
+  i2c_master_cmd_begin ( I2C_NUM_0, cmd, 10 / portTICK_PERIOD_MS ) ;
   i2c_cmd_link_delete ( cmd ) ;
   clear() ;                                                       // Clear the display
 }

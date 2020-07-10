@@ -105,17 +105,17 @@ void displayvolume()
   {
     static uint8_t oldvol = 0 ;                         // Previous volume
     uint8_t        newvol ;                             // Current setting
-    uint16_t       pos ;                                // Positon of volume indicator
+    uint16_t       len ;                                // Length of volume indicator in pixels
 
     newvol = vs1053player->getVolume() ;                // Get current volume setting
     if ( newvol != oldvol )                             // Volume changed?
     {
       oldvol = newvol ;                                 // Remember for next compare
-      pos = map ( newvol, 0, 100, 0, dsp_getwidth() ) ; // Compute position on TFT
+      len = map ( newvol, 0, 100, 0, dsp_getwidth() ) ; // Compute length on TFT
       dsp_fillRect ( 0, dsp_getheight() - 2,
-                     pos, 2, RED ) ;                    // Paint red part
-      dsp_fillRect ( pos, dsp_getheight() - 2,
-                     dsp_getwidth() - pos, 2, GREEN ) ; // Paint green part
+                     len, 2, RED ) ;                    // Paint red part
+      dsp_fillRect ( len, dsp_getheight() - 2,
+                     dsp_getwidth() - len, 2, GREEN ) ; // Paint green part
     }
   }
 }

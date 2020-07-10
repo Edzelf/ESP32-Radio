@@ -45,7 +45,7 @@ li a:hover, a.active {
 }
 
 .button {
-   width: 90px;
+   min-width: 80px;
    height: 30px;
    background-color: #128F76;
    border: none;
@@ -57,6 +57,7 @@ li a:hover, a.active {
    margin: 4px 2px;
    cursor: pointer;
    border-radius: 10px;
+   white-space: nowrap;
 }
 
 .buttonr {background-color: #D62C1A;}
