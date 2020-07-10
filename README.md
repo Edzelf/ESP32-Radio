@@ -8,7 +8,7 @@ Features:
 -	Can connect to thousands of Internet radio stations that broadcast MP3 or Ogg audio streams.
 - Can connect to a standalone mp3 file on a server.
 - Support for .m3u playlists.
-- Can play mp3 tracks from SD card.
+- Can play mp3 tracks from SD card or USB stick (CH376).
 -	Uses a minimal number of components; no Arduino required.
 -	Handles bitrates up to 320 kbps.
 -	Has a preset list of maximal 100 favorite radio stations in configuration file.
@@ -36,6 +36,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 10-jul-2020, Support for USB drive (CH376).
 - 23-mar-2020, Allow playlists  on SD card.
 - 21-dec-2019, Check for right (VS1053) CHIP.
 - 16-dec-2019, Better logging claimSPI for debug.
