@@ -89,31 +89,32 @@ String getUSBfilename ( String &nodeID )
 //**************************************************************************************************
 void handle_ID3_USB ( String path )
 {
-  char*  p ;                                                // Pointer to filename
-  struct ID3head_t                                          // First part of ID3 info
+  char*     p ;                                             // Pointer to filename
+  uint8_t   nb ;                                            // Number of bytes read
+  struct    ID3head_t                                       // First part of ID3 info
   {
     char    fid[3] ;                                        // Should be filled with "ID3"
     uint8_t majV, minV ;                                    // Major and minor version
     uint8_t hflags ;                                        // Headerflags
     uint8_t ttagsize[4] ;                                   // Total tag size
   } ID3head ;
-  uint8_t  exthsiz[4] ;                                     // Extended header size
-  uint32_t stx ;                                            // Ext header size converted
-  uint32_t sttg ;                                           // Total tagsize converted
-  uint32_t stg ;                                            // Size of a single tag
-  struct ID3tag_t                                           // Tag in ID3 info
+  uint8_t   exthsiz[4] ;                                    // Extended header size
+  uint32_t  stx ;                                           // Ext header size converted
+  uint32_t  sttg ;                                          // Total tagsize converted
+  uint32_t  stg ;                                           // Size of a single tag
+  struct    ID3tag_t                                        // Tag in ID3 info
   {
     char    tagid[4] ;                                      // Things like "TCON", "TYER", ...
     uint8_t tagsize[4] ;                                    // Size of the tag
     uint8_t tagflags[2] ;                                   // Tag flags
   } ID3tag ;
-  uint8_t  tmpbuf[4] ;                                      // Scratch buffer
-  uint8_t  tenc ;                                           // Text encoding
-  String   albttl = String() ;                              // Album and title
-  String   dir ;                                            // Directory from full path
-  String   filename ;                                       // filename from full path
-  int      inx ;                                            // For splitting full path
-  int      res ;
+  uint8_t   tmpbuf[4] ;                                     // Scratch buffer
+  uint8_t   tenc ;                                          // Text encoding
+  String    albttl = String() ;                             // Album and title
+  String    dir ;                                           // Directory from full path
+  String    filename ;                                      // filename from full path
+  int       inx ;                                           // For splitting full path
+  int       res ;
   
   tftset ( 2, "Playing from local file" ) ;                 // Assume no ID3
   inx = path.lastIndexOf ( "/" ) ;                          // Search for the last slash
@@ -133,7 +134,7 @@ void handle_ID3_USB ( String path )
     return ;                                                // Yes, no ID's, but leave file open
   }
   flashDrive->readRaw ( (uint8_t*)&ID3head,                 // Read first part of ID3 info
-                       sizeof(ID3head) ) ;
+                        sizeof(ID3head) ) ;
   if ( strncmp ( ID3head.fid, "ID3", 3 ) == 0 )
   {
     sttg = ssconv ( ID3head.ttagsize ) ;                    // Convert tagsize
@@ -148,8 +149,9 @@ void handle_ID3_USB ( String path )
     }
     while ( sttg > 10 )                                     // Now handle the tags
     {
-      sttg -= flashDrive->readRaw ( (uint8_t*)&ID3tag,
-                                   sizeof(ID3tag) ) ;       // Read first part of a tag
+      flashDrive->readRaw ( (uint8_t*)&ID3tag,
+                            sizeof(ID3tag) ) ;              // Read first part of a tag
+      sttg -= sizeof(ID3tag) ;
       if ( ID3tag.tagid[0] == 0 )                           // Reached the end of the list?
       {
         break ;                                             // Yes, quit the loop
@@ -157,20 +159,22 @@ void handle_ID3_USB ( String path )
       stg = ssconv ( ID3tag.tagsize ) ;                     // Convert size of tag
       if ( ID3tag.tagflags[1] & 0x08 )                      // Compressed?
       {
-        sttg -= flashDrive->readRaw ( tmpbuf, 4 ) ;         // Yes, ignore 4 bytes
+        flashDrive->readRaw ( tmpbuf, 4 ) ;                 // Yes, ignore 4 bytes
+        sttg -= 4 ;
         stg -= 4 ;                                          // Reduce tag size
       }
       if ( ID3tag.tagflags[1] & 0x044 )                     // Encrypted or grouped?
       {
-        sttg -= flashDrive->readRaw ( tmpbuf, 1 ) ;         // Yes, ignore 1 byte
+        flashDrive->readRaw ( tmpbuf, 1 ) ;                 // Yes, ignore 1 byte
+        sttg -- ;
         stg-- ;                                             // Reduce tagsize by 1
       }
       if ( stg > ( sizeof(metalinebf) + 2 ) )               // Room for tag?
       {
         break ;                                             // No, skip this and further tags
       }
-      sttg -= flashDrive->readRaw ( (uint8_t*)metalinebf,
-                                   stg ) ;                  // Read tag contents
+      flashDrive->readRaw ( (uint8_t*)metalinebf, stg ) ;   // Read tag contents
+      sttg -= stg ;
       metalinebf[stg] = '\0' ;                              // Add delimeter
       tenc = metalinebf[0] ;                                // First byte is encoding type
       if ( tenc == '\0' )                                   // Debug all tags with encoding 0
@@ -443,7 +447,8 @@ void setup_CH376()
   if ( flashDrive == NULL )
   {
     flashDrive = new Ch376msc ( ini_block.ch376_cs_pin,
-                                ini_block.ch376_int_pin ) ;  // Create an instant for CH376
+                                ini_block.ch376_int_pin,     // Create an instant for CH376
+                                SPI_SCK_MHZ(4) ) ;           // 4 Mhz SPI clock 
   }
   flashDrive->init() ;                                       // Init the interface
   USB_okay = flashDrive->driveReady() ;                      // Check drive in USB port
@@ -460,7 +465,7 @@ void setup_CH376()
   dbgprint ( "Locate mp3 files on USB drive, may take a while..." ) ;
   tftlog ( "Read USB drive" ) ;
   USB_nodecount = listusbtracks ( "/", 0, false ) ;          // Build nodelist
-  p = dbgprint ( "%d tracks on USD", USB_nodecount ) ;
+  p = dbgprint ( "%d tracks on USB", USB_nodecount ) ;
   tftlog ( p ) ;                                             // Show number of tracks on TFT
 }
 
@@ -493,11 +498,11 @@ void check_CH376()
 //                                       R E A D _ U S B D R I V E                                 *
 //**************************************************************************************************
 // Read a block of data from USB drive file.                                                       *
+// Due to a bug in the CH376 library we cannot check the number of byres read.                     *
 //**************************************************************************************************
 int read_USBDRIVE ( uint8_t* buf, uint32_t len )
 {
   int numbytes = 0 ;                                   // Number of bytes read total
-  int nr ;                                             // Number of bytes read
   int n  ;                                             // Number of bytes to read
 
   while ( ! flashDrive->getEOF() )                     // Do not pass EOF
@@ -510,12 +515,7 @@ int read_USBDRIVE ( uint8_t* buf, uint32_t len )
     {
       n = len ;
     }
-    nr = flashDrive->readRaw ( buf, n ) ;              // Try to read
-    //if ( nr != n )                                   // Check result
-    //{
-    //  dbgprint ( "Read USB error, nr = %d, "
-    //             "should be %d", nr, n ) ; 
-    //}
+    flashDrive->readRaw ( buf, n ) ;                   // Try to read
     numbytes += n ;                                    // Count total
     buf += n ;                                         // Move buffer pointer
     len = len - n ;                                    // Reduce rest to read
