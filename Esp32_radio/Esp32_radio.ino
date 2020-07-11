@@ -155,16 +155,16 @@
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Fri, 10 Jul 2020 12:30:00 GMT"
+#define VERSION     "Sat, 11 Jul 2020 11:45:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
 #define BINFILE     "/Arduino/Esp32_radio.ino.bin"      // Binary file name for update software
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
-// Define type of local filesystem.  See documentation.
+// Define type of local filesystem(s).  See documentation.
 #define CH376                          // For CXH376 support (reading files from USB stick)
-//#define SDCARD                         // For SD card support (reading files from SD card)
+#define SDCARD                         // For SD card support (reading files from SD card)
 // Define (just one) type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
@@ -258,7 +258,7 @@ uint32_t    ssconv ( const uint8_t* bytes ) ;
 //**************************************************************************************************
 //
 
-enum fs_type { USB, SDCARD } ;                        // SD or USB interface
+enum fs_type { FS_USB, FS_SD } ;                      // USB- or SD interface
 
 struct scrseg_struct                                  // For screen segments
 {
@@ -416,7 +416,7 @@ String            networks ;                             // Found networks in th
 uint16_t          mqttcount = 0 ;                        // Counter MAXMQTTCONNECTS
 int8_t            playingstat = 0 ;                      // 1 if radio is playing (for MQTT)
 int16_t           playlist_num = 0 ;                     // Nonzero for selection from playlist
-fs_type           usb_sd = USB ;                         // SD or USB interface
+fs_type           usb_sd = FS_USB ;                      // SD or USB interface
 uint32_t          mp3filelength ;                        // File length
 bool              localfile = false ;                    // Play from local mp3-file or not
 bool              chunked = false ;                      // Station provides chunked transfer
@@ -1829,7 +1829,7 @@ void IRAM_ATTR isr_enc_turn()
 //**************************************************************************************************
 String selectnextFSnode ( int16_t delta )
 {
-  if ( usb_sd == USB )                                // File system depends on this switch
+  if ( usb_sd == FS_USB )                             // File system depends on this switch
   {
     return selectnextUSBnode ( delta ) ;              // Use USB
   }
@@ -1845,7 +1845,7 @@ String selectnextFSnode ( int16_t delta )
 //**************************************************************************************************
 bool connecttofile()
 {
-  if ( usb_sd == USB )                                // File system depends on this switch
+  if ( usb_sd == FS_USB )                             // File system depends on this switch
   {
     return connecttofile_USB() ;                      // Use USB
   }
@@ -1861,7 +1861,7 @@ bool connecttofile()
 //**************************************************************************************************
 int read_FS ( uint8_t* buf, uint32_t len )
 {
-  if ( usb_sd == USB )                                // File system depends on this switch
+  if ( usb_sd == FS_USB )                             // File system depends on this switch
   {
     return read_USBDRIVE ( buf, len ) ;               // Use USB
   }
@@ -1876,7 +1876,7 @@ int read_FS ( uint8_t* buf, uint32_t len )
 //**************************************************************************************************
 int listfstracks ( const char* dirname, int level = 0, bool send = true )
 {
-  if ( usb_sd == USB )                                // File system depends on this switch
+  if ( usb_sd == FS_USB )                             // File system depends on this switch
   {
     return listusbtracks ( dirname, level, send ) ;   // Use USB
   }
@@ -1891,7 +1891,7 @@ int listfstracks ( const char* dirname, int level = 0, bool send = true )
 //**************************************************************************************************
 int get_FS_nodecount()
 {
-  if ( usb_sd == USB )                                // File system depends on this switch
+  if ( usb_sd == FS_USB )                             // File system depends on this switch
   {
     return USB_nodecount ;                            // Use USB
   }
@@ -1968,12 +1968,12 @@ void showstreamtitle ( const char *ml, bool full )
 //**************************************************************************************************
 //                                    S E T D A T A M O D E                                        *
 //**************************************************************************************************
-// Change the datamode and show in debug.                                                          *
+// Change the datamode and show in debug for testing.                                              *
 //**************************************************************************************************
 void setdatamode ( datamode_t newmode )
 {
-  dbgprint ( "Change datamode from 0x%03X to 0x%03X",
-             (int)datamode, (int)newmode ) ;
+  //dbgprint ( "Change datamode from 0x%03X to 0x%03X",
+  //           (int)datamode, (int)newmode ) ;
   datamode = newmode ;
 }
 
@@ -3951,11 +3951,11 @@ void handleVolPub()
 //**************************************************************************************************
 String getFSfilename ( String &nodeID )
 {
-  if ( ( usb_sd == USB ) && USB_okay )                 // File system depends on this switch
+  if ( ( usb_sd == FS_USB ) && USB_okay )              // File system depends on this switch
   {
     return getUSBfilename ( nodeID ) ;                 // like "localhost/........"
   }
-  else if ( ( usb_sd == SDCARD ) && SD_okay )
+  else if ( ( usb_sd == FS_SD ) && SD_okay )
   {
     return getSDfilename ( nodeID ) ;                  // like "localhost/........"
   }
@@ -4970,6 +4970,7 @@ const char* analyzeCmd ( const char* str )
 //   reset                                  // Restart the ESP32                                   *
 //   bat0       = 2318                      // ADC value for an empty battery                      *
 //   bat100     = 2916                      // ADC value for a fully charged battery               *
+//   fs         = USB or SD                 // Select local filesystem for MP# player mode.        *
 //  Commands marked with "*)" are sensible during initialization only                              *
 //**************************************************************************************************
 const char* analyzeCmd ( const char* par, const char* val )
@@ -5178,11 +5179,6 @@ const char* analyzeCmd ( const char* par, const char* val )
     dbgprint ( "ADC reading is %d", adcval ) ;
     dbgprint ( "scaniocount is %d", scaniocount ) ;
     dbgprint ( "Max. mp3_loop duration is %d", max_mp3loop_time ) ;
-    dbgprint ( "Datamode is %02X", (int)datamode ) ;
-    if ( localfile )
-    {
-      dbgprint ( "localfile is true" ) ;
-    }
     max_mp3loop_time = 0 ;                            // Start new check
   }
   // Commands for bass/treble control
@@ -5268,6 +5264,17 @@ const char* analyzeCmd ( const char* par, const char* val )
     else if ( argument.indexOf ( "0" ) == 3 )         // 0 percent value?
     {
       ini_block.bat0 = ivalue ;                       // Yes, set it
+    }
+  }
+  else if ( argument == "fs" )                        // Filesystem for MP3 player mode?
+  {
+    if ( value.equalsIgnoreCase ( "usb" ) )           // Yes, is it USB?
+    {
+      usb_sd = FS_USB ;                               // Yes, change FS setting to USB
+    }
+    else
+    {
+      usb_sd = FS_SD ;                                // Otherwise to SD
     }
   }
   else

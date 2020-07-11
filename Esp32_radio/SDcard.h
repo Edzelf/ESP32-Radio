@@ -19,7 +19,7 @@ String            SD_currentnode = "" ;                  // Node ID of song play
 #else
 #include <FS.h>
 #include <SD.h>
-File              mp3file ;                              // File containing mp3 on SD card
+File        mp3file ;                              // File containing mp3 on SD card
 
 // forward declaration
 void        setdatamode ( datamode_t newmode ) ;
@@ -443,6 +443,8 @@ void setup_SDCARD()
     else
     {
       SD_okay = ( SD.cardType() != CARD_NONE ) ;         // See if known card
+      usb_sd = FS_SD ;                                   // Set SD for MP3 player mode
+
       if ( !SD_okay )
       {
         p = dbgprint ( "No SD card attached" ) ;         // Card not readable

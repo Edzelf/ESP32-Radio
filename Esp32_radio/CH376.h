@@ -16,6 +16,7 @@ void        setdatamode ( datamode_t newmode ) ;
 #define getUSBfilename(a)       String("")
 #define listusbtracks(a,b,c)    0
 #define selectnextUSBnode(b)    String("")
+#define read_USBDRIVE(a,b)      0
 #else
 #include <Ch376msc.h>                     // https://www.arduinolibraries.info/libraries/ch376msc
 Ch376msc* flashDrive = NULL ;             // Initialized by setup
@@ -498,6 +499,7 @@ void setup_CH376()
     return ;
   }
   dbgprint ( "Start CH376" ) ;
+  usb_sd = FS_USB ;                                          // Set USB for MP3 player mode
   if ( flashDrive == NULL )
   {
     flashDrive = new Ch376msc ( ini_block.ch376_cs_pin,
