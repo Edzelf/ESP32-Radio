@@ -155,7 +155,7 @@
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Sat, 11 Jul 2020 11:45:00 GMT"
+#define VERSION     "Mon, 13 Jul 2020 12:30:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -5456,6 +5456,7 @@ void playtask ( void * parameter )
           vs1053player->setVolume ( 0 ) ;                           // Mute
           vs1053player->stopSong() ;                                // STOP, stop player
           releaseSPI() ;                                            // Release SPI bus
+          while ( xQueueReceive ( dataqueue, &inchunk, 0 ) ) ;      // Flush rest of queue
           vTaskDelay ( 500 / portTICK_PERIOD_MS ) ;                 // Pause for a short time
           break ;
         default:
