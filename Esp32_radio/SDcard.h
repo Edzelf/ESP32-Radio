@@ -292,6 +292,8 @@ void handle_ID3_SD ( String &path )
   uint8_t  tmpbuf[4] ;                                      // Scratch buffer
   uint8_t  tenc ;                                           // Text encoding
   String   albttl = String() ;                              // Album and title
+  bool      talb ;                                          // Tag is TALB (album title)
+  bool      tpe1 ;                                          // Tag is TPE1 (artist)
 
   tftset ( 2, "Playing from local file" ) ;                 // Assume no ID3
   p = (char*)path.c_str() + 1 ;                             // Point to filename (after the slash)
@@ -346,8 +348,9 @@ void handle_ID3_SD ( String &path )
         dbgprint ( "ID3 %s = %s", ID3tag.tagid,
                    metalinebf + 1 ) ;
       }
-      if ( ( strncmp ( ID3tag.tagid, "TALB", 4 ) == 0 ) ||  // Album title
-           ( strncmp ( ID3tag.tagid, "TPE1", 4 ) == 0 ) )   // or artist?
+      talb = ( strncmp ( ID3tag.tagid, "TALB", 4 ) == 0 ) ; // Album title
+      tpe1 = ( strncmp ( ID3tag.tagid, "TPE1", 4 ) == 0 ) ; // Artist?
+      if ( talb || tpe1 )                                   // Album title or artist?
       {
         albttl += String ( metalinebf + 1 ) ;               // Yes, add to string
         if ( displaytype == T_NEXTION )                     // NEXTION display?
@@ -358,10 +361,15 @@ void handle_ID3_SD ( String &path )
         {
           albttl += String ( "\n" ) ;                       // Add newline (1 character)
         }
+        if ( tpe1 )                                         // Artist tag?
+        {
+          icyname = String ( metalinebf + 1 ) ;             // Yes, save for status in webinterface
+        }
       }
       if ( strncmp ( ID3tag.tagid, "TIT2", 4 ) == 0 )       // Songtitle?
       {
         tftset ( 2, metalinebf + 1 ) ;                      // Yes, show title
+        icystreamtitle = String ( metalinebf + 1 ) ;        // For status in webinterface
       }
     }
     tftset ( 1, albttl ) ;                                  // Show album and title
@@ -417,7 +425,6 @@ bool connecttofile_SD()
   }
   mp3filelength = mp3file.available() ;                   // Get length
   mqttpub.trigger ( MQTT_STREAMTITLE ) ;                  // Request publishing to MQTT
-  icyname = "" ;                                          // No icy name yet
   chunked = false ;                                       // File not chunked
   metaint = 0 ;                                           // No metadata
   return true ;

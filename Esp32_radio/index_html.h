@@ -204,37 +204,51 @@ const char index_html[] PROGMEM = R"=====(
      }
    }
    
+   // Request current status.
+   function myRefresh()
+   {
+    httpGet ('status') ;
+    setTimeout(myRefresh,5000) ;
+   }
+
    // Fill preset list initially
    //
-   var i, sel, opt, lines, parts ;
-   var theUrl = "/?settings" + "&version=" + Math.random() ;
-   var xhr = new XMLHttpRequest() ;
-   xhr.onreadystatechange = function() {
-     if ( xhr.readyState == XMLHttpRequest.DONE )
-     {
-       lines = xhr.responseText.split ( "\n" ) ;
-       for ( i = 0 ; i < ( lines.length-1 ) ; i++ )
+   function onloadfunc()
+   {
+     var i, sel, opt, lines, parts ;
+     var theUrl = "/?settings" + "&version=" + Math.random() ;
+     var xhr = new XMLHttpRequest() ;
+     xhr.onreadystatechange = function() {
+       if ( xhr.readyState == XMLHttpRequest.DONE )
        {
-         sel = document.getElementById ( "preset" ) ;
-         parts = lines[i].split ( "=" ) ;
-         if ( parts[0].indexOf ( "preset_" ) == 0 )
+         lines = xhr.responseText.split ( "\n" ) ;
+         for ( i = 0 ; i < ( lines.length-1 ) ; i++ )
          {
-           opt = document.createElement ( "OPTION" ) ;
-           opt.value = parts[0].substring ( 7 ) ;
-           opt.text = parts[1] ;
-           sel.add( opt ) ;
+           sel = document.getElementById ( "preset" ) ;
+           parts = lines[i].split ( "=" ) ;
+           if ( parts[0].indexOf ( "preset_" ) == 0 )
+           {
+             opt = document.createElement ( "OPTION" ) ;
+             opt.value = parts[0].substring ( 7 ) ;
+             opt.text = parts[1] ;
+             sel.add( opt ) ;
+           }
+           if ( ( parts[0].indexOf ( "tone" ) == 0 ) ||
+                ( parts[0] == "preset" ) )
+           {
+             selectItemByValue ( parts[0], parts[1] ) ;
+           }
          }
-         if ( ( parts[0].indexOf ( "tone" ) == 0 ) ||
-              ( parts[0] == "preset" ) )
-         {
-           selectItemByValue ( parts[0], parts[1] ) ;
-         }
+         setTimeout(myRefresh,5000) ;
        }
      }
+     xhr.open ( "GET", theUrl, false ) ;
+     xhr.send() ;
    }
-   xhr.open ( "GET", theUrl, false ) ;
-   xhr.send() ;
-  </script>
+
+   window.onload = onloadfunc ;   // Run after page has been loaded
+ 
+ </script>
  </body>
 </html>
 <noscript>

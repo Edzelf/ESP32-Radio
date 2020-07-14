@@ -151,7 +151,6 @@ String getUSBfilename ( String &nodeID )
 void handle_ID3_USB ( String path )
 {
   char*     p ;                                             // Pointer to filename
-  uint8_t   nb ;                                            // Number of bytes read
   struct    ID3head_t                                       // First part of ID3 info
   {
     char    fid[3] ;                                        // Should be filled with "ID3"
@@ -175,7 +174,8 @@ void handle_ID3_USB ( String path )
   String    dir ;                                           // Directory from full path
   String    filename ;                                      // filename from full path
   int       inx ;                                           // For splitting full path
-  int       res ;
+  bool      talb ;                                          // Tag is TALB (album title)
+  bool      tpe1 ;                                          // Tag is TPE1 (artist)
 
   tftset ( 2, "Playing from local file" ) ;                 // Assume no ID3
   inx = path.lastIndexOf ( "/" ) ;                          // Search for the last slash
@@ -243,8 +243,9 @@ void handle_ID3_USB ( String path )
         dbgprint ( "ID3 %s = %s", ID3tag.tagid,
                    metalinebf + 1 ) ;
       }
-      if ( ( strncmp ( ID3tag.tagid, "TALB", 4 ) == 0 ) ||  // Album title
-           ( strncmp ( ID3tag.tagid, "TPE1", 4 ) == 0 ) )   // or artist?
+      talb = ( strncmp ( ID3tag.tagid, "TALB", 4 ) == 0 ) ; // Album title
+      tpe1 = ( strncmp ( ID3tag.tagid, "TPE1", 4 ) == 0 ) ; // Artist?
+      if ( talb || tpe1 )                                   // Album title or artist?
       {
         albttl += String ( metalinebf + 1 ) ;               // Yes, add to string
         if ( displaytype == T_NEXTION )                     // NEXTION display?
@@ -255,10 +256,15 @@ void handle_ID3_USB ( String path )
         {
           albttl += String ( "\n" ) ;                       // Add newline (1 character)
         }
+        if ( tpe1 )                                         // Artist tag?
+        {
+          icyname = String ( metalinebf + 1 ) ;             // Yes, save for status in webinterface
+        }
       }
       if ( strncmp ( ID3tag.tagid, "TIT2", 4 ) == 0 )       // Songtitle?
       {
         tftset ( 2, metalinebf + 1 ) ;                      // Yes, show title
+        icystreamtitle = String ( metalinebf + 1 ) ;        // For status in webinterface
       }
     }
     tftset ( 1, albttl ) ;                                  // Show album and title
@@ -313,7 +319,6 @@ bool connecttofile_USB()
   }
   mp3filelength = flashDrive->getFileSize() ;             // Get length
   mqttpub.trigger ( MQTT_STREAMTITLE ) ;                  // Request publishing to MQTT
-  icyname = "" ;                                          // No icy name yet
   chunked = false ;                                       // File not chunked
   metaint = 0 ;                                           // No metadata
   return true ;
@@ -341,9 +346,7 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
   String          filename ;                            // Copy of filename for lowercase test
   uint16_t        i ;                                   // Loop control to compute single node id
   String          tmpstr ;                              // Tijdelijke opslag node ID
-  const char*     p ;                                   // Points to filename in directory
   bool            found ;                               // Found directory entry
-  uint8_t         res ;                                 // Result cd
   uint8_t         attr ;                                // File attribute
 
   //dbgprint ( "List dirname %s, level %d",
@@ -368,7 +371,7 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
   claimSPI ( "USB_1" ) ;                                // Claim SPI bus
   flashDrive->closeFile() ;
   flashDrive->resetFileList() ;
-  res = flashDrive->cd ( dirname, false ) ;             // Dive into directory
+  flashDrive->cd ( dirname, false ) ;                   // Dive into directory
   releaseSPI() ;                                        // Release SPI bus
   while ( true )                                        // Find all (mp3) files
   {
@@ -415,7 +418,7 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
         //dbgprint ( "Back to <%s>, level %d",
         //           dirname, level ) ;
         claimSPI ( "USB_3" ) ;                          // Claim SPI bus
-        res = flashDrive->cd ( dirname, false ) ;       // Back to parent directory
+        flashDrive->cd ( dirname, false ) ;             // Back to parent directory
         //dbgprint ( "Skip %d entries",
         //           USB_node[level] ) ;
         for ( i = USB_node[level] ; i > 0 ; i-- )       // Skip already handled entries
@@ -486,8 +489,6 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
   //           fcount ) ;
   return fcount ;                                       // Return number of MP3s (sofar)
 }
-
-
 
 
 //***********************************************************************************************

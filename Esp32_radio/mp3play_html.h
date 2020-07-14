@@ -30,6 +30,11 @@ const char mp3play_html[] PROGMEM = R"=====(
    <button class="button" onclick="httpGet('downpreset=1', true)">PREV</button>
    <button class="button" onclick="httpGet('mp3track=0', true)">RANDOM</button>
    <button class="button" onclick="httpGet('uppreset=1', true)">NEXT</button>
+   <br>
+   <button class="button" onclick="httpGet('downvolume=2', false)">VOL-</button>
+   <button class="button" onclick="httpGet('upvolume=2', false)">VOL+</button>
+   <button class="button" onclick="httpGet('mute', false)">(un)MUTE</button>
+   <button class="button" onclick="httpGet('status', false)">STATUS</button>
    <br><br>
    <br>
    <input type="text" width="600px" size="120" id="resultstr" placeholder="Waiting for a command...."><br>
@@ -62,27 +67,40 @@ const char mp3play_html[] PROGMEM = R"=====(
     }
    }
 
+   // Request current status.
+   function myRefresh()
+   {
+    httpGet ('status',false) ;
+    setTimeout(myRefresh,5000) ;
+   }
+
    // Fill track list initially
    //
-   var i, select, opt, tracks, strparts ;
-   select = document.getElementById("seltrack") ;
-   var theUrl = "/?mp3list" ;
-   var xhr = new XMLHttpRequest() ;
-   xhr.onreadystatechange = function(){
-     if ( xhr.readyState == XMLHttpRequest.DONE )
-     {
-       tracks = xhr.responseText.split ( "\n" ) ;
-       for ( i = 0 ; i < ( tracks.length - 1 ) ; i++ ){
-         opt = document.createElement( "OPTION" ) ;
-         strparts = tracks[i].split ( "/" ) ;
-         opt.value = strparts[0] ;
-         opt.text = strparts[1] ;
-         select.add( opt ) ;
+   function onloadfunc()
+   {
+     var i, select, opt, tracks, strparts ;
+     select = document.getElementById("seltrack") ;
+     var theUrl = "/?mp3list" ;
+     var xhr = new XMLHttpRequest() ;
+     xhr.onreadystatechange = function(){
+       if ( xhr.readyState == XMLHttpRequest.DONE )
+       {
+         tracks = xhr.responseText.split ( "\n" ) ;
+         for ( i = 0 ; i < ( tracks.length - 1 ) ; i++ ){
+           opt = document.createElement( "OPTION" ) ;
+           strparts = tracks[i].split ( "/" ) ;
+           opt.value = strparts[0] ;
+           opt.text = strparts[1] ;
+           select.add(opt) ;
+         }
+         setTimeout(myRefresh,5000) ;
        }
      }
+     xhr.open("GET",theUrl,false) ;
+     xhr.send() ;
    }
-   xhr.open ( "GET", theUrl, false ) ;
-   xhr.send() ;
+
+    window.onload = onloadfunc ;   // Run after page has been loaded
   </script>
  </body>
 </html>
