@@ -36,6 +36,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 14-jul-2020, Dynamic status display in web interface.
 - 10-jul-2020, Support for USB drive (CH376).
 - 23-mar-2020, Allow playlists  on SD card.
 - 21-dec-2019, Check for right (VS1053) CHIP.
