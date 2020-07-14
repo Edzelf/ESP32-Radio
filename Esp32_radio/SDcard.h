@@ -109,24 +109,25 @@ String getSDfilename ( String &nodeID )
   }
   dbgprint ( "getSDfilename requested node ID is %s",      // Show requeste node ID
              nodeID.c_str() ) ;
-  while ( ( n = nodeID.toInt() ) )                         // Next sequence in current level
+  while ( ( n = nodeID.toInt() ) > 0 )                     // Next sequence in current level
   {
+    claimSPI ( "sdopen" ) ;                                // Claim SPI bus
+    root = SD.open ( p ) ;                                 // Open the directory (this level)
+    for ( i = 1 ; i <=  n ; i++ )
+    {
+      file = root.openNextFile() ;                         // Get next directory entry
+    }
+    releaseSPI() ;                                         // Release SPI bus
+    p = file.name() ;                                      // Points to directory- or file name
     inx = nodeID.indexOf ( "," ) ;                         // Find position of comma
     if ( inx >= 0 )
     {
       nodeID = nodeID.substring ( inx + 1 ) ;              // Remove sequence in this level from nodeID
     }
-    claimSPI ( "sdopen" ) ;                                // Claim SPI bus
-    root = SD.open ( p ) ;                                 // Open the directory (this level)
-    releaseSPI() ;                                         // Release SPI bus
-    for ( i = 1 ; i <=  n ; i++ )
+    else
     {
-      claimSPI ( "sdopenxt" ) ;                            // Claim SPI bus
-      file = root.openNextFile() ;                         // Get next directory entry
-      releaseSPI() ;                                       // Release SPI bus
-      delay ( 5 ) ;                                        // Allow playtask
+      break ;                                              // All levels handled
     }
-    p = file.name() ;                                      // Points to directory- or file name
   }
   res = String ( "localhost" ) + String ( p ) ;            // Format result
   dbgprint ( "Selected file is %s", res.c_str() ) ;        // Show result

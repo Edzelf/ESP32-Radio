@@ -155,7 +155,7 @@
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Mon, 13 Jul 2020 12:30:00 GMT"
+#define VERSION     "Tue, 14 Jul 2020 07:15:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates

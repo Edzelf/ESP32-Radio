@@ -101,17 +101,14 @@ String getUSBfilename ( String &nodeID )
     }
     nodeinx2 = USB_nodelist.indexOf ( "\n", nodeinx ) ;    // Find end of node ID
     nodeID = USB_nodelist.substring ( nodeinx,
-                                      nodeinx2 ) ;          // Get node ID
+                                      nodeinx2 ) ;         // Get node ID
   }
   dbgprint ( "getUSBfilename requested node ID is %s",     // Show requeste node ID
              nodeID.c_str() ) ;
-  while ( ( n = nodeID.toInt() ) )                         // Next sequence in current level
+  while ( ( n = nodeID.toInt() ) > 0 ) 
   {
-    inx = nodeID.indexOf ( "," ) ;                         // Find position of comma
-    if ( inx >= 0 )
-    {
-      nodeID = nodeID.substring ( inx + 1 ) ;              // Remove sequence in this level from nodeID
-    }
+    //dbgprint ( "Dir is %s, nodeID is %s",                // For debug
+    //           res.c_str(), nodeID.c_str() ) ;
     claimSPI ( "usbopen" ) ;                               // Claim SPI bus
     flashDrive->closeFile() ;
     flashDrive->resetFileList() ;
@@ -128,6 +125,15 @@ String getUSBfilename ( String &nodeID )
     file.trim() ;                                          // Remove trailing spaces
     res += file ;                                          // Points to directory- or file name
     releaseSPI() ;                                         // Release SPIU claim
+    inx = nodeID.indexOf ( "," ) ;                         // Find position of comma
+    if ( inx > 0 )
+    {
+      nodeID = nodeID.substring ( inx + 1 ) ;              // Remove sequence in this level from nodeID
+    }
+    else
+    {
+      break ;                                              // All levels handled
+    }
   }
   res = String ( "localhost" ) + res ;                     // Format result
   dbgprint ( "Selected file is %s", res.c_str() ) ;        // Show result
@@ -447,9 +453,10 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
                         String ( "\n" ) ;
         }
         USB_nodelist += tmpstr + String ( "\n" ) ;      // Add to nodelist
-        dbgprint ( "Track: %s/%s",
-                   dirname,                             // Show debug info
-                   filename.c_str() ) ;
+        //dbgprint ( "Track: %s/%s, node: %s",
+        //           dirname,                           // Show debug info
+        //           filename.c_str(),
+        //           tmpstr.c_str() ) ;
         if ( USB_outbuf.length() > 1000 )               // Buffer full?
         {
           cmdclient.print ( USB_outbuf ) ;              // Yes, send it
