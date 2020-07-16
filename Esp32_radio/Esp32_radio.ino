@@ -450,6 +450,7 @@ enc_menu_t        enc_menu_mode = VOLUME ;               // Default is VOLUME mo
 String clockdotstr = "" ;                                // State of the segment clock dots
 String clockbrightnesstr = "" ;                          // State of the segment clock brightness
 String overallstate = "" ;                               // Overall state (to report startup etc.)
+bool stoppedstart = true;                                // Do not start playback on start
 //
 struct progpin_struct                                    // For programmable input pins
 {
@@ -582,7 +583,7 @@ class mqttpubc                                           // For MQTT publishing
       { "playing",          MQINT8,   &playingstat,       false }, // Definition for MQTT_PLAYING
       { "playlist/pos",     MQINT16,  &playlist_num,      false }, // Definition for MQTT_PLAYLISTPOS
       { "clock/dots",       MQSTRING, &clockdotstr,       false }, // Definition for MQTT_CLOCKDOTS
-      { "clock/brightness", MQINT8,   &clockbrightnesstr, false }, // Definition for MQTT_CLOCKBRIGHTNESS
+      { "clock/brightness", MQSTRING, &clockbrightnesstr, false }, // Definition for MQTT_CLOCKBRIGHTNESS
       { "state",            MQSTRING, &overallstate,      false }, // Definition for MQTT_STATE
       { NULL,               0,        NULL,               false }  // End of definitions
     } ;
@@ -4456,7 +4457,7 @@ void chk_enc()
 //**************************************************************************************************
 //                                           M P 3 L O O P                                         *
 //**************************************************************************************************
-// Called from the mail loop() for the mp3 functions.                                              *
+// Called from the main loop() for the mp3 functions.                                              *
 // A connection to an MP3 server is active and we are ready to receive data.                       *
 // Normally there is about 2 to 4 kB available in the data stream.  This depends on the sender.    *
 //**************************************************************************************************
@@ -4646,7 +4647,9 @@ void mp3loop()
 //**************************************************************************************************
 void loop()
 {
-  mp3loop() ;                                       // Do mp3 related actions
+    if ( ! stoppedstart ) {                         // Only play if stoppedstart is false
+  mp3loop() ;                                       // Do mp3 related actions        
+    }
   if ( updatereq )                                  // Software update requested?
   {
     if ( displaytype == T_NEXTION )                 // NEXTION in use?
@@ -4661,6 +4664,9 @@ void loop()
   if ( resetreq )                                   // Reset requested?
   {
     delay ( 1000 ) ;                                // Yes, wait some time
+    if ( mqtt_on ) {
+        mqttclient.disconnect();                    // Disconnect nicely from MQTT broker
+    }
     ESP.restart() ;                                 // Reboot
   }
   scanserial() ;                                    // Handle serial input
@@ -4668,7 +4674,9 @@ void loop()
   scandigital() ;                                   // Scan digital inputs
   scanIR() ;                                        // See if IR input
   ArduinoOTA.handle() ;                             // Check for OTA
-  mp3loop() ;                                       // Do more mp3 related actions
+    if ( ! stoppedstart ) {                         // Only play if stoppedstart is false
+  mp3loop() ;                                       // Do mp3 related actions        
+    }
   handlehttpreply() ;
   cmdclient = cmdserver.available() ;               // Check Input from client?
   if ( cmdclient )                                  // Client connected?
@@ -5363,7 +5371,7 @@ const char* analyzeCmd ( const char* par, const char* val )
     display.setBrightness(ivalue);
     sprintf ( reply, "Brightness is now %d",          // Reply new brightness
               ivalue ) ;
-    clockbrightnesstr =  ivalue ;                    // MQTT payload
+    clockbrightnesstr =  String( ivalue );                    // MQTT payload
     mqttpub.trigger ( MQTT_CLOCKBRIGHTNESS ) ;
   }
   else if ( argument.indexOf ( "dotson" ) >= 0 )     // TM1637 dots on
@@ -5438,18 +5446,23 @@ const char* analyzeCmd ( const char* par, const char* val )
 
     {
       datamode = STOPREQD ;                           // Request STOP
+      stoppedstart = true;
     }
     else
     {
       hostreq = true ;                                // Request UNSTOP
+      stoppedstart = true;
+
     }
   }
   else if ( argument == "realresume" )                      // (un)Stop requested?
   {
+    stoppedstart = false;
     hostreq = true ;                                // Request UNSTOP
   }
   else if ( argument == "realstop" )                      // (un)Stop requested?
   {
+    stoppedstart = true;
     datamode = STOPREQD ;                           // Request STOP
   }
   else if ( ( value.length() > 0 ) &&
