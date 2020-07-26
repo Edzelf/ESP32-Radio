@@ -4,6 +4,14 @@ See the review by Andreas Spiess at https://www.youtube.com/watch?v=hz65vfvbXMs.
 
 Look for documentation and printdesign in the doc directory.
 
+This fork adds support for a TM1673 7-segment module so that the whole kit can act as a radio clock. Additionally, MQTT control possibilities have been expanded and received IR codes are also being published so that they can be acted on within ones home automation environment. Different to the original, playback is paused on boot and switching sources does not automatically start playback (you wouldn't want your radio clock to start blasting music after a power outage).
+
+The radio clock does not include the actual alarm function. Playback gets triggered via a received command ('realresume'). The logic, a timer node in Node RED or a cron job somewhere else control the radio. The segment display's dots can be controlled separately to indicate states (e.g. that the alarm is set). 
+
+States are reported via MQTT so that the logic can make use of it (e.g. states can be stored in global variables in Node RED).
+
+Additions are commented in the code.
+
 Features:
 -	Can connect to thousands of Internet radio stations that broadcast MP3 or Ogg audio streams.
 - Can connect to a standalone mp3 file on a server.
