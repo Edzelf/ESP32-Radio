@@ -450,6 +450,7 @@ enc_menu_t        enc_menu_mode = VOLUME ;               // Default is VOLUME mo
 String clockdotstr = "" ;                                // State of the segment clock dots
 String clockbrightnesstr = "" ;                          // State of the segment clock brightness
 String overallstate = "" ;                               // Overall state (to report startup etc.)
+String irstr;                                            // IR value as string
 bool stoppedstart = true;                                // Do not start playback on start
 //
 struct progpin_struct                                    // For programmable input pins
@@ -556,7 +557,7 @@ touchpin_struct   touchpin[] =                           // Touch pins and progr
 // ID's for the items to publish to MQTT.  Is index in amqttpub[]
 enum { MQTT_IP,     MQTT_ICYNAME, MQTT_STREAMTITLE, MQTT_NOWPLAYING,
        MQTT_PRESET, MQTT_VOLUME, MQTT_PLAYING, MQTT_PLAYLISTPOS,
-       MQTT_CLOCKDOTS, MQTT_CLOCKBRIGHTNESS, MQTT_STATE
+       MQTT_CLOCKDOTS, MQTT_CLOCKBRIGHTNESS, MQTT_STATE, MQTT_IRVALUE
      } ;
 enum { MQSTRING, MQINT8, MQINT16 } ;                     // Type of variable to publish
 
@@ -572,7 +573,7 @@ class mqttpubc                                           // For MQTT publishing
     // Publication topics for MQTT.  The topic will be pefixed by "PREFIX/", where PREFIX is replaced
     // by the the mqttprefix in the preferences.
   protected:
-    mqttpub_struct amqttpub[12] =                   // Definitions of various MQTT topic to publish
+    mqttpub_struct amqttpub[13] =                   // Definitions of various MQTT topic to publish
     { // Index is equal to enum above
       { "ip",               MQSTRING, &ipaddress,         false }, // Definition for MQTT_IP
       { "icy/name",         MQSTRING, &icyname,           false }, // Definition for MQTT_ICYNAME
@@ -585,6 +586,7 @@ class mqttpubc                                           // For MQTT publishing
       { "clock/dots",       MQSTRING, &clockdotstr,       false }, // Definition for MQTT_CLOCKDOTS
       { "clock/brightness", MQSTRING, &clockbrightnesstr, false }, // Definition for MQTT_CLOCKBRIGHTNESS
       { "state",            MQSTRING, &overallstate,      false }, // Definition for MQTT_STATE
+      { "irvalue",          MQSTRING, &irstr,             false }, // Definition for MQTT_IRCODE
       { NULL,               0,        NULL,               false }  // End of definitions
     } ;
   public:
@@ -3223,6 +3225,9 @@ void scanIR()
   if ( ir_value )                                           // Any input?
   {
     sprintf ( mykey, "ir_%04X", ir_value ) ;                // Form key in preferences
+    //sprintf ( irstr, "%04X", ir_value ) ;
+    irstr = String(ir_value, HEX);
+    mqttpub.trigger ( MQTT_IRVALUE ) ;                      // publish received IR value
     if ( nvssearch ( mykey ) )
     {
       val = nvsgetstr ( mykey ) ;                           // Get the contents
