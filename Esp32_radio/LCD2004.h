@@ -1,8 +1,8 @@
 //***************************************************************************************************
-//*  LCD1602.h -- Driver for LCD 1602 display with I2C backpack.                                    *
+//*  LCD2004.h -- Driver for LCD 2004 display with I2C backpack.                                    *
 //***************************************************************************************************
 // The backpack communicates with the I2C bus and converts the serial data to parallel for the      *
-// 1602 board.  In the serial data, the 8 bits are assigned as follows:                             *
+// 2004 board.  In the serial data, the 8 bits are assigned as follows:                             *
 // Bit   Destination  Description                                                                   *
 // ---   -----------  ------------------------------------                                          *
 //  0    RS           H=data, L=command                                                             *
@@ -19,7 +19,7 @@
 
 #include <driver/i2c.h>
 
-#define I2C_ADDRESS 0x3F                                     // Adjust for your display
+#define I2C_ADDRESS 0x27                                     // Adjust for your display
 #define ACKENA      true                                     // Enable ACK for I2C communication
 // Color definitions for the TFT screen (if used)
 #define BLACK   0
@@ -63,8 +63,8 @@
 #define dsp_setTextColor(a)                              
 #define dsp_setCursor(a,b)                                         // Position the cursor
 #define dsp_erase()         tft->sclear()                          // Clear the screen
-#define dsp_getwidth()      16                                     // Get width of screen
-#define dsp_getheight()     2                                      // Get height of screen
+#define dsp_getwidth()      20                                     // Get width of screen
+#define dsp_getheight()     4                                      // Get height of screen
 #define dsp_usesSPI()       false                                  // Does not use SPI
 
 #define TFTSECS 4                                           // 4 sections, only 2 used
@@ -76,10 +76,10 @@ scrseg_struct     tftdata[TFTSECS] =                        // Screen divided in
   { false, WHITE,   0,  0, "" }                             // 4 lines at the bottom for rotary encoder
 } ;
 
-class LCD1602
+class LCD2004
 {
   public:
-                     LCD1602 ( uint8_t sda, uint8_t scl ) ; // Constructor
+                     LCD2004 ( uint8_t sda, uint8_t scl ) ; // Constructor
     void             print ( char c ) ;                     // Send 1 char
     void             reset() ;                              // Perform reset
     void             sclear() ;                             // Clear the screen
@@ -99,56 +99,56 @@ class LCD1602
     uint8_t          ychar = 0 ;                            // Current cursor position (text)
 } ;
 
-LCD1602* tft = NULL ;
+LCD2004* tft = NULL ;
 
 bool dsp_begin()
 {
-  dbgprint ( "Init LCD1602, I2C pins %d,%d", ini_block.tft_sda_pin,
+  dbgprint ( "Init LCD2004, I2C pins %d,%d", ini_block.tft_sda_pin,
              ini_block.tft_scl_pin ) ;
   if ( ( ini_block.tft_sda_pin >= 0 ) &&
        ( ini_block.tft_scl_pin >= 0 ) )
   {
-    tft = new LCD1602 ( ini_block.tft_sda_pin,
+    tft = new LCD2004 ( ini_block.tft_sda_pin,
                         ini_block.tft_scl_pin ) ;           // Create an instance for TFT
   }
   else
   {
-    dbgprint ( "Init LCD1602 failed!" ) ;
+    dbgprint ( "Init LCD2004 failed!" ) ;
   }
   return ( tft != NULL ) ;
 }
 
 
 //***********************************************************************************************
-//                                L C D 1 6 0 2  write functions                                *
+//                                L C D 2 0 0 4  write functions                                *
 //***********************************************************************************************
 // Write functins for command, data and general.                                                *
 //***********************************************************************************************
-void LCD1602::swrite ( uint8_t val, uint8_t rs )          // General write, 8 bits data
+void LCD2004::swrite ( uint8_t val, uint8_t rs )          // General write, 8 bits data
 {
   strobe ( ( val & 0xf0 ) | rs ) ;                        // Send 4 LSB bits
   strobe ( ( val << 4 ) | rs ) ;                          // Send 4 MSB bits
 }
 
 
-void LCD1602::write_data ( uint8_t val )
+void LCD2004::write_data ( uint8_t val )
 {
   swrite ( val, FLAG_RS_DATA ) ;                           // Send data (RS = HIGH)
 }
 
 
-void LCD1602::write_cmd ( uint8_t val )
+void LCD2004::write_cmd ( uint8_t val )
 {
   swrite ( val, FLAG_RS_COMMAND ) ;                        // Send command (RS = LOW)
 }
 
 
 //***********************************************************************************************
-//                                L C D 1 6 0 2 :: S T R O B E                                  *
+//                                L C D 2 0 0 4 :: S T R O B E                                  *
 //***********************************************************************************************
 // Send data followed by strobe to clock data to LCD.                                           *
 //***********************************************************************************************
-void LCD1602::strobe ( uint8_t cmd )
+void LCD2004::strobe ( uint8_t cmd )
 {
   scommand ( cmd | FLAG_ENABLE ) ;                  // Send command with E high
   scommand ( cmd ) ;                                // Same command with E low
@@ -157,12 +157,12 @@ void LCD1602::strobe ( uint8_t cmd )
 
 
 //***********************************************************************************************
-//                                L C D 1 6 0 2 :: S C O M M A N D                              *
+//                                L C D 2 0 0 4 :: S C O M M A N D                              *
 //***********************************************************************************************
 // Send a command to the LCD.                                                                   *
 // Actual I/O.  Open a channel to the I2C interface and write one byte.                         *
 //***********************************************************************************************
-void LCD1602::scommand ( uint8_t cmd )
+void LCD2004::scommand ( uint8_t cmd )
 {
   hnd = i2c_cmd_link_create() ;                           // Create a link
   if ( i2c_master_start ( hnd ) |
@@ -175,7 +175,7 @@ void LCD1602::scommand ( uint8_t cmd )
        i2c_master_cmd_begin ( I2C_NUM_0, hnd,             // Send bufferd data to LCD
                               10 / portTICK_PERIOD_MS ) )
   {
-    dbgprint ( "LCD1602 communication error!" ) ;         // Something went wrong (not connected)
+    dbgprint ( "LCD2004 communication error!" ) ;         // Something went wrong (not connected)
   }
   i2c_cmd_link_delete ( hnd ) ;                           // Link not needed anymore
 }
@@ -183,22 +183,22 @@ void LCD1602::scommand ( uint8_t cmd )
 
 
 //***********************************************************************************************
-//                                L C D 1 6 0 2 :: P R I N T                                    *
+//                                L C D 2 0 0 4 :: P R I N T                                    *
 //***********************************************************************************************
 // Put a character in the buffer.                                                               *
 //***********************************************************************************************
-void LCD1602::print ( char c )
+void LCD2004::print ( char c )
 {
   write_data ( c ) ;
 }
 
 
 //***********************************************************************************************
-//                                L C D 1 6 0 2 :: S C U R S O R                                *
+//                                L C D 2 0 0 4 :: S C U R S O R                                *
 //***********************************************************************************************
 // Place the cursor at the requested position.                                                  *
 //***********************************************************************************************
-void LCD1602::scursor ( uint8_t col, uint8_t row )
+void LCD2004::scursor ( uint8_t col, uint8_t row )
 {
   const int row_offsets[] = { 0x00, 0x40, 0x14, 0x54 } ;
   
@@ -208,22 +208,22 @@ void LCD1602::scursor ( uint8_t col, uint8_t row )
 
 
 //***********************************************************************************************
-//                                L C D 1 6 0 2 :: S C L E A R                                  *
+//                                L C D 2 0 0 4 :: S C L E A R                                  *
 //***********************************************************************************************
 // Clear the LCD.                                                                               *
 //***********************************************************************************************
-void LCD1602::sclear()
+void LCD2004::sclear()
 {
   write_cmd ( COMMAND_CLEAR_DISPLAY ) ;
 }
 
 
 //***********************************************************************************************
-//                                L C D 1 6 0 2 :: S C R O L L                                  *
+//                                L C D 2 0 0 4 :: S C R O L L                                  *
 //***********************************************************************************************
 // Set scrolling on/off.                                                                        *
 //***********************************************************************************************
-void LCD1602::scroll ( bool son )
+void LCD2004::scroll ( bool son )
 {
   uint8_t ecmd = COMMAND_ENTRY_MODE_SET |               // Assume no scroll
                  FLAG_ENTRY_MODE_SET_ENTRY_INCREMENT ;
@@ -237,22 +237,22 @@ void LCD1602::scroll ( bool son )
 
 
 //***********************************************************************************************
-//                                L C D 1 6 0 2 :: S H O M E                                    *
+//                                L C D 2 0 0 4 :: S H O M E                                    *
 //***********************************************************************************************
 // Go to home position.                                                                         *
 //***********************************************************************************************
-void LCD1602::shome()
+void LCD2004::shome()
 {
   write_cmd ( COMMAND_RETURN_HOME ) ;
 }
 
 
 //***********************************************************************************************
-//                                L C D 1 6 0 2 :: R E S E T                                    *
+//                                L C D 2 0 0 4 :: R E S E T                                    *
 //***********************************************************************************************
 // Reset the LCD.                                                                               *
 //***********************************************************************************************
-void LCD1602::reset()
+void LCD2004::reset()
 {
   scommand ( 0 ) ;                                // Put expander to known state
   delayMicroseconds ( 1000 ) ;
@@ -281,11 +281,11 @@ void LCD1602::reset()
 
 
 //***********************************************************************************************
-//                                L C D 1 6 0 2                                                 *
+//                                L C D 2 0 0 4                                                 *
 //***********************************************************************************************
 // Constructor for the display.                                                                 *
 //***********************************************************************************************
-LCD1602::LCD1602 ( uint8_t sda, uint8_t scl )
+LCD2004::LCD2004 ( uint8_t sda, uint8_t scl )
 {
   esp_err_t        espRc ;
 
@@ -314,7 +314,9 @@ struct dsp_str
   uint8_t         row ;                                 // Row on display  
 } ;
 
-dsp_str dline[2] = { { "", 0, 0, 0 },
+dsp_str dline[4] = { { "", 0, 0, 0 },
+                     { "", 0, 0, 0 },
+                     { "", 0, 0, 0 },
                      { "", 0, 0, 0 }
                    } ;
 
@@ -331,7 +333,7 @@ void dsp_update_line ( uint8_t lnr )
   p = dline[lnr].str.c_str() ;
   dline[lnr].len = strlen ( p ) ;
   //dbgprint ( "Strlen is %d, str is %s", len, p ) ;
-  if ( dline[lnr].len > 16 )
+  if ( dline[lnr].len > dsp_getwidth() )
   {
     if ( dline[lnr].pos >= dline[lnr].len )
     {
@@ -342,9 +344,9 @@ void dsp_update_line ( uint8_t lnr )
       p += dline[lnr].pos ;
     }
     dline[lnr].len -= dline[lnr].pos ;
-    if ( dline[lnr].len > 16 )
+    if ( dline[lnr].len > dsp_getwidth() )
     {
-      dline[lnr].len = 16 ;
+      dline[lnr].len = dsp_getwidth() ;
     }
   }
   else
@@ -365,7 +367,7 @@ void dsp_update_line ( uint8_t lnr )
     }
     p++ ;
   }
-  for ( i = 0 ; i < ( 16 - dline[lnr].len ) ; i++ )  // Fill remainder
+  for ( i = 0 ; i < ( dsp_getwidth() - dline[lnr].len ) ; i++ )  // Fill remainder
   {
     tft->print ( ' ' ) ;
   }
@@ -392,26 +394,26 @@ void dsp_update()
   cnt = 0 ;
   if ( enc_menu_mode != VOLUME )                        // Encoder menu mode?
   {
-    dline[0].str = tftdata[3].str.substring(0,16) ;     // Yes, different lines
-    dline[1].str = tftdata[3].str.substring(16) ;
+    dline[1].str = tftdata[3].str.substring(0,dsp_getwidth()) ;     // Yes, different lines
+    dline[2].str = tftdata[3].str.substring(dsp_getwidth()) ;
   }
   else
   {
-    dline[0].str = tftdata[1].str ;                     // Local copy
+    dline[2].str = tftdata[1].str ;                     // Local copy
     dline[1].str = tftdata[2].str ;                     // Local copy
   }  
-  dline[0].str.trim() ;                                 // Remove non printing
+  dline[2].str.trim() ;                                 // Remove non printing
   dline[1].str.trim() ;                                 // Remove non printing
-  if ( dline[0].str.length() > 16 )
+  if ( dline[2].str.length() > dsp_getwidth() )
   {
-    dline[0].str += String ( "  " ) ;
+    dline[2].str += String ( "  " ) ;
   }
-  if ( dline[1].str.length() > 16 )
+  if ( dline[1].str.length() > dsp_getwidth() )
   {
     dline[1].str += String ( "  " ) ;
   }
-  dsp_update_line ( 0 ) ;
   dsp_update_line ( 1 ) ;
+  dsp_update_line ( 2 ) ;
 }
 
 
@@ -428,18 +430,62 @@ void displaybattery()
 //**************************************************************************************************
 //                                      D I S P L A Y V O L U M E                                  *
 //**************************************************************************************************
-// Dummy routine for this type of display.                                                         *
+// Display volume for this type of display.                                                        *
 //**************************************************************************************************
 void displayvolume()
 {
+  static uint8_t   oldvol = 0 ;                       // Previous volume
+  uint8_t          newvol ;                           // Current setting
+  uint16_t         pos ;                              // Positon of volume indicator
+
+  dline[3].str = "";
+
+  newvol = vs1053player->getVolume() ;                // Get current volume setting
+  if ( newvol != oldvol )                             // Volume changed?
+  {
+    oldvol = newvol ;                                 // Remember for next compare
+    pos = map ( newvol, 0, 100, 0, dsp_getwidth() ) ; // Compute end position on TFT
+    for ( int i = 0 ; i < dsp_getwidth() ; i++ )      // Set oldstr to dots
+    {
+      if ( i <= pos )
+      {
+        dline[3].str += "-" ;                         // Add minus sign
+      }
+      else
+      {
+        dline[3].str += " " ;                         // Or blank sign
+      }
+    }
+    dsp_update_line(3) ;
+  }
 }
 
 
 //**************************************************************************************************
 //                                      D I S P L A Y T I M E                                      *
 //**************************************************************************************************
-// Dummy routine for this type of display.                                                         *
+//                                                         *
 //**************************************************************************************************
-void displaytime ( const char* str, uint16_t color )
-{
+void displaytime ( const char* str, uint16_t color ){
+  const char* WDAYS [] ={"Mon","Tue","Wed","Thu","Fri","Sat","Sun"};
+  char        datetxt[21] ;                           
+  sprintf ( datetxt, "%03s %02d.%02d.  %08s",                // Format new time to a string
+                  WDAYS[timeinfo.tm_wday-1],
+                  timeinfo.tm_mday,
+                  timeinfo.tm_mon,
+                  str) ;
+  char oldstr[21] = "...................." ;             // For compare
+  uint8_t     i ;                                  // Index in strings
+  if ( datetxt[14] == '0' ) {                           // Empty string?
+    for ( int i = 0 ; i < 21 ; i++ )                    // Set oldstr to dots
+       oldstr[i] = '.' ;
+    return ;                                       // No actual display yet
+  }
+  
+    if ( datetxt != oldstr ) {                  // Difference?
+       dline[0].str = datetxt;          
+       dsp_update_line(0);
+       for ( int i = 0 ; i < 21 ; i++ )                    // Set oldstr to dots
+       oldstr[i] = datetxt[i] ;
+      }
 }

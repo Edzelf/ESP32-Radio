@@ -152,6 +152,7 @@
 // 25-03-2020, ES: End of playlist: start over.
 // 09-07-2020, ES: Add CH376 support.
 // 14-07-2020, ES: Dynamic status display in webinterface.
+// 17-09-2020, ES: Support for LCD2004. Thanks to mrohner.
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
@@ -167,10 +168,11 @@
 #define CH376                          // For CXH376 support (reading files from USB stick)
 #define SDCARD                         // For SD card support (reading files from SD card)
 // Define (just one) type of display.  See documentation.
-#define BLUETFT                        // Works also for RED TFT 128x160
+///#define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
 //#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
+#define LCD2004I2C                     // LCD 2004 display with I2C backpack
 //#define ILI9341                      // ILI9341 240*320
 //#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
 //
@@ -358,8 +360,8 @@ struct keyname_t                                      // For keys in NVS
 //**************************************************************************************************
 
 enum display_t { T_UNDEFINED, T_BLUETFT, T_OLED,             // Various types of display
-                 T_DUMMYTFT, T_LCD1602I2C, T_ILI9341,
-                 T_NEXTION } ;
+                 T_DUMMYTFT, T_LCD1602I2C, T_LCD2004I2C,
+                 T_ILI9341, T_NEXTION } ;
 
 enum datamode_t { INIT = 0x1, HEADER = 0x2, DATA = 0x4,      // State for datastream
                   METADATA = 0x8, PLAYLISTINIT = 0x10,
@@ -1118,6 +1120,9 @@ VS1053* vs1053player ;
 #endif
 #ifdef LCD1602I2C
 #include "LCD1602.h"                                     // For LCD 1602 display (I2C)
+#endif
+#ifdef LCD2004I2C
+#include "LCD2004.h"                                     // For LCD 2004 display (I2C)
 #endif
 #ifdef DUMMYTFT
 #include "Dummytft.h"                                    // For Dummy display
@@ -3259,6 +3264,9 @@ void setup()
 #if defined ( LCD1602I2C )
   dbgprint ( dtyp, "LCD1602" ) ;
 #endif
+#if defined ( LCD2004I2C )
+  dbgprint ( dtyp, "LCD2004" ) ;
+#endif
 #if defined ( NEXTION )
   dbgprint ( dtyp, "NEXTION" ) ;
 #endif
@@ -3291,7 +3299,7 @@ void setup()
   ini_block.bat0 = 0 ;                                   // Battery ADC levels not yet defined
   ini_block.bat100 = 0 ;
   readIOprefs() ;                                        // Read pins used for SPI, TFT, VS1053, IR,
-  // Rotary encoder
+                                                         // Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
   {
     pinMode ( pinnr, INPUT_PULLUP ) ;                    // Input for control button
