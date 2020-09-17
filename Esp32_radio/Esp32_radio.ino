@@ -157,7 +157,7 @@
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Tue, 14 Jul 2020 09:40:00 GMT"
+#define VERSION     "Thu, 17 Sep 2020 12:50:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -168,11 +168,11 @@
 #define CH376                          // For CXH376 support (reading files from USB stick)
 #define SDCARD                         // For SD card support (reading files from SD card)
 // Define (just one) type of display.  See documentation.
-///#define BLUETFT                        // Works also for RED TFT 128x160
+#define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
 //#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
-#define LCD2004I2C                     // LCD 2004 display with I2C backpack
+//#define LCD2004I2C                   // LCD 2004 display with I2C backpack
 //#define ILI9341                      // ILI9341 240*320
 //#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
 //
