@@ -1,5 +1,6 @@
 // CH376.h
 // Includes for CH376 USB interface
+//  Note: Some USB drives require a new insert after reset!
 //
 int         USB_nodecount = 0 ;           // Number of nodes in SD_nodelist
 String      USB_nodelist ;
@@ -307,6 +308,8 @@ bool connecttofile_USB()
   }
   flashDrive->closeFile() ;                               // Sure to close previous file
   path = host.substring ( 9 ) ;                           // Path, skip the "localhost" part
+  icystreamtitle = path ;                                 // If no ID3 available
+  icyname = String ( "" ) ;                               // If no ID3 available
   claimSPI ( "usbopen3" ) ;                               // Claim SPI bus
   handle_ID3_USB ( path ) ;                               // See if there are ID3 tags in this file
   res = flashDrive->getEOF() ;                            // Check EOF
@@ -384,13 +387,14 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
     {
       break ;                                           // End of list
     }
-    if ( attr & ( ATTR_HIDDEN | ATTR_SYSTEM ) )         // Skip hidden or system files/directories
+    if ( attr & ( CH376_ATTR_HIDDEN |
+                  CH376_ATTR_SYSTEM ) )                // Skip hidden or system files/directories
     {
       continue ;
     }
     USB_node[level]++ ;                                 // Set entry sequence of current level
     filename.trim() ;                                   // Remove trailing spaces
-    if ( attr & ATTR_DIRECTORY )                        // Is it a directory?
+    if ( attr & CH376_ATTR_DIRECTORY )                  // Is it a directory?
     {
       if ( filename.startsWith ( "." ) )                // Special entry?
       {
@@ -399,12 +403,12 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
       //dbgprint ( "Directory %s found, attr = 0x%X",
       //           filename.c_str(),
       //           attr ) ;
-      // ATTR_READ_ONLY = 0x01; //read-only file
-      // ATTR_HIDDEN    = 0x02; //hidden file
-      // ATTR_SYSTEM    = 0x04; //system file
-      // ATTR_VOLUME_ID = 0x08; //Volume label
-      // ATTR_DIRECTORY = 0x10; //subdirectory (folder)
-      // ATTR_ARCHIVE   = 0x20; //archive (normal) file
+      // CH376_ATTR_READ_ONLY = 0x01; //read-only file
+      // CH376_ATTR_HIDDEN    = 0x02; //hidden file
+      // CH376_ATTR_SYSTEM    = 0x04; //system file
+      // CH376_ATTR_VOLUME_ID = 0x08; //Volume label
+      // CH376_ATTR_DIRECTORY = 0x10; //subdirectory (folder)
+      // CH376_ATTR_ARCHIVE   = 0x20; //archive (normal) file
       if ( level < (USB_MAXDEPTH - 1) )                 // Yes, dig deeper
       {
         if ( strlen ( dirname ) > 1 )                   // Are we in subdirectory?
@@ -430,7 +434,8 @@ int listusbtracks ( const char* dirname, int level = 0, bool send = true )
     }
     else
     {
-      if ( attr & ( ATTR_HIDDEN | ATTR_SYSTEM ) )
+      if ( attr & ( CH376_ATTR_HIDDEN |
+                    CH376_ATTR_SYSTEM ) )
       {
         continue ;                                      // Skip hidden and system files
       }

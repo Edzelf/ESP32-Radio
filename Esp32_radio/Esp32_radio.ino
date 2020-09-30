@@ -153,11 +153,12 @@
 // 09-07-2020, ES: Add CH376 support.
 // 14-07-2020, ES: Dynamic status display in webinterface.
 // 17-09-2020, ES: Support for LCD2004. Thanks to mrohner.
+// 30-09-2020, ES: Ready for ch376msc library Version 1.4.4
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Thu, 17 Sep 2020 12:50:00 GMT"
+#define VERSION     "Wed, 30 Sep 2020 09:25:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
