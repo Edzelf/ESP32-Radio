@@ -154,11 +154,12 @@
 // 14-07-2020, ES: Dynamic status display in webinterface.
 // 17-09-2020, ES: Support for LCD2004. Thanks to mrohner.
 // 30-09-2020, ES: Ready for ch376msc library Version 1.4.4
+// 14-10-2020, ES: Clear artist and title on new station connect
 //
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Wed, 30 Sep 2020 09:25:00 GMT"
+#define VERSION     "Wed, 14 Oct 2020 09:45:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -2021,6 +2022,7 @@ bool connecttohost()
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
   tftset ( 0, "ESP32-Radio" ) ;                     // Set screen segment text top line
+  tftset ( 1, "" ) ;                                // Clear song and artist
   displaytime ( "" ) ;                              // Clear time on TFT screen
   setdatamode ( INIT ) ;                            // Start default in metamode
   chunked = false ;                                 // Assume not chunked
