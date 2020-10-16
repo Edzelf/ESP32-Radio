@@ -2072,6 +2072,8 @@ bool connecttohost()
                       hostwoext +
                       String ( "\r\n" ) +
                       String ( "Icy-MetaData:1\r\n" ) +
+                      String ( "Icy-Reset: 1\r\n" ) +
+                      String ( "Icy-Prebuffer: 65536\r\n" ) + 
                       auth +
                       String ( "Connection: close\r\n\r\n" ) ) ;
     return true ;
