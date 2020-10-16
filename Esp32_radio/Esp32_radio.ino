@@ -160,11 +160,18 @@
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
 #define VERSION     "Wed, 14 Oct 2020 09:45:00 GMT"
+
+
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
+
+#define OTA
+#ifdef OTA
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
 #define BINFILE     "/Arduino/Esp32_radio.ino.bin"      // Binary file name for update software
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
+#endif
+
 //
 // Define type of local filesystem(s).  See documentation.
 #define CH376                          // For CXH376 support (reading files from USB stick)
@@ -186,14 +193,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <SPI.h>
-#include <ArduinoOTA.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include <esp_task_wdt.h>
 #include <esp_partition.h>
 #include <driver/adc.h>
-#include <Update.h>
 #include <base64.h>
+
+#ifdef OTA
+#include <ArduinoOTA.h>
+#include <Update.h>
+#endif
+
 // Number of entries in the queue
 #define QSIZ 400
 // Debug buffer size
@@ -2241,6 +2252,7 @@ bool do_nextion_update ( uint32_t clength )
 //**************************************************************************************************
 // Update software from OTA stream.                                                                *
 //**************************************************************************************************
+#ifdef OTA
 bool do_software_update ( uint32_t clength )
 {
   bool res = false ;                                          // Update result
@@ -2283,13 +2295,14 @@ bool do_software_update ( uint32_t clength )
   }
   return res ;
 }
-
+#endif 
 
 //**************************************************************************************************
 //                                        U P D A T E _ S O F T W A R E                            *
 //**************************************************************************************************
 // Update software by download from remote host.                                                   *
 //**************************************************************************************************
+#ifdef OTA
 void update_software ( const char* lstmodkey, const char* updatehost, const char* binfile )
 {
   uint32_t    timeout = millis() ;                              // To detect time-out
@@ -2378,7 +2391,7 @@ void update_software ( const char* lstmodkey, const char* updatehost, const char
     otaclient.flush() ;
   }
 }
-
+#endif
 
 //**************************************************************************************************
 //                                  R E A D H O S T F R O M P R E F                                *
@@ -3387,9 +3400,13 @@ void setup()
     dbgprint ( "Network found. Starting mqtt and OTA" ) ;
     mqtt_on = ( ini_block.mqttbroker.length() > 0 ) &&   // Use MQTT if broker specified
               ( ini_block.mqttbroker != "none" ) ;
+
+#ifdef OTA
     ArduinoOTA.setHostname ( NAME ) ;                    // Set the hostname
     ArduinoOTA.onStart ( otastart ) ;
     ArduinoOTA.begin() ;                                 // Allow update over the air
+#endif
+
     if ( mqtt_on )                                       // Broker specified?
     {
       if ( ( ini_block.mqttprefix.length() == 0 ) ||     // No prefix?
@@ -4352,6 +4369,8 @@ void mp3loop()
 void loop()
 {
   mp3loop() ;                                       // Do mp3 related actions
+  
+#ifdef OTA 
   if ( updatereq )                                  // Software update requested?
   {
     if ( displaytype == T_NEXTION )                 // NEXTION in use?
@@ -4363,6 +4382,8 @@ void loop()
                       UPDATEHOST, BINFILE ) ;
     resetreq = true ;                               // And reset
   }
+#endif  
+
   if ( resetreq )                                   // Reset requested?
   {
     delay ( 1000 ) ;                                // Yes, wait some time
@@ -4372,7 +4393,9 @@ void loop()
   scanserial2() ;                                   // Handle serial input from NEXTION (if active)
   scandigital() ;                                   // Scan digital inputs
   scanIR() ;                                        // See if IR input
+#ifdef OTA  
   ArduinoOTA.handle() ;                             // Check for OTA
+#endif  
   mp3loop() ;                                       // Do more mp3 related actions
   handlehttpreply() ;
   cmdclient = cmdserver.available() ;               // Check Input from client?
