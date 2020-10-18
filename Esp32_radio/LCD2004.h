@@ -449,7 +449,7 @@ void displayvolume()
     {
       if ( i <= pos )
       {
-        dline[3].str += "-" ;                         // Add minus sign
+        dline[3].str += "\x7F" ;                      // Add block character
       }
       else
       {
@@ -464,28 +464,32 @@ void displayvolume()
 //**************************************************************************************************
 //                                      D I S P L A Y T I M E                                      *
 //**************************************************************************************************
-//                                                         *
+// Display date and time to LCD line 0.                                                            *
 //**************************************************************************************************
-void displaytime ( const char* str, uint16_t color ){
-  const char* WDAYS [] ={"Mon","Tue","Wed","Thu","Fri","Sat","Sun"};
-  char        datetxt[21] ;                           
-  sprintf ( datetxt, "%03s %02d.%02d.  %08s",                // Format new time to a string
-                  WDAYS[timeinfo.tm_wday-1],
-                  timeinfo.tm_mday,
-                  timeinfo.tm_mon,
-                  str) ;
-  char oldstr[21] = "...................." ;             // For compare
-  uint8_t     i ;                                  // Index in strings
-  if ( datetxt[14] == '0' ) {                           // Empty string?
-    for ( int i = 0 ; i < 21 ; i++ )                    // Set oldstr to dots
-       oldstr[i] = '.' ;
-    return ;                                       // No actual display yet
+void displaytime ( const char* str, uint16_t color )
+{
+  const char* WDAYS [] ={ "???", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" } ;
+  char        datetxt[24] ;
+  static char oldstr = '\0' ;                            // To check time difference
+  const char* p = datetxt ;                              // Pointer to text to display                          
+
+  if ( ( str == NULL ) || ( str[0] == '\0' ) )           // Check time string
+  {
+    p = "" ;                                             // Not okay, show empty string
   }
-  
-    if ( datetxt != oldstr ) {                  // Difference?
-       dline[0].str = datetxt;          
-       dsp_update_line(0);
-       for ( int i = 0 ; i < 21 ; i++ )                    // Set oldstr to dots
-       oldstr[i] = datetxt[i] ;
-      }
+  else
+  {
+    if ( str[8] == oldstr )                              // Difference?
+    {
+      return ;                                           // No, quick return
+    }
+    sprintf ( datetxt, "%3s %02d.%02d.  %s",             // Format new time to a string
+                       WDAYS[timeinfo.tm_wday],
+                       timeinfo.tm_mday,
+                       timeinfo.tm_mon - 1,
+                       str ) ;
+  }
+  dline[0].str = String ( p ) ;                         // Copy datestring or empty string to LCD line 0   
+  oldstr = str[8] ;                                     // For next compare, last digit of time
+  dsp_update_line(0);
 }
