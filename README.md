@@ -37,6 +37,7 @@ See documentation in doc/pdf-file.
 
 Last changes:
 - 14-oct-2020, Clear artist and song on display at new station connect.
+- 18-oct-2020, Fixed LCD2004 error.
 - 30-sep-2020, Ready for ch376msc library version 1.4.4.
 - 14-jul-2020, Dynamic status display in web interface.
 - 10-jul-2020, Support for USB drive (CH376).
