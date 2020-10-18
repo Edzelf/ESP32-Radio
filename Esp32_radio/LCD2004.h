@@ -486,7 +486,7 @@ void displaytime ( const char* str, uint16_t color )
     sprintf ( datetxt, "%3s %02d.%02d.  %s",             // Format new time to a string
                        WDAYS[timeinfo.tm_wday],
                        timeinfo.tm_mday,
-                       timeinfo.tm_mon - 1,
+                       timeinfo.tm_mon + 1,
                        str ) ;
   }
   dline[0].str = String ( p ) ;                         // Copy datestring or empty string to LCD line 0   
