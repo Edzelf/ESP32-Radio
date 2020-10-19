@@ -468,28 +468,27 @@ void displayvolume()
 //**************************************************************************************************
 void displaytime ( const char* str, uint16_t color )
 {
-  const char* WDAYS [] ={ "???", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" } ;
+  const char* WDAYS [] = { "???", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" } ;
   char        datetxt[24] ;
   static char oldstr = '\0' ;                            // To check time difference
-  const char* p = datetxt ;                              // Pointer to text to display                          
 
   if ( ( str == NULL ) || ( str[0] == '\0' ) )           // Check time string
   {
-    p = "" ;                                             // Not okay, show empty string
+    return ;                                             // Not okay, return
   }
   else
   {
-    if ( str[8] == oldstr )                              // Difference?
+    if ( str[7] == oldstr )                              // Difference?
     {
       return ;                                           // No, quick return
     }
-    sprintf ( datetxt, "%3s %02d.%02d.  %s",             // Format new time to a string
+    sprintf ( datetxt, "%s %02d.%02d.  %s",              // Format new time to a string
                        WDAYS[timeinfo.tm_wday],
                        timeinfo.tm_mday,
                        timeinfo.tm_mon + 1,
                        str ) ;
   }
-  dline[0].str = String ( p ) ;                         // Copy datestring or empty string to LCD line 0   
-  oldstr = str[8] ;                                     // For next compare, last digit of time
-  dsp_update_line(0);
+  dline[0].str = String ( datetxt ) ;                    // Copy datestring or empty string to LCD line 0   
+  oldstr = str[7] ;                                      // For next compare, last digit of time
+  dsp_update_line ( 0 ) ;
 }
