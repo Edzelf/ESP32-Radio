@@ -69,7 +69,7 @@ void setup()
   preferences.putString ( "ir_C03F",     "downvolume = 2" ) ;
   //
   preferences.putString ( "pin_vs_cs",   "5                                      # GPIO Pin number for VS1053 CS" ) ;
-  preferences.putString ( "pin_vs_dcs",  "16                                     # GPIO Pin number for VS1053 DCS" ) ;
+  preferences.putString ( "pin_vs_dcs",  "32                                     # GPIO Pin number for VS1053 DCS" ) ;
   preferences.putString ( "pin_vs_dreq", "4                                      # GPIO Pin number for VS1053 DREQ" ) ;
   //
   preferences.putString ( "pin_enc_clk", "25                                     # GPIO Pin number for rotary encoder CLK" ) ;
