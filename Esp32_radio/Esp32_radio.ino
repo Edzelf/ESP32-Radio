@@ -3983,7 +3983,7 @@ String getFSfilename ( String &nodeID )
 //**************************************************************************************************
 void chk_enc()
 {
-  static int8_t  enc_preset ;                                 // Selected preset
+  static int16_t  enc_preset ;                                 // Selected preset
   static String  enc_nodeID ;                                 // Node of selected track
   static String  enc_filename ;                               // Filename of selected track
   String         tmp ;                                        // Temporary string
