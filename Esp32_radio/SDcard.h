@@ -1,3 +1,4 @@
+#define TRACKLIST
 // SDcard.h
 // Includes for SD card interface
 //
@@ -6,6 +7,10 @@ String            SD_nodelist ;                          // Nodes of mp3-files o
 bool              SD_okay = false ;                      // True if SD card in place and readable
 int               SD_nodecount = 0 ;                     // Number of nodes in SD_nodelist
 String            SD_currentnode = "" ;                  // Node ID of song playing ("0" if random)
+#if defined(TRACKLIST)
+bool              SD_hastracklist = false;               // Nodelist file "/mp3nodes.txt" exists (or not)
+char*             SD_tracklistname = "/mp3nodes.txt";    // Path to store the nodestring
+#endif
 
 #ifndef SDCARD
   #define setup_SDCARD()                                 // Dummy initialize
@@ -460,9 +465,60 @@ void setup_SDCARD()
       }
       else
       {
+#if defined(TRACKLIST)
+      bool haveFromTracklist = false;
+      if (SD_hastracklist = SD.exists( SD_tracklistname )) {
+        char *sbuff = (char *)&tmpbuff;
+        size_t buffsize = sizeof(tmpbuff) - 1;
+        File trackList;
+        size_t tracklistSize;
+        char s[20];
+        p = dbgprint("Read MP3-Tracklist from file" );
+        tftlog ( p );
+        trackList = SD.open( SD_tracklistname );
+        tracklistSize = trackList.size();
+        if (tracklistSize > 10) {
+          trackList.read((uint8_t *)s, 10);
+          s[10] = 0;
+          SD_nodecount = atoi ( s );
+          trackList.read((uint8_t *)s, 1);
+          if (haveFromTracklist = (s[0] == '=')) {
+            SD_nodelist = "";
+            tracklistSize = tracklistSize - 11;
+            while (tracklistSize > 0) {
+              size_t len = (tracklistSize < buffsize)?tracklistSize:buffsize;
+              trackList.read(tmpbuff, len);
+              tmpbuff[len] = 0;
+              SD_nodelist = SD_nodelist + String(sbuff);
+              tracklistSize = tracklistSize - len;
+            }
+          }          
+        }
+        trackList.close();
+      }
+      if (!haveFromTracklist)
+        {
+        char *sbuff = (char *)&tmpbuff;
+        size_t buffsize = sizeof(tmpbuff);
+        if (!SD_hastracklist)
+          dbgprint ( "Locate mp3 files on SD, may take a while...", SD_tracklistname ) ;
+        else
+          dbgprint ( "Tracklist file \"%s\" is empty (or corrupt), creating it may take a while...", SD_tracklistname ) ;
+        tftlog ( "Read SD card" ) ;
+        SD_nodecount = listsdtracks ( "/", 0, false ) ;  // Build nodelist
+        if ( SD_hastracklist ) {
+          File trackList = SD.open(SD_tracklistname, FILE_WRITE);
+          sprintf(sbuff, "%10d=", SD_nodecount);
+          trackList.write(tmpbuff, strlen(sbuff));
+          trackList.write((uint8_t *)SD_nodelist.c_str(), SD_nodelist.length());
+          trackList.close();
+          }
+        }
+#else
         dbgprint ( "Locate mp3 files on SD, may take a while..." ) ;
         tftlog ( "Read SD card" ) ;
         SD_nodecount = listsdtracks ( "/", 0, false ) ;  // Build nodelist
+#endif
         p = dbgprint ( "%d tracks on SD", SD_nodecount ) ;
         tftlog ( p ) ;                                   // Show number of tracks on TFT
       }
