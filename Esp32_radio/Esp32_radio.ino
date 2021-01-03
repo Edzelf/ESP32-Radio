@@ -168,14 +168,14 @@
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
 // Define type of local filesystem(s).  See documentation.
-#define CH376                          // For CXH376 support (reading files from USB stick)
+//#define CH376                          // For CXH376 support (reading files from USB stick)
 #define SDCARD                         // For SD card support (reading files from SD card)
 // Define (just one) type of display.  See documentation.
 //#define BLUETFT                        // Works also for RED TFT 128x160
 //#define OLED                         // 64x128 I2C OLED
-//#define DUMMYTFT                     // Dummy display
+#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
-#define LCD2004I2C                   // LCD 2004 display with I2C backpack
+//#define LCD2004I2C                   // LCD 2004 display with I2C backpack
 //#define ILI9341                      // ILI9341 240*320
 //#define NEXTION                      // Nextion display. Uses UART 2 (pin 16 and 17)
 //
@@ -5035,6 +5035,46 @@ const char* analyzeCmd ( const char* par, const char* val )
     dbgprint ( "Command: %s (without parameter)",
                argument.c_str() ) ;
   }
+#if defined(TRACKLIST)
+  if (argument == "tracklist") {
+    value.toLowerCase();
+    if (SD_okay) {
+      if (value == "0") {
+        sprintf(reply, "Tracklist \"%s\" is %sused.", SD_tracklistname, (SD_hastracklist?"":"not "));
+      } else if (value == "delete") {
+        if (!SD_hastracklist) 
+          sprintf(reply, "Tracklist \"%s\" does not exist!", SD_tracklistname);
+        else {
+          bool deleteSuccess;
+          claimSPI ( "command" );
+          deleteSuccess = SD.remove( SD_tracklistname );
+          releaseSPI ();
+          if (SD_hastracklist = !deleteSuccess) 
+            sprintf(reply, "Failed to delete tracklist \"%s\".", SD_tracklistname);
+          else
+            sprintf(reply, "Tracklist \"%s\" deleted.", SD_tracklistname);
+        }
+      } else if (value == "init") {
+        if (SD_hastracklist) 
+          sprintf(reply, "Tracklist \"%s\" does exist. Run command \"tracklist=delete\" first to delete it.", SD_tracklistname);
+        else {
+          File f;
+          claimSPI ( "command" );
+          f = SD.open( SD_tracklistname, FILE_WRITE );
+          f.close();
+          releaseSPI ();         
+          sprintf(reply, "Empty Tracklist \"%s\" created. Will be filled at next start of radio.", SD_tracklistname);
+           
+        }
+      }
+    }
+    else {
+      strcpy(reply, "SD-card not available!");
+    }
+    return reply;
+  }    
+#endif
+
   if ( argument.indexOf ( "volume" ) >= 0 )           // Volume setting?
   {
     // Volume may be of the form "upvolume", "downvolume" or "volume" for relative or absolute setting
