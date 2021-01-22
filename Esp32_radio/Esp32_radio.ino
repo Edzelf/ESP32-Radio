@@ -2984,7 +2984,7 @@ void scanIR()
                                                             // specific repeat count, ir_XXXXr will NOT fire.
                                                             // (BTW: ir_XXXXr0 will never fire. ir_XXXX cannot be masked)
       bool done = false ;                                   // Will be set to true if specific ir_XXXXrY has been found.
-      dbgprint ( "Longpress IR code %04X received,"
+      dbgprint ( "Longpress IR code %04X received, "
                  "repeat count is: %d",
                 code, repeat_count ) ;
       sprintf ( mykey, "ir_%04Xr%d", code , repeat_count) ; // Form key in preferences
