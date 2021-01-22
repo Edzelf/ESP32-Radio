@@ -3012,12 +3012,12 @@ void scanIR()
     }
     else                                                    // On first press, do just search for ir_XXXX
     {
-      sprintf ( mykey, "ir_%04X", ir_value ) ;              // Form key in preferences
+      sprintf ( mykey, "ir_%04X", code ) ;                  // Form key in preferences
       if ( nvssearch ( mykey ) )
       {
         val = nvsgetstr ( mykey ) ;                           // Get the contents
         dbgprint ( "IR code %04X received. Will execute %s",
-                   ir_value, val.c_str() ) ;
+                   code, val.c_str() ) ;
         reply = analyzeCmd ( val.c_str() ) ;                  // Analyze command and handle it
         dbgprint ( reply ) ;                                  // Result for debugging
       }
