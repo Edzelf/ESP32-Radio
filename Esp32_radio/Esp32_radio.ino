@@ -3024,7 +3024,7 @@ void scanIR()
       else
       {
         dbgprint ( "IR code %04X received, but not found in preferences!  Timing %d/%d",
-                   ir_value, ir_0, ir_1 ) ;
+                   code, ir_0, ir_1 ) ;
       }
 	}
   }
