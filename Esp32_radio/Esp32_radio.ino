@@ -430,7 +430,7 @@ int               chunkcount = 0 ;                       // Counter for chunked 
 String            http_getcmd ;                          // Contents of last GET command
 String            http_rqfile ;                          // Requested file
 bool              http_response_flag = false ;           // Response required
-uint16_t          ir_value = 0 ;                         // IR code
+uint32_t          ir_value = 0 ;                         // IR code
 uint32_t          ir_0 = 550 ;                           // Average duration of an IR short pulse
 uint32_t          ir_1 = 1650 ;                          // Average duration of an IR long pulse
 struct tm         timeinfo ;                             // Will be filled by NTP server
@@ -1695,6 +1695,9 @@ void IRAM_ATTR isr_IR()
   sv uint32_t      t0 = 0 ;                          // To get the interval
   sv uint32_t      ir_locvalue = 0 ;                 // IR code
   sv int           ir_loccount = 0 ;                 // Length of code
+  sv uint32_t      ir_repeatcode = 0;                // Code to report, if repeat shot has been detected
+  sv uint32_t      ir_lasttime = 0;                  // Last time of valid code (either first shot or repeat)
+  sv uint8_t       repeat_step = 0;                  // Current Status of repeat code received
   uint32_t         t1, intval ;                      // Current time and interval since last change
   uint32_t         mask_in = 2 ;                     // Mask input for conversion
   uint16_t         mask_out = 1 ;                    // Mask output for conversion
@@ -1704,9 +1707,25 @@ void IRAM_ATTR isr_IR()
   t0 = t1 ;                                          // Save for next compare
   if ( ( intval > 300 ) && ( intval < 800 ) )        // Short pulse?
   {
-    ir_locvalue = ir_locvalue << 1 ;                 // Shift in a "zero" bit
-    ir_loccount++ ;                                  // Count number of received bits
-    ir_0 = ( ir_0 * 3 + intval ) / 4 ;               // Compute average durartion of a short pulse
+    if ( repeat_step == 2 )                          // Full preamble for repeat seen?
+    {  
+      if (t1 - ir_lasttime < 120000)                 // Repeat shot is expected 108 ms either after last
+      {                                              // initial key or previous repeat  
+        if ((ir_value == 0) && (ir_repeatcode != 0)) // Last IR value has been consumed? repeatcode is valid?
+        {
+          ir_repeatcode = ir_repeatcode + 0x10000 ;  // Increment repeat counter (stored in upper word)
+          ir_value = ir_repeatcode ;                 // And report repeat with incremented repeat counter
+        }                                            // (repeat counter is in upper word of ir_value) 
+        ir_lasttime = t1 ;                           // Reset timer for next repeat shot.
+      }
+      repeat_step = 0 ;                              // Reset repeat search state  
+    } 
+    else 
+    {
+      ir_locvalue = ir_locvalue << 1 ;               // Shift in a "zero" bit
+      ir_loccount++ ;                                // Count number of received bits
+      ir_0 = ( ir_0 * 3 + intval ) / 4 ;             // Compute average durartion of a short pulse
+	}
   }
   else if ( ( intval > 1400 ) && ( intval < 1900 ) ) // Long pulse?
   {
@@ -1716,6 +1735,7 @@ void IRAM_ATTR isr_IR()
   }
   else if ( ir_loccount == 65 )                      // Value is correct after 65 level changes
   {
+    ir_value = 0 ;                                   // Clear all 32 bits of ir_value
     while ( mask_in )                                // Convert 32 bits to 16 bits
     {
       if ( ir_locvalue & mask_in )                   // Bit set in pattern?
@@ -1726,9 +1746,17 @@ void IRAM_ATTR isr_IR()
       mask_out <<= 1 ;                               // Shift output mask 1 position
     }
     ir_loccount = 0 ;                                // Ready for next input
+    ir_repeatcode = ir_value ;                       // Store code for repeat shots
+    ir_lasttime = t1 ;                               // Start timer for detecting valid repeat shots
   }
   else
   {
+    if ((intval > 8500) && (intval < 9500) && (repeat_step == 0))         // Check for repeat: a repeat shot starts 
+      repeat_step++;                                                      // with a 9ms pulse
+    else if ((intval > 2000) && (intval < 2500) && (repeat_step == 1))    // followed by a 2.25ms pulse
+      repeat_step++;
+    else
+      repeat_step = 0;                                                    // Reset repeat shot decoding
     ir_locvalue = 0 ;                                // Reset decoding
     ir_loccount = 0 ;
   }
@@ -2933,24 +2961,72 @@ void scanIR()
   char        mykey[20] ;                                   // For numerated key
   String      val ;                                         // Contents of preference entry
   const char* reply ;                                       // Result of analyzeCmd
+  uint16_t    code ;                                        // The code of the Remote key
+  uint16_t    repeat_count ;                                // Will be increased by every repeated
+                                                            // call to scanIR() until the key is released.
+                                                            // Zero on first detection
 
   if ( ir_value )                                           // Any input?
   {
-    sprintf ( mykey, "ir_%04X", ir_value ) ;                // Form key in preferences
-    if ( nvssearch ( mykey ) )
-    {
-      val = nvsgetstr ( mykey ) ;                           // Get the contents
-      dbgprint ( "IR code %04X received. Will execute %s",
-                 ir_value, val.c_str() ) ;
-      reply = analyzeCmd ( val.c_str() ) ;                  // Analyze command and handle it
-      dbgprint ( reply ) ;                                  // Result for debugging
-    }
-    else
-    {
-      dbgprint ( "IR code %04X received, but not found in preferences!  Timing %d/%d",
-                 ir_value, ir_0, ir_1 ) ;
-    }
+    code = ir_value & 0xffff ;                              // Key code is stored in lower word of ir_value
+    repeat_count = ir_value >> 16 ;                         // Repeat counter in upper word of if_value
     ir_value = 0 ;                                          // Reset IR code received
+    if ( 0 < repeat_count )                                 // Is it a "longpress"?
+    {                                                       // In case of a "longpress", we will first search
+                                                            // for ir_XXXXrY, where XXXX is the HEX code of the
+                                                            // key as usual and Y is the repeat counter in decimal,
+                                                            // just as is, no leading '0'. Example: ir_40BFr20 means
+                                                            // this is the 20th repeat of key with code $0BF. That
+                                                            // translates (roughly) to a press time of (at least) 20 * 100ms
+                                                            // If such a preference is not found, we will search for 
+                                                            // ir_XXXXr, which fires for any repeat count.
+                                                            // That means, ir_XXXXrY takes precedence, if defined for a
+                                                            // specific repeat count, ir_XXXXr will NOT fire.
+                                                            // (BTW: ir_XXXXr0 will never fire. ir_XXXX cannot be masked)
+      bool done = false ;                                   // Will be set to true if specific ir_XXXXrY has been found.
+      dbgprint ( "Longpress IR code %04X received, "
+                 "repeat count is: %d",
+                code, repeat_count ) ;
+      sprintf ( mykey, "ir_%04Xr%d", code , repeat_count) ; // Form key in preferences
+      if ( nvssearch ( mykey ) )                            // Search for specific ir_XXXXrY  
+      {
+        done = true ;                                       // If found, we will not search for ir_XXXXr later
+        val = nvsgetstr ( mykey ) ;                         // Get the contents
+        dbgprint ( "IR code %s received. Will execute %s",
+                  mykey, val.c_str() ) ;
+        reply = analyzeCmd ( val.c_str() ) ;                // Analyze command and handle it
+        dbgprint ( reply ) ;                                // Result for debugging
+      }
+      if ( !done )                                          // Did we not find a specific ir_XXXXrY before?
+      {
+        sprintf ( mykey, "ir_%04Xr", code ) ;               // Form key in preferences
+        if ( nvssearch ( mykey ) )                          // Search for more generic ir_XXXXr
+        {
+          val = nvsgetstr ( mykey ) ;                       // Get the contents
+          dbgprint ( "IR code %s received. Will execute %s",
+                    mykey, val.c_str() ) ;
+          reply = analyzeCmd ( val.c_str() ) ;              // Analyze command and handle it
+          dbgprint ( reply ) ;                              // Result for debugging
+        }
+      }
+    }
+    else                                                    // On first press, do just search for ir_XXXX
+    {
+      sprintf ( mykey, "ir_%04X", code ) ;                  // Form key in preferences
+      if ( nvssearch ( mykey ) )
+      {
+        val = nvsgetstr ( mykey ) ;                           // Get the contents
+        dbgprint ( "IR code %04X received. Will execute %s",
+                   code, val.c_str() ) ;
+        reply = analyzeCmd ( val.c_str() ) ;                  // Analyze command and handle it
+        dbgprint ( reply ) ;                                  // Result for debugging
+      }
+      else
+      {
+        dbgprint ( "IR code %04X received, but not found in preferences!  Timing %d/%d",
+                   code, ir_0, ir_1 ) ;
+      }
+	}
   }
 }
 
