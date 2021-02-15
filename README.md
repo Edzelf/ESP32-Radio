@@ -36,6 +36,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 15-feb-2021, Added earch page.
 - 21-jan-2021, Added PlatformIO version.
 - 14-oct-2020, Clear artist and song on display at new station connect.
 - 18-oct-2020, Fixed LCD2004 error.
