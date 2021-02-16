@@ -2128,6 +2128,9 @@ bool connectwifi()
 
   WiFi.disconnect ( true ) ;                            // After restart the router could
   WiFi.softAPdisconnect ( true ) ;                      // still keep the old connection
+  vTaskDelay ( 1000 / portTICK_PERIOD_MS ) ;            // Silly things to start connection
+  WiFi.mode ( WIFI_STA ) ;
+  vTaskDelay ( 1000 / portTICK_PERIOD_MS ) ;
   if ( wifilist.size()  )                               // Any AP defined?
   {
     if ( wifilist.size() == 1 )                         // Just one AP defined in preferences?
@@ -4228,7 +4231,10 @@ void mp3loop()
       }
       if ( maxchunk > 1000 || datamode == INIT )         // Only read if worthwile or during INIT
       {
-        res = mp3client.read ( tmpbuff, maxchunk ) ;     // Read a number of bytes from the stream
+        if ( maxchunk )                                  // Zero bytes not allowed
+        {
+          res = mp3client.read ( tmpbuff, maxchunk ) ;   // Read a number of bytes from the stream
+        }
       }
     }
     if ( maxchunk == 0 )
@@ -4551,6 +4557,11 @@ void handlebyte_ch ( uint8_t b )
         if ( lcml.startsWith ( "location: http://" ) ) // Redirection?
         {
           host = metaline.substring ( 17 ) ;           // Yes, get new URL
+          hostreq = true ;                             // And request this one
+        }
+        if ( lcml.startsWith ("location: https://") )  // Redirection?
+        {
+          host = metaline.substring ( 18 ) ;           // Yes, get new URL
           hostreq = true ;                             // And request this one
         }
         if ( lcml.indexOf ( "content-type" ) >= 0)     // Line with "Content-Type: xxxx/yyy"
