@@ -159,15 +159,15 @@
 // 27-12-2020, ES: Do not read small buffer from stream.
 // 21-01-2021, ES: PlatformIO version.
 // 15-02-2021, ES: Added search page in web interface.
-//
+// 16-02-2021, ES: Give BBC stations some time to react on initial request.
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Mon, 15 Feb 2021 13:00:00 GMT"
+#define VERSION     "Tue, 16 Feb 2021 08:05:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
-#define BINFILE     "/Arduino/Esp32_radio/firmware.bin"      // Binary file name for update software
+#define BINFILE     "/Arduino/Esp32_radio/firmware.bin" // Binary file name for update software
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
 // Define type of local filesystem(s).  See documentation.
@@ -2025,6 +2025,7 @@ bool connecttohost()
   String      extension = "/" ;                     // May be like "/mp3" in "skonto.ls.lv:8002/mp3"
   String      hostwoext = host ;                    // Host without extension and portnumber
   String      auth  ;                               // For basic authentication
+  String      getreq ;                              // Get request
 
   stop_mp3client() ;                                // Disconnect if still connected
   dbgprint ( "Connect to new host %s", host.c_str() ) ;
@@ -2072,16 +2073,18 @@ bool connecttohost()
                 auth + String ( "\r\n" ) ;
       }
     }
-    mp3client.print ( String ( "GET " ) +
-                      extension +
-                      String ( " HTTP/1.1\r\n" ) +
-                      String ( "Host: " ) +
-                      hostwoext +
-                      String ( "\r\n" ) +
-                      String ( "Icy-MetaData:1\r\n" ) +
-                      auth +
-                      String ( "Connection: close\r\n\r\n" ) ) ;
-    return true ;
+    getreq = String ( "GET " ) +                            // Format get request
+             extension +
+             String ( " HTTP/1.0\r\n" ) +
+             String ( "Host: " ) +
+             hostwoext +
+             String ( "\r\n" ) +
+             String ( "Icy-MetaData: 1\r\n" ) +
+             auth +
+             String ( "Connection: close\r\n\r\n" ) ;
+    mp3client.print ( getreq ) ;                            // Send get request
+    vTaskDelay ( 1000 / portTICK_PERIOD_MS ) ;              // Give some time to react
+    return true ;                                           // Send is probably okay
   }
   dbgprint ( "Request %s failed!", host.c_str() ) ;
   return false ;
@@ -4170,7 +4173,7 @@ void chk_enc()
 //**************************************************************************************************
 //                                           M P 3 L O O P                                         *
 //**************************************************************************************************
-// Called from the mail loop() for the mp3 functions.                                              *
+// Called from the main loop() for the mp3 functions.                                              *
 // A connection to an MP3 server is active and we are ready to receive data.                       *
 // Normally there is about 2 to 4 kB available in the data stream.  This depends on the sender.    *
 //**************************************************************************************************
@@ -4223,7 +4226,7 @@ void mp3loop()
       {
         maxchunk = qspace ;                              // No, limit to free queue space
       }
-      if ( maxchunk > 1000 )                             // Only read if worthwile
+      if ( maxchunk > 1000 || datamode == INIT )         // Only read if worthwile or during INIT
       {
         res = mp3client.read ( tmpbuff, maxchunk ) ;     // Read a number of bytes from the stream
       }
@@ -4423,7 +4426,7 @@ bool chkhdrline ( const char* str )
       {
         if ( b == ':' )                               // Found a colon?
         {
-          return ( ( len > 5 ) && ( len < 50 ) ) ;    // Yes, okay if length is okay
+          return ( ( len > 5 ) && ( len < 70 ) ) ;    // Yes, okay if length is okay
         }
         else
         {
@@ -4521,6 +4524,7 @@ void handlebyte_ch ( uint8_t b )
     bitrate = 0 ;                                      // Bitrate still unknown
     dbgprint ( "Switch to HEADER" ) ;
     setdatamode ( HEADER ) ;                           // Handle header
+
     totalcount = 0 ;                                   // Reset totalcount
     metalinebfx = 0 ;                                  // No metadata yet
     metalinebf[0] = '\0' ;
@@ -5152,11 +5156,11 @@ const char* analyzeCmd ( const char* par, const char* val )
         return reply ;
       }
     }
-    if ( datamode & ( HEADER | DATA | METADATA | PLAYLISTINIT |
-                      PLAYLISTHEADER | PLAYLISTDATA ) )
-    {
-      setdatamode ( STOPREQD ) ;                      // Request STOP
-    }
+    ///if ( datamode & ( HEADER | DATA | METADATA | PLAYLISTINIT |
+    ///                  PLAYLISTHEADER | PLAYLISTDATA ) )
+    ///{
+    ///  setdatamode ( STOPREQD ) ;                      // Request STOP
+    ///}
     host = value ;                                    // Save it for storage and selection later
     hostreq = true ;                                  // Force this station as new preset
     sprintf ( reply,
