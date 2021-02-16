@@ -163,11 +163,11 @@
 //
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Tue, 16 Feb 2021 08:05:00 GMT"
+#define VERSION     "Tue, 16 Feb 2021 09:00:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
-#define BINFILE     "/Arduino/Esp32_radio/firmware.bin" // Binary file name for update software
+#define BINFILE     "/Arduino/ESP32_radio/firmware.bin" // Binary file name for update software
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
 // Define type of local filesystem(s).  See documentation.
