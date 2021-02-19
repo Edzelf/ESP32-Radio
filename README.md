@@ -36,6 +36,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 19-feb-2021, More Oled models.
 - 16-feb-2021, Give BBC stations some time to react. See issue 437.
 - 15-feb-2021, Added earch page.
 - 21-jan-2021, Added PlatformIO version.
