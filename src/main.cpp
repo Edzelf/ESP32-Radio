@@ -160,10 +160,11 @@
 // 21-01-2021, ES: PlatformIO version.
 // 15-02-2021, ES: Added search page in web interface.
 // 16-02-2021, ES: Give BBC stations some time to react on initial request.
-//
+// 19-02-2021, ES: More Oled models.
+
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Tue, 16 Feb 2021 09:00:00 GMT"
+#define VERSION     "Fri, 19 Feb 2021 11:50:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -175,7 +176,9 @@
 #define SDCARD                         // For SD card support (reading files from SD card)
 // Define (just one) type of display.  See documentation.
 #define BLUETFT                        // Works also for RED TFT 128x160
-//#define OLED                         // 64x128 I2C OLED
+//#define OLED1306                     // 64x128 I2C OLED SSD1306
+//#define OLED1309                     // 64x128 I2C OLED SSD1309
+//#define OLED1106                     // 64x128 I2C OLED SH1106
 //#define DUMMYTFT                     // Dummy display
 //#define LCD1602I2C                   // LCD 1602 display with I2C backpack
 //#define LCD2004I2C                   // LCD 2004 display with I2C backpack
@@ -1119,25 +1122,31 @@ VS1053* vs1053player ;
 
 // Include software for the right display
 #ifdef BLUETFT
-#include "bluetft.h"                                     // For ILI9163C or ST7735S 128x160 display
+ #include "bluetft.h"                                    // For ILI9163C or ST7735S 128x160 display
 #endif
 #ifdef ILI9341
-#include "ILI9341.h"                                     // For ILI9341 320x240 display
+ #include "ILI9341.h"                                    // For ILI9341 320x240 display
 #endif
-#ifdef OLED
-#include "SSD1306.h"                                     // For OLED I2C SD1306 64x128 display
+#ifdef OLED1306
+ #include "oled.h"                                       // For OLED I2C SD1306 64x128 display
+#endif
+#ifdef OLED1309
+ #include "oled.h"                                       // For OLED I2C SD1309 64x128 display
+#endif
+#ifdef OLED1106
+ #include "oled.h"                                       // For OLED I2C SH1106 64x128 display
 #endif
 #ifdef LCD1602I2C
-#include "LCD1602.h"                                     // For LCD 1602 display (I2C)
+ #include "oled.h.h"                                     // For LCD 1602 display (I2C)
 #endif
 #ifdef LCD2004I2C
-#include "LCD2004.h"                                     // For LCD 2004 display (I2C)
+ #include "LCD2004.h"                                    // For LCD 2004 display (I2C)
 #endif
 #ifdef DUMMYTFT
-#include "Dummytft.h"                                    // For Dummy display
+ #include "Dummytft.h"                                   // For Dummy display
 #endif
 #ifdef NEXTION
-#include "NEXTION.h"                                     // For NEXTION display
+ #include "NEXTION.h"                                    // For NEXTION display
 #endif
 //
 // Include software for CH376
@@ -3272,8 +3281,11 @@ void setup()
 #if defined ( ILI9341 )                                // Report display option
   dbgprint ( dtyp, "ILI9341" ) ;
 #endif
-#if defined ( OLED )
-  dbgprint ( dtyp, "OLED" ) ;
+#if defined ( OLED1306 )
+  dbgprint ( dtyp, "OLED1306" ) ;
+#endif
+#if defined ( OLED1309 )
+  dbgprint ( dtyp, "OLED1309" ) ;
 #endif
 #if defined ( DUMMYTFT )
   dbgprint ( dtyp, "DUMMYTFT" ) ;
