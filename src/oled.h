@@ -3,7 +3,8 @@
 //***************************************************************************************************
 // Driver for SSD1306/SSD1309/SH1106 display                                                        *
 //***************************************************************************************************
-
+// 25-02-2021, ES: Correct bug, isSH1106 was always set.                                            *
+//***************************************************************************************************
 #include <driver/i2c.h>
 #include <string.h>
 
@@ -48,7 +49,7 @@ class OLED
                            uint8_t w,
                            uint8_t h ) ;        
   private:
-    bool                    isSH1106 = true ;         // Display is a SH1106
+    bool                    isSH1106 = false ;        // Display is a SH1106 or not
     i2c_cmd_handle_t        i2Cchan ;                 // Channel for I2C communication
     struct page_struct*     ssdbuf = NULL ;
     const  uint8_t*         font ;                    // Font to use
