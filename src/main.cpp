@@ -4540,6 +4540,7 @@ void handlebyte_ch ( uint8_t b )
     metaint = 0 ;                                      // No metaint found
     LFcount = 0 ;                                      // For detection end of header
     bitrate = 0 ;                                      // Bitrate still unknown
+    icyname = "" ;                                     // Clear Station name
     dbgprint ( "Switch to HEADER" ) ;
     setdatamode ( HEADER ) ;                           // Handle header
 
@@ -5199,8 +5200,16 @@ const char* analyzeCmd ( const char* par, const char* val )
     }
     else
     {
-      sprintf ( reply, "%s - %s", icyname.c_str(),
-                icystreamtitle.c_str() ) ;            // Streamtitle from metadata
+      if ( icyname != "" )                            // Check for station name
+      {
+        sprintf ( reply, "%s - %s", icyname.c_str(),
+                  icystreamtitle.c_str() ) ;          // Streamtitle from metadata
+      }
+      else
+      {
+         sprintf ( reply, "%s", 
+                 icystreamtitle.c_str() ) ;           // Streamtitle from metadata
+      }
     }
   }
   else if ( argument.startsWith ( "reset" ) )         // Reset request
