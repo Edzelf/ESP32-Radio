@@ -161,10 +161,11 @@
 // 15-02-2021, ES: Added search page in web interface.
 // 16-02-2021, ES: Give BBC stations some time to react on initial request.
 // 19-02-2021, ES: More Oled models.
+// 25-04-2021, ES: Fixed playlist bug.
 
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Fri, 19 Feb 2021 11:50:00 GMT"
+#define VERSION     "Sun, 25 Apr 2021 12:30:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -175,8 +176,8 @@
 #define CH376                          // For CXH376 support (reading files from USB stick)
 #define SDCARD                         // For SD card support (reading files from SD card)
 // Define (just one) type of display.  See documentation.
-#define BLUETFT                        // Works also for RED TFT 128x160
-//#define OLED1306                     // 64x128 I2C OLED SSD1306
+//#define BLUETFT                        // Works also for RED TFT 128x160
+#define OLED1306                     // 64x128 I2C OLED SSD1306
 //#define OLED1309                     // 64x128 I2C OLED SSD1309
 //#define OLED1106                     // 64x128 I2C OLED SH1106
 //#define DUMMYTFT                     // Dummy display
@@ -450,6 +451,7 @@ int16_t           scanios ;                              // TEST*TEST*TEST
 int16_t           scaniocount ;                          // TEST*TEST*TEST
 uint16_t          bltimer = 0 ;                          // Backlight time-out counter
 display_t         displaytype = T_UNDEFINED ;            // Display type
+int               ir_intcount = 0 ;                      // For test IR interrupts
 std::vector<WifiInfo_t> wifilist ;                       // List with wifi_xx info
 // nvs stuff
 nvs_page                nvsbuf ;                         // Space for 1 page of NVS info
@@ -929,7 +931,7 @@ bool VS1053::testComm ( const char *header )
     dbgprint ( "This is not a VS1053, "                 // Report the wrong chip
                "but a VS%d instead!",
                vstype[r1] ) ;
-    okay = false ;
+    //okay = false ;                                    // Standard codecs not fully supported
   }
   return ( okay ) ;                                     // Return the result
 }
@@ -1714,6 +1716,7 @@ void IRAM_ATTR isr_IR()
   uint32_t         mask_in = 2 ;                     // Mask input for conversion
   uint16_t         mask_out = 1 ;                    // Mask output for conversion
 
+  ir_intcount++ ;                                    // Test IR input.
   t1 = micros() ;                                    // Get current time
   intval = t1 - t0 ;                                 // Compute interval
   t0 = t1 ;                                          // Save for next compare
@@ -3287,6 +3290,9 @@ void setup()
 #if defined ( OLED1309 )
   dbgprint ( dtyp, "OLED1309" ) ;
 #endif
+#if defined ( OLED1106 )
+  dbgprint ( dtyp, "OLED1106" ) ;
+#endif
 #if defined ( DUMMYTFT )
   dbgprint ( dtyp, "DUMMYTFT" ) ;
 #endif
@@ -4241,7 +4247,9 @@ void mp3loop()
       {
         maxchunk = qspace ;                              // No, limit to free queue space
       }
-      if ( maxchunk > 1000 || datamode == INIT )         // Only read if worthwile or during INIT
+      if ( ( maxchunk > 1000 ) ||
+           ( datamode == INIT ) ||                       // Only read if worthwile or during INIT
+           ( datamode == PLAYLISTINIT ) )
       {
         if ( maxchunk )                                  // Zero bytes not allowed
         {
@@ -4542,7 +4550,6 @@ void handlebyte_ch ( uint8_t b )
     bitrate = 0 ;                                      // Bitrate still unknown
     dbgprint ( "Switch to HEADER" ) ;
     setdatamode ( HEADER ) ;                           // Handle header
-
     totalcount = 0 ;                                   // Reset totalcount
     metalinebfx = 0 ;                                  // No metadata yet
     metalinebf[0] = '\0' ;
@@ -5232,6 +5239,7 @@ const char* analyzeCmd ( const char* par, const char* val )
     dbgprint ( "ADC reading is %d", adcval ) ;
     dbgprint ( "scaniocount is %d", scaniocount ) ;
     dbgprint ( "Max. mp3_loop duration is %d", max_mp3loop_time ) ;
+    dbgprint ( "%d IR interrupts seen", ir_intcount ) ;
     max_mp3loop_time = 0 ;                            // Start new check
   }
   // Commands for bass/treble control
