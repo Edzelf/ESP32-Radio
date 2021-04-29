@@ -162,10 +162,11 @@
 // 16-02-2021, ES: Give BBC stations some time to react on initial request.
 // 19-02-2021, ES: More Oled models.
 // 25-04-2021, ES: Fixed playlist bug.
+// 29-04-2021, ES: Fixed SSD1309 bug, thanks to Juraj Liso.
 
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Sun, 25 Apr 2021 12:30:00 GMT"
+#define VERSION     "Thu, 29 Apr 2021 09:20:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -173,11 +174,11 @@
 #define TFTFILE     "/Arduino/ESP32-Radio.tft"          // Binary file name for update NEXTION image
 //
 // Define type of local filesystem(s).  See documentation.
-#define CH376                          // For CXH376 support (reading files from USB stick)
-#define SDCARD                         // For SD card support (reading files from SD card)
+//#define CH376                          // For CXH376 support (reading files from USB stick)
+//#define SDCARD                         // For SD card support (reading files from SD card)
 // Define (just one) type of display.  See documentation.
-//#define BLUETFT                        // Works also for RED TFT 128x160
-#define OLED1306                     // 64x128 I2C OLED SSD1306
+#define BLUETFT                        // Works also for RED TFT 128x160
+//#define OLED1306                     // 64x128 I2C OLED SSD1306
 //#define OLED1309                     // 64x128 I2C OLED SSD1309
 //#define OLED1106                     // 64x128 I2C OLED SH1106
 //#define DUMMYTFT                     // Dummy display
