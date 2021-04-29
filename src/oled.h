@@ -50,6 +50,7 @@ class OLED
                            uint8_t h ) ;        
   private:
     bool                    isSH1106 = false ;        // Display is a SH1106 or not
+    bool                    isSSD1309 = false ;       // Display is a SSD1309 or not
     i2c_cmd_handle_t        i2Cchan ;                 // Channel for I2C communication
     struct page_struct*     ssdbuf = NULL ;
     const  uint8_t*         font ;                    // Font to use
@@ -390,7 +391,7 @@ void OLED::display()
       openI2Cchan() ;                                         // Open I2C channel
       wrI2Cchan ( OLED_CONTROL_BYTE_CMD_SINGLE ) ;            // Set single byte command mode
       wrI2Cchan ( 0xB0 | pg ) ;                               // Set page address
-      if ( isSH1106 )                                         // Is it an SH1106?
+      if ( isSH1106 || isSSD1309 )                            // Is it an SH1106 or SSD1309?
       {
         wrI2Cchan ( 0x00 ) ;                           	      // Set lower column address to 0
         wrI2Cchan ( 0x10 ) ;                                  // Set higher column address to 0
@@ -513,9 +514,13 @@ OLED::OLED ( uint8_t sda, uint8_t scl )
                     OLED_CMD_DISPLAY_ON                      // Display on
                   } ;
   #if defined ( OLED1106 )                                      // Is it an SH1106?
-    isSH1106 = true ;                                           // Get display type                         
+    isSH1106 = true ;                                           // Get display type
+  #endif
+  #if defined ( OLED1309 )                                      // Is it an SDD1309?
+    isSSD1309 = true ;                                          // Get display type
   #endif
   dbgprint ( "ISSH116 is %d", (int)isSH1106 ) ;
+  dbgprint ( "ISSSD1309 is %d", (int)isSSD1309 ) ;
   ssdbuf = (page_struct*) malloc ( 8 * sizeof(page_struct) ) ;  // Create buffer for screen
   font = OLEDfont ;
   i2c_param_config ( I2C_NUM_0, &i2c_config ) ;

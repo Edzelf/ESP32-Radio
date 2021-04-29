@@ -219,7 +219,7 @@
 // Adjust size of buffer to the longest expected string for nvsgetstr
 #define NVSBUFSIZE 150
 // Position (column) of time in topline relative to end
-#define TIMEPOS -52
+#define TIMEPOS -47
 // SPI speed for SD card
 #define SDSPEED 1000000
 // Size of metaline buffer
