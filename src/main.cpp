@@ -163,6 +163,7 @@
 // 19-02-2021, ES: More Oled models.
 // 25-04-2021, ES: Fixed playlist bug.
 // 29-04-2021, ES: Fixed SSD1309 bug, thanks to Juraj Liso.
+// 11-05-2021, ES: Added alternative volume scaling, thanks to Jason Gaunt.
 
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
@@ -302,6 +303,7 @@ struct ini_struct
   uint8_t        reqvol ;                             // Requested volume
   uint8_t        rtone[4] ;                           // Requested bass/treble settings
   int16_t        newpreset ;                          // Requested preset
+  int8_t         volaltscale ;                        // Alternative volume scaling mode
   String         clk_server ;                         // Server to be used for time of day clock
   int8_t         clk_offset ;                         // Offset in hours with respect to UTC
   int8_t         clk_dst ;                            // Number of hours shift during DST
@@ -998,7 +1000,13 @@ void VS1053::setVolume ( uint8_t vol )
   if ( vol != curvol )
   {
     curvol = vol ;                                      // Save for later use
-    value = map ( vol, 0, 100, 0xF8, 0x00 ) ;           // 0..100% to one channel
+    value = vol ;
+    if (( ini_block.volaltscale == 1 ) && ( vol > 0 ) )
+    {
+      value = ( value / 2 ) + 50 ;
+      dbgprint ( "Volume scaling active, requested %d, scaling to %d", vol, value ) ;
+    }
+    value = map ( value, 0, 100, 0xF8, 0x00 ) ;         // 0..100% to one channel
     value = ( value << 8 ) | value ;
     write_register ( SCI_VOL, value ) ;                 // Volume left and right
     if ( vol == 0 )                                     // Completely silence?
@@ -3334,6 +3342,7 @@ void setup()
   ini_block.clk_dst = 1 ;                                // DST is +1 hour
   ini_block.bat0 = 0 ;                                   // Battery ADC levels not yet defined
   ini_block.bat100 = 0 ;
+  ini_block.volaltscale = 0 ;                            // Default volume scaling is linear
   readIOprefs() ;                                        // Read pins used for SPI, TFT, VS1053, IR,
                                                          // Rotary encoder
   for ( i = 0 ; (pinnr = progpin[i].gpio) >= 0 ; i++ )   // Check programmable input pins
@@ -4993,45 +5002,46 @@ const char* analyzeCmd ( const char* str )
 
 
 //**************************************************************************************************
-//                                     A N A L Y Z E C M D                                         *
+//                                      A N A L Y Z E C M D                                        *
 //**************************************************************************************************
 // Handling of the various commands from remote webclient, serial or MQTT.                         *
 // par holds the parametername and val holds the value.                                            *
 // "wifi_00" and "preset_00" may appear more than once, like wifi_01, wifi_02, etc.                *
 // Examples with available parameters:                                                             *
-//   preset     = 12                        // Select start preset to connect to                   *
-//   preset_00  = <mp3 stream>              // Specify station for a preset 00-max *)              *
-//   volume     = 95                        // Percentage between 0 and 100                        *
-//   upvolume   = 2                         // Add percentage to current volume                    *
-//   downvolume = 2                         // Subtract percentage from current volume             *
-//   toneha     = <0..15>                   // Setting treble gain                                 *
-//   tonehf     = <0..15>                   // Setting treble frequency                            *
-//   tonela     = <0..15>                   // Setting bass gain                                   *
-//   tonelf     = <0..15>                   // Setting treble frequency                            *
-//   station    = <mp3 stream>              // Select new station (will not be saved)              *
-//   station    = <URL>.mp3                 // Play standalone .mp3 file (not saved)               *
-//   station    = <URL>.m3u                 // Select playlist (will not be saved)                 *
+//   preset      = 12                       // Select start preset to connect to                   *
+//   preset_00   = <mp3 stream>             // Specify station for a preset 00-max *)              *
+//   volume      = 95                       // Percentage between 0 and 100                        *
+//   volaltscale = 0                        // Alternative volume scaling, 0 = default, 1 = scaled *
+//   upvolume    = 2                        // Add percentage to current volume                    *
+//   downvolume  = 2                        // Subtract percentage from current volume             *
+//   toneha      = <0..15>                  // Setting treble gain                                 *
+//   tonehf      = <0..15>                  // Setting treble frequency                            *
+//   tonela      = <0..15>                  // Setting bass gain                                   *
+//   tonelf      = <0..15>                  // Setting treble frequency                            *
+//   station     = <mp3 stream>             // Select new station (will not be saved)              *
+//   station     = <URL>.mp3                // Play standalone .mp3 file (not saved)               *
+//   station     = <URL>.m3u                // Select playlist (will not be saved)                 *
 //   stop                                   // Stop playing                                        *
 //   resume                                 // Resume playing                                      *
 //   mute                                   // Mute/unmute the music (toggle)                      *
-//   wifi_00    = mySSID/mypassword         // Set WiFi SSID and password *)                       *
-//   mqttbroker = mybroker.com              // Set MQTT broker to use *)                           *
-//   mqttprefix = XP93g                     // Set MQTT broker to use                              *
-//   mqttport   = 1883                      // Set MQTT port to use, default 1883 *)               *
-//   mqttuser   = myuser                    // Set MQTT user for authentication *)                 *
-//   mqttpasswd = mypassword                // Set MQTT password for authentication *)             *
-//   clk_server = pool.ntp.org              // Time server to be used *)                           *
-//   clk_offset = <-11..+14>                // Offset with respect to UTC in hours *)              *
-//   clk_dst    = <1..2>                    // Offset during daylight saving time in hours *)      *
-//   mp3track   = <nodeID>                  // Play track from SD card, nodeID 0 = random          *
+//   wifi_00     = mySSID/mypassword        // Set WiFi SSID and password *)                       *
+//   mqttbroker  = mybroker.com             // Set MQTT broker to use *)                           *
+//   mqttprefix  = XP93g                    // Set MQTT broker to use                              *
+//   mqttport    = 1883                     // Set MQTT port to use, default 1883 *)               *
+//   mqttuser    = myuser                   // Set MQTT user for authentication *)                 *
+//   mqttpasswd  = mypassword               // Set MQTT password for authentication *)             *
+//   clk_server  = pool.ntp.org             // Time server to be used *)                           *
+//   clk_offset  = <-11..+14>               // Offset with respect to UTC in hours *)              *
+//   clk_dst     = <1..2>                   // Offset during daylight saving time in hours *)      *
+//   mp3track    = <nodeID>                 // Play track from SD card, nodeID 0 = random          *
 //   settings                               // Returns setting like presets and tone               *
 //   status                                 // Show current URL to play                            *
 //   test                                   // For test purposes                                   *
-//   debug      = 0 or 1                    // Switch debugging on or off                          *
+//   debug       = 0 or 1                   // Switch debugging on or off                          *
 //   reset                                  // Restart the ESP32                                   *
-//   bat0       = 2318                      // ADC value for an empty battery                      *
-//   bat100     = 2916                      // ADC value for a fully charged battery               *
-//   fs         = USB or SD                 // Select local filesystem for MP# player mode.        *
+//   bat0        = 2318                     // ADC value for an empty battery                      *
+//   bat100      = 2916                     // ADC value for a fully charged battery               *
+//   fs          = USB or SD                // Select local filesystem for MP# player mode.        *
 //  Commands marked with "*)" are sensible during initialization only                              *
 //**************************************************************************************************
 const char* analyzeCmd ( const char* par, const char* val )
@@ -5106,6 +5116,18 @@ const char* analyzeCmd ( const char* par, const char* val )
     muteflag = false ;                                // Stop possibly muting
     sprintf ( reply, "Volume is now %d",              // Reply new volume
               ini_block.reqvol ) ;
+  }
+  else if ( argument.indexOf ( "volaltscale" ) >= 0 ) // Alternative volume scaling request
+  {
+    ini_block.volaltscale = ivalue ;
+    if ( ini_block.volaltscale >= 1 )
+    {
+      ini_block.volaltscale = 1 ;
+    }
+    else
+    {
+      ini_block.volaltscale = 0 ;
+    }
   }
   else if ( argument == "mute" )                      // Mute/unmute request
   {

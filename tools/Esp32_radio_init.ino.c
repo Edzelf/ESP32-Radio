@@ -39,11 +39,12 @@ void setup()
   preferences.putString ( "wifi_00", "NETGEAR-11/DEADC0DE11" ) |
   preferences.putString ( "wifi_01", "ADSL-11/DEADC0DE11" ) |
   //
-  preferences.putString ( "volume", "72" ) |
-  preferences.putString ( "toneha", "0" ) |
-  preferences.putString ( "tonehf", "0" ) |
-  preferences.putString ( "tonela", "0" ) |
-  preferences.putString ( "tonelf", "0" ) |
+  preferences.putString ( "volume", "72"     ) |
+  preferences.putString ( "volaltscale", "0" ) |
+  preferences.putString ( "toneha", "0"      ) |
+  preferences.putString ( "tonehf", "0"      ) |
+  preferences.putString ( "tonela", "0"      ) |
+  preferences.putString ( "tonelf", "0"      ) |
   //
   preferences.putString ( "preset", "6" ) |
   preferences.putString ( "preset_00", "109.206.96.34:8100                       #  0 - NAXI LOVE RADIO, Belgrade, Serbia" ) ;

@@ -36,6 +36,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 11-may-2021, Added alternative volume scaling for use with headphones
 - 29-apr-2021, Fixed SSD1309 bug.
 - 25-apr-2021, Fixed SSD1309 bug, thanks to Juraj Liso.
 - 19-feb-2021, More Oled models.
