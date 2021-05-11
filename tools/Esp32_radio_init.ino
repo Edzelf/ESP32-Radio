@@ -41,6 +41,7 @@ void setup()
   preferences.putString ( "wifi_01",     "SSID2/YYYYYY" ) ;
   //
   preferences.putString ( "volume",      "72" ) ;
+  preferences.putString ( "volaltscale", "0" ) ;
   preferences.putString ( "toneha",      "0" ) ;
   preferences.putString ( "tonehf",      "0" ) ;
   preferences.putString ( "tonela",      "0" ) ;
