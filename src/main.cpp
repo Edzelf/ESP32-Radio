@@ -163,10 +163,11 @@
 // 19-02-2021, ES: More Oled models.
 // 25-04-2021, ES: Fixed playlist bug.
 // 29-04-2021, ES: Fixed SSD1309 bug, thanks to Juraj Liso.
+// 21-06-2021, ES: Display station name if not in metadata
 
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Thu, 29 Apr 2021 09:20:00 GMT"
+#define VERSION     "Mon, 21 Jun 2021 12:00:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -4207,6 +4208,8 @@ void mp3loop()
   String          nodeID ;                               // Next nodeID of track on SD
   uint32_t        timing ;                               // Startime and duration this function
   uint32_t        qspace ;                               // Free space in data queue
+  String          tmp ;                                  // Needed for station name in pref
+  int             inx ;                                  // Indexe of "#" in station name
 
   // Try to keep the Queue to playtask filled up by adding as much bytes as possible
   if ( datamode & ( INIT | HEADER | DATA |               // Test op playing
@@ -4339,6 +4342,15 @@ void mp3loop()
       else
       {
         host = readhostfrompref() ;                       // Lookup preset in preferences
+        icyname = host ;                                  // First guess station name
+        inx = icyname.indexOf ( "#" ) ;                   // Get position of "#"
+        if ( inx > 0 )                                    // Hash sign present?
+        {
+          icyname.remove ( 0, inx + 1 ) ;                 // Yes, remove non-comment part
+        }
+        chomp ( icyname ) ;                               // Remove garbage from description
+        tftset ( 2, icyname ) ;                           // Set screen segment bottom part
+        mqttpub.trigger ( MQTT_ICYNAME ) ;                // Request publishing to MQTT
         chomp ( host ) ;                                  // Get rid of part after "#"
       }
       dbgprint ( "New preset/file requested (%d/%d) from %s",
