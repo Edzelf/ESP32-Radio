@@ -36,6 +36,7 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
+- 21-jun-2021, Display station name from preference if not in metadata.
 - 29-apr-2021, Fixed SSD1309 bug.
 - 25-apr-2021, Fixed SSD1309 bug, thanks to Juraj Liso.
 - 19-feb-2021, More Oled models.
