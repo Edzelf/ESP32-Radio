@@ -164,10 +164,10 @@
 // 25-04-2021, ES: Fixed playlist bug.
 // 29-04-2021, ES: Fixed SSD1309 bug, thanks to Juraj Liso.
 // 21-06-2021, ES: Display station name if not in metadata
-
+// 28-06-2021, ES: Convert special characters in station name
 // Define the version number, also used for webserver as Last-Modified header and to
 // check version for update.  The format must be exactly as specified by the HTTP standard!
-#define VERSION     "Mon, 21 Jun 2021 12:00:00 GMT"
+#define VERSION     "Mon, 28 Jun 2021 12:40:00 GMT"
 // ESP32-Radio can be updated (OTA) to the latest version from a remote server.
 // The download uses the following server and files:
 #define UPDATEHOST  "smallenburg.nl"                    // Host for software updates
@@ -714,6 +714,7 @@ class VS1053
     const uint8_t SM_RESET          = 2 ;         // Bitnumber in SCI_MODE soft reset
     const uint8_t SM_CANCEL         = 3 ;         // Bitnumber in SCI_MODE cancel song
     const uint8_t SM_TESTS          = 5 ;         // Bitnumber in SCI_MODE for tests
+    const uint8_t SM_STREAM         = 6 ;         // Bitnumber in SCI_MODE for stream mode
     const uint8_t SM_LINE1          = 14 ;        // Bitnumber in SCI_MODE for Line input
     SPISettings   VS1053_SPI ;                    // SPI settings for this slave
     uint8_t       endFillByte ;                   // Byte to send when stopping song
@@ -791,7 +792,7 @@ class VS1053
       return ( digitalRead ( dreq_pin ) == HIGH ) ;
     }
     void     AdjustRate ( long ppm2 ) ;                  // Fine tune the datarate
-
+    void     streamMode ( bool onoff ) ;
 } ;
 
 //**************************************************************************************************
@@ -1116,6 +1117,19 @@ void VS1053::AdjustRate ( long ppm2 )                  // Fine tune the data rat
   write_register ( SCI_AUDATA,   read_register ( SCI_AUDATA ) ) ;
 }
 
+
+void VS1053::streamMode ( bool onoff )                // Set stream mode on/off
+{
+  uint16_t pat = _BV(SM_SDINEW) ;                     // Assume off
+
+  if ( onoff )                                        // Activate stream mode?
+  {
+    pat |= _BV(SM_STREAM) ;                           // Yes, set stream mode bit
+  }
+  write_register ( SCI_MODE, pat ) ;                  // Set new value
+  delay ( 10 ) ;
+  await_data_request() ;
+}
 
 // The object for the MP3 player
 VS1053* vs1053player ;
@@ -3361,6 +3375,7 @@ void setup()
                               ini_block.vs_dreq_pin,
                               ini_block.vs_shutdown_pin,
                               ini_block.vs_shutdownx_pin ) ;
+  vs1053player->streamMode ( true ) ;                    // Set streammode (experimental)
   if ( ini_block.ir_pin >= 0 )
   {
     dbgprint ( "Enable pin %d for IR",
@@ -4446,6 +4461,39 @@ void loop()
 
 
 //**************************************************************************************************
+//                             D E C O D E _ S P E C _ C H A R S                                   *
+//**************************************************************************************************
+// Decode special characters like "&#39;".                                                         *
+//**************************************************************************************************
+String decode_spec_chars ( String str )
+{
+  int    inx, inx2 ;                                // Indexes in string
+  char   c ;                                        // Character from string
+  char   val ;                                      // Converted character
+  String res = str ;
+
+  while ( ( inx = res.indexOf ( "&#" ) ) >= 0 )     // Start sequence in string?
+  {
+    inx2 = res.indexOf ( ";", inx ) ;               // Yes, search for stop character
+    if ( inx2 < 0 )                                 // Stop character found
+    {
+      break ;                                       // Malformed string
+    }
+    res = str.substring ( 0, inx ) ;                // First part
+    inx += 2 ;                                      // skip over start sequence
+    val = 0 ;                                       // Init result of 
+    while ( ( c = str[inx++] ) != ';' )             // Convert character
+    {
+      val = val * 10 + c - '0' ;
+    }
+    res += ( String ( val ) +                       // Add special char to string
+             str.substring ( ++inx2 ) ) ;           // Add rest of string
+  }
+  return res ;
+}
+
+
+//**************************************************************************************************
 //                                    C H K H D R L I N E                                          *
 //**************************************************************************************************
 // Check if a line in the header is a reasonable headerline.                                       *
@@ -4618,6 +4666,7 @@ void handlebyte_ch ( uint8_t b )
         else if ( lcml.startsWith ( "icy-name:" ) )
         {
           icyname = metaline.substring(9) ;            // Get station name
+          icyname = decode_spec_chars ( icyname ) ;    // Decode special characters in name
           icyname.trim() ;                             // Remove leading and trailing spaces
           tftset ( 2, icyname ) ;                      // Set screen segment bottom part
           mqttpub.trigger ( MQTT_ICYNAME ) ;           // Request publishing to MQTT
