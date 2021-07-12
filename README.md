@@ -1,4 +1,5 @@
 # ESP32-Radio
+![alt text](esp32radio.jpg)
 Internet radio based on ESP32, VS1053 and a TFT screen.  Will compile in Arduino IDE.
 See the review by Andreas Spiess at https://www.youtube.com/watch?v=hz65vfvbXMs.
 
@@ -32,6 +33,7 @@ Features:
 - Displays time of day on TFT.
 - Optional display remaining battery capacity on screen.
 - PCB available (see doc).
+- 3D case available (see doc).
 
 See documentation in doc/pdf-file.
 
