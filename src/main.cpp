@@ -148,7 +148,7 @@
 // 15-05-2019, ES: MAX number of presets as a defined constant.
 // 16-12-2019, ES: Modify of claimSPI() function for debugability.
 // 21-12-2019, ES: Check chip version.
-triplecl// 23-03-2020, ES: Allow playlists on SD card.
+// 23-03-2020, ES: Allow playlists on SD card.
 // 25-03-2020, ES: End of playlist: start over.
 // 09-07-2020, ES: Add CH376 support.
 // 14-07-2020, ES: Dynamic status display in webinterface.
