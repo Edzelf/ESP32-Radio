@@ -1,0 +1,48 @@
+bat0 = 2178   # ADC for 0
+bat100 = 3256   # ACD for 100
+#
+clk_dst = 1
+clk_offset = 1
+clk_server = pool.ntp.org
+#
+gpio_00 = uppreset = 1
+#
+ir_40BF = upvolume = 2
+ir_C03F = downvolume = 2
+#
+mqttbroker = none
+mqttpasswd = none
+mqttport = 1883
+mqttuser = carol
+#
+ota = 1
+#
+pin_enc_clk = 12     # GPIO rotary encoder CLK
+pin_enc_dt = 27      # GPIO rotary encoder DT
+pin_enc_sw = 13      # GPIO rotary encoder SW
+pin_ir = 35          # GPIO IR receiver VS1838B
+pin_sd_cs = 14       # SD card select
+pin_tft_cs = 15      # GPIO TFT CS
+pin_tft_dc = 2       # GPIO TFT DC
+pin_vs_cs = 5        # GPIO VS1053 CS
+pin_vs_dcs = 16      # GPIO VS1053 DCS
+pin_vs_dreq = 4      # GPIO VS1053 DREQ
+#
+preset = 5
+preset_000 = 109.206.96.34:8100                       #  0 - NAXI LOVE RADIO, Belgrade, Serbia
+preset_001 = airspectrum.cdnstream1.com:8114/1648_128 #  1 - Easy Hits Florida
+preset_002 = streamer.radio.co/sa7bf61271/listen      #  2 - JB's Rock N Roll
+preset_003 = airspectrum.cdnstream1.com:8000/1261_192 #  3 - Magic Oldies Florida
+preset_004 = stream.laut.fm/kinderlieder-123          #  4 - Kinderlieder
+preset_005 = icecast.omroep.nl:80/radio1-bb-mp3       #  5 - Radio 1, NL
+preset_006 = icecast.omroep.nl:80/radio5-bb-mp3       #  6 - Radio 5, NL
+preset_007 = icecast.omroep.nl:80/radio2-bb-mp3       #  7 - Radio 2, NL#
+#
+toneha = 14
+tonehf = 0
+tonela = 3
+tonelf = 11
+#
+volume = 56
+#
+wifi_00 = ADSL-11/DEADC0DE11

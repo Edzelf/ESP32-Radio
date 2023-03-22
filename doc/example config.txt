@@ -1,0 +1,76 @@
+clk_dst = 1                 # Offset during daylight saving time (hours)
+clk_offset = 2              # Offset with respect to UTC in hours
+clk_server = pool.ntp.org   # Time server to be used
+#
+pin_enc_dwn = 21            # ZIPPY B5 side switch
+pin_enc_sw = 32
+pin_enc_up = 17
+pin_i2s_bck = 27            # I2S (UDA1334)
+pin_i2s_din = 25
+pin_i2s_lck = 26
+pin_sd_cs = 13              # SD Card
+pin_shutdownx = 16          # Deemphasis, will be set to LOW
+pin_tft_cs = 15             # Display
+pin_tft_dc = 5
+
+#
+preset = -1
+preset_00 = 1a-60er.radionetz.de/1a-60er.mp3
+preset_01 = us5.internet-radio.com:8267 # Classic Rock Radio HD
+preset_02 = 178.159.3.22:8177           # Mi-Soul
+preset_03 = 149.56.175.167:5461         # Hip Hop Request
+preset_04 = 192.99.41.102:5429          # 100 Hip Hop and RNB.FM
+preset_05 = 149.13.0.80/nrj128          # Energy (BG)
+preset_06 = 149.56.175.167:5612   # Off The Wire Radio
+preset_07 = 158.69.114.190:8024   # The Big 80s Station
+preset_08 = 157.90.197.157:8010   # Heartbeat FM
+preset_09 = 167.114.64.181:8389   # HD Radio - The Blues
+preset_10 = 144.217.203.184:9560  # Fofinho Rock Club Web Radio
+preset_11 = us5.internet-radio.com:8121 # Sunny 105 - Feel Good Variety
+preset_12 = 167.114.64.181:8524   # PureRock.US
+preset_13 = 144.76.39.214:9578    # Radio 101 Rock
+preset_14 = 63.143.40.238:9900    # Hot Hitz 80's
+preset_15 = 158.69.114.190:8024   # The Big 80s Station
+preset_16 = 149.56.185.82:8135    # Back To The 80s Radio
+preset_17 = us1.internet-radio.com:8294  # Rock Star Classics
+preset_18 = uk2.internet-radio.com:31491 # Ambient Radio
+preset_19 = us4.internet-radio.com:8193  # Radio Estilo Leblon
+preset_20 = uk6.internet-radio.com:8124  # Party Vibe Music - All The Hits All The Time
+preset_21 = uk7.internet-radio.com:8168  # 242 Radio Stream
+preset_22 = 80.80.160.232:8080  # Radio K4 SHQIP
+preset_23 = s1.onweb.gr:8800    # STAR FM 88.8 Kerkyra Corfu Greece
+preset_24 = 85.214.231.253:8080 # Dolfijn FM
+preset_25 = 87.98.130.255:8414  # Play Radio Hits 90s
+preset_26 = 5.135.188.130:8000  # Maxi 80 Webradio France
+preset_27 = 167.114.64.181:8759 # HD Radio - Hot 100
+preset_30 = 176.31.244.83:35944 # One DANCEableRADIO
+preset_31 = 62.210.10.4:8644    # Bangkok.fm Thailand
+preset_32 = 176.31.98.109:12508 # XS80s
+preset_33 = 74.82.59.197:8116   # TRIK FM
+preset_34 = 79.99.1.22:9000     # The Beat Sweden
+preset_35 = 176.31.107.8:8946   # Pulse FM - Hit Music Now
+preset_36 = 176.31.111.65:12440 # 2020 Radio UK
+preset_37 = 176.31.98.109:9520  # BlastTheRadio
+preset_38 = 142.4.217.133:8035  # RadioMaxMusic
+preset_39 = 212.83.150.15:8378  # Ferry FM
+preset_40 = 167.114.64.181:8352 # HD Radio - Classic Rock
+preset_41 = 198.50.238.178:5440 # MixHitRadio.com
+preset_42 = 37.59.28.208:8243   # Atlantic Radio Extra
+preset_43 = 5.135.154.69:14536  # SF Soul Radio
+preset_44 = 158.69.131.71:8036  # Austin Blues Radio
+preset_45 = 208.77.21.33:9730   # AddictedToRadio.com
+preset_46 = 149.56.157.81:8710  # Famous Cut Radio
+preset_47 = 64.20.39.8:8041     # Fleet Top 40 Radio
+preset_48 = 149.56.157.81:8800  # Mix Radio One
+preset_49 = 31.220.44.100:8000  # RTVRadio AllTheTop
+preset_50 = 149.56.175.167:5479 # BoothPimps Radio
+#
+toneha = 0
+tonehf = 0
+tonela = 0
+tonelf = 0
+#
+volume = 100
+#
+wifi_00 = ADSL-11/DEADC0DE11
+wifi_01 = MoniNet/m1234m1234
