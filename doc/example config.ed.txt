@@ -45,4 +45,4 @@ tonelf = 11
 #
 volume = 56
 #
-wifi_00 = ADSL-11/DEADC0DE11
+wifi_00 = xxxx/yyyy
