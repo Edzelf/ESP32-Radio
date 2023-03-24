@@ -38,7 +38,6 @@ Features:
 See documentation in doc/pdf-file.
 
 Last changes:
-- 22-mar-2023, Clean-up code, correct Nextion pin configuration.
 - 28-jun-2021, Allow special characters in station name.
 - 21-jun-2021, Display station name from preference if not in metadata.
 - 29-apr-2021, Fixed SSD1309 bug.
