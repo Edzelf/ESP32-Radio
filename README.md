@@ -1,4 +1,5 @@
-# ESP32-Radio
+# Please use the V2 version of the ESP32-Radio.
+# See https://github.com/Edzelf/ESP32Radio-V2
 ![alt text](esp32radio.jpg)
 Internet radio based on ESP32, VS1053 and a TFT screen.  Will compile in Arduino IDE.
 See the review by Andreas Spiess at https://www.youtube.com/watch?v=hz65vfvbXMs.
