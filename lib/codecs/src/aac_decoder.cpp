@@ -5294,7 +5294,7 @@ void GenerateNoiseVector(int *coef, int *last, int nVals)
     int i;
 
     for (i = 0; i < nVals; i++)
-        coef[i] = ((int32_t)Get32BitVal((uint32_t *)last)) >> 16;
+        coef[i] = ((int32_t)Get32BitVal((unsigned int*)last)) >> 16;
 }
 
 /***********************************************************************************************************************
